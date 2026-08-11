@@ -1,7 +1,9 @@
 {
   "name": "Automatizaciones",
   "navigation": {
-    "automations": { "label": "Automatizaciones" }
+    "automations": {
+      "label": "Automatizaciones"
+    }
   },
   "ui": {
     "loading": "Cargando…",
@@ -14,7 +16,6 @@
     "retry": "Reintentar",
     "unnamed": "Automatización sin nombre",
     "errGeneric": "Algo ha fallado. No se ha guardado nada.",
-
     "listTitle": "Automatizaciones",
     "newAutomation": "Nueva automatización",
     "emptyTitle": "Todavía no hay nada automatizado",
@@ -27,14 +28,12 @@
     "pause": "Pausar",
     "neverRun": "No se ha ejecutado nunca",
     "lastRun": "Última vez: {when}",
-
     "noAccessTitle": "Este editor necesita tu permiso",
     "noAccessMessage": "Una automatización puede ejecutar comandos sin que nadie mire, así que este módulo solo llega a ellas si tú lo autorizas. Ve a Ajustes → Permisos y activa «Administrar automatizaciones» para Automatizaciones.",
     "unsupportedTitle": "Este hub todavía no sabe automatizar",
     "unsupportedMessage": "El motor de automatizaciones llegó en una versión posterior del hub. Actualiza el hub y este editor lo encontrará.",
     "notAdminTitle": "Solo el dueño o un administrador puede editar automatizaciones",
     "notAdminMessage": "Una automatización actúa en nombre del negocio sin que nadie mire, así que decidir qué puede hacer no es algo que apruebe una sesión de turno.",
-
     "whenThisHappens": "Cuando pase esto…",
     "thenDo": "…haz esto",
     "triggerEvent": "Cuando {event}",
@@ -57,14 +56,14 @@
     "timeLabel": "Hora",
     "cronLabel": "Programación (cron)",
     "atLabel": "Fecha y hora",
-
     "addStep": "Añadir un paso",
     "addCommand": "Hacer algo",
     "addGuard": "Solo sigue si…",
     "addDelay": "Esperar",
     "stepCommand": "Ejecuta {command}",
     "stepCommandEmpty": "Elige qué hace este paso",
-    "stepGuard": "Solo sigue si se cumplen {count} condición(es)",
+    "stepGuard": "se cumplen {count} condiciones",
+    "stepGuardOne": "se cumple 1 condición",
     "stepUnsupported": "Un paso «{kind}», que este editor todavía no sabe editar",
     "readOnlyStep": "Este paso sigue funcionando. Editarlo necesita una versión más nueva de este módulo.",
     "removeStep": "Quitar este paso",
@@ -72,7 +71,6 @@
     "moveDown": "Bajar",
     "reorderHint": "Arrastra para reordenar",
     "noSteps": "Todavía no hay pasos. Añade lo primero que debe hacer esta automatización.",
-
     "commandLabel": "Qué ejecutar",
     "commandHint": "El nombre de un comando de este hub, por ejemplo sales.sale.create. Antes de que pueda ejecutarse se te pedirá que lo autorices.",
     "paramsTitle": "Con esta información",
@@ -81,7 +79,6 @@
     "paramValue": "Valor",
     "insertField": "Insertar un dato",
     "removePart": "Quitar {label}",
-
     "guardTitle": "Solo sigue si",
     "guardExplain": "Si esto no se cumple, la automatización termina aquí. No hace nada más — no hay un segundo camino.",
     "addCondition": "Añadir una condición",
@@ -99,26 +96,26 @@
     "opLt": "menor que",
     "opLte": "menor o igual que",
     "opInHint": "Separa los valores con una coma.",
-
     "delayNone": "Sin espera",
-    "delayDays": "Espera {count} día(s)",
-    "delayHours": "Espera {count} hora(s)",
-    "delayMinutes": "Espera {count} minuto(s)",
-    "delaySeconds": "Espera {count} segundo(s)",
+    "delayDays": "Espera {count} días",
+    "delayDaysOne": "Espera 1 día",
+    "delayHours": "Espera {count} horas",
+    "delayHoursOne": "Espera 1 hora",
+    "delayMinutes": "Espera {count} minutos",
+    "delayMinutesOne": "Espera 1 minuto",
+    "delaySeconds": "Espera {count} segundos",
+    "delaySecondsOne": "Espera 1 segundo",
     "delayAmount": "Cuánto",
     "unitMinutes": "minutos",
     "unitHours": "horas",
     "unitDays": "días",
-
     "pickFieldTitle": "¿Qué dato?",
     "pickFieldSearch": "Busca por nombre o por valor",
     "pickFieldEmpty": "Todavía no hay nada que elegir.",
-    "pickFieldFrom": "De {event}",
+    "pickFieldFrom": "De cuando {event}",
     "pickFieldNoSamples": "Este hub no ha visto esto últimamente, así que no hay ejemplos que enseñar. Los datos siguen siendo los correctos.",
     "pickFieldRedacted": "ejemplo oculto: podría ser de una persona",
     "pickFieldOptional": "no siempre viene",
-    "pickFieldTypeSkipped": "aquí no se ofrece: es {type} y esta casilla necesita {wanted}",
-
     "grantsTitle": "Qué puede hacer esta automatización",
     "grantsIntro": "Una automatización se ejecuta con sus propios permisos, nunca con los tuyos. Nada de lo de abajo ocurre hasta que lo autorices.",
     "grantsNone": "Esta automatización todavía no pide nada.",
@@ -130,7 +127,6 @@
     "grantsSaved": "Permisos actualizados.",
     "grantCommandNotFound": "Este hub no tiene ningún comando llamado {command}. Revisa el nombre en el paso.",
     "grantOther": "{kind}: {value}",
-
     "historyTitle": "Qué ha hecho",
     "historyEmpty": "Todavía no se ha ejecutado.",
     "runDone": "Terminó bien",
@@ -156,11 +152,9 @@
     "byEvent": "porque pasó algo",
     "byCron": "por su programación",
     "byAt": "en su fecha",
-
     "tabEditor": "Pasos",
     "tabPermissions": "Permisos",
     "tabHistory": "Historial",
-
     "evSaleCompleted": "se cobra una venta",
     "evSaleVoided": "se anula una venta",
     "evOrderCompleted": "se cierra una comanda",
@@ -184,6 +178,9 @@
     "evWhatsappReceived": "llega un WhatsApp",
     "evTicketCreated": "se abre una incidencia",
     "evTaskCompleted": "se termina una tarea",
-    "evStaffTimeOff": "alguien pide vacaciones"
+    "evStaffTimeOff": "alguien pide vacaciones",
+    "stepGuardEmpty": "elige la condición",
+    "pickFieldSkipArray": "no se ofrece: es una lista, y una automatización no sabe entrar dentro",
+    "pickFieldSkipObject": "no se ofrece suelto: elige uno de los datos de dentro"
   }
 }

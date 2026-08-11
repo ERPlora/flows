@@ -1,7 +1,9 @@
 {
   "name": "Automations",
   "navigation": {
-    "automations": { "label": "Automations" }
+    "automations": {
+      "label": "Automations"
+    }
   },
   "ui": {
     "loading": "Loading…",
@@ -14,7 +16,6 @@
     "retry": "Try again",
     "unnamed": "Untitled automation",
     "errGeneric": "Something went wrong. Nothing was saved.",
-
     "listTitle": "Automations",
     "newAutomation": "New automation",
     "emptyTitle": "Nothing is automated yet",
@@ -27,14 +28,12 @@
     "pause": "Pause",
     "neverRun": "Never run",
     "lastRun": "Last run {when}",
-
     "noAccessTitle": "This editor needs your permission",
     "noAccessMessage": "Automations can run commands while nobody is watching, so this module only reaches them if you allow it. Go to Settings → Permissions and turn on “Manage automations” for Automations.",
     "unsupportedTitle": "This hub cannot do automations yet",
     "unsupportedMessage": "The automation kernel arrived in a newer version of the hub. Update the hub and this editor will find it.",
     "notAdminTitle": "Only an owner or an administrator can edit automations",
     "notAdminMessage": "An automation acts in the name of the business without anybody watching, so deciding what it may do is not something a shift session can approve.",
-
     "whenThisHappens": "When this happens…",
     "thenDo": "…then do this",
     "triggerEvent": "When {event}",
@@ -57,14 +56,14 @@
     "timeLabel": "Time",
     "cronLabel": "Schedule (cron)",
     "atLabel": "Date and time",
-
     "addStep": "Add a step",
     "addCommand": "Do something",
     "addGuard": "Only continue if…",
     "addDelay": "Wait",
     "stepCommand": "Run {command}",
     "stepCommandEmpty": "Pick what this step does",
-    "stepGuard": "Only continue if {count} condition(s) are met",
+    "stepGuard": "{count} conditions are met",
+    "stepGuardOne": "one condition is met",
     "stepUnsupported": "A “{kind}” step, which this editor cannot edit yet",
     "readOnlyStep": "This step keeps working. Editing it needs a newer version of this module.",
     "removeStep": "Remove this step",
@@ -72,7 +71,6 @@
     "moveDown": "Move down",
     "reorderHint": "Drag to reorder",
     "noSteps": "No steps yet. Add the first thing this automation should do.",
-
     "commandLabel": "What to run",
     "commandHint": "The name of a command in this hub, for example sales.sale.create. You will be asked to allow it before it can run.",
     "paramsTitle": "With this information",
@@ -81,7 +79,6 @@
     "paramValue": "Value",
     "insertField": "Insert a field",
     "removePart": "Remove {label}",
-
     "guardTitle": "Only continue if",
     "guardExplain": "If this is not true the automation stops here. It does not do anything else — there is no second path.",
     "addCondition": "Add a condition",
@@ -99,26 +96,26 @@
     "opLt": "less than",
     "opLte": "less than or equal to",
     "opInHint": "Separate the values with a comma.",
-
     "delayNone": "No wait",
-    "delayDays": "Wait {count} day(s)",
-    "delayHours": "Wait {count} hour(s)",
-    "delayMinutes": "Wait {count} minute(s)",
-    "delaySeconds": "Wait {count} second(s)",
+    "delayDays": "Wait {count} days",
+    "delayDaysOne": "Wait 1 day",
+    "delayHours": "Wait {count} hours",
+    "delayHoursOne": "Wait 1 hour",
+    "delayMinutes": "Wait {count} minutes",
+    "delayMinutesOne": "Wait 1 minute",
+    "delaySeconds": "Wait {count} seconds",
+    "delaySecondsOne": "Wait 1 second",
     "delayAmount": "How long",
     "unitMinutes": "minutes",
     "unitHours": "hours",
     "unitDays": "days",
-
     "pickFieldTitle": "Which information?",
     "pickFieldSearch": "Search by name or by value",
     "pickFieldEmpty": "Nothing to pick from yet.",
-    "pickFieldFrom": "From {event}",
+    "pickFieldFrom": "From when {event}",
     "pickFieldNoSamples": "This hub has not seen this happen recently, so there are no examples to show. The fields are still the right ones.",
     "pickFieldRedacted": "example hidden: it could be about a person",
     "pickFieldOptional": "not always there",
-    "pickFieldTypeSkipped": "not offered here: it is {type}, and this box needs {wanted}",
-
     "grantsTitle": "What this automation may do",
     "grantsIntro": "An automation runs with its own permissions, never with yours. Nothing below happens until you allow it.",
     "grantsNone": "This automation asks for nothing yet.",
@@ -130,7 +127,6 @@
     "grantsSaved": "Permissions updated.",
     "grantCommandNotFound": "This hub has no command called {command}. Check the name in the step.",
     "grantOther": "{kind}: {value}",
-
     "historyTitle": "What it has done",
     "historyEmpty": "It has not run yet.",
     "runDone": "Completed",
@@ -156,11 +152,9 @@
     "byEvent": "by something that happened",
     "byCron": "by its schedule",
     "byAt": "at its date",
-
     "tabEditor": "Steps",
     "tabPermissions": "Permissions",
     "tabHistory": "History",
-
     "evSaleCompleted": "a sale is charged",
     "evSaleVoided": "a sale is voided",
     "evOrderCompleted": "an order is closed",
@@ -184,6 +178,9 @@
     "evWhatsappReceived": "a WhatsApp message arrives",
     "evTicketCreated": "a support ticket is opened",
     "evTaskCompleted": "a task is finished",
-    "evStaffTimeOff": "somebody asks for time off"
+    "evStaffTimeOff": "somebody asks for time off",
+    "stepGuardEmpty": "pick the condition",
+    "pickFieldSkipArray": "not offered: it is a list, and an automation cannot reach inside one",
+    "pickFieldSkipObject": "not offered on its own: pick one of the fields inside it"
   }
 }

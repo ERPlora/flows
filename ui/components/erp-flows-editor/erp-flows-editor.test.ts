@@ -263,6 +263,31 @@ describe('what it has done', () => {
     expect(el.renderRoot.textContent).not.toContain('r1');
   });
 
+  it('puts the REASON a run failed on the row, not two clicks away', async () => {
+    // «Se paró por un error» with the error hidden behind a chevron is the shape of a screen
+    // that makes somebody phone support. The reason is the only actionable thing on it.
+    const client = fakeClient({
+      flows: {
+        runs: vi.fn(async () => ({
+          data: [
+            {
+              id: 'r9',
+              status: 'failed',
+              last_error: 'flow.grant_denied: no live grant for command `tasks.task.create`',
+              created_at: '2026-08-11T19:04:00Z',
+            },
+          ],
+        })),
+      },
+    });
+    const el = await mount(flowWith([{ id: 'a', kind: 'command', command: 'one' }]), client);
+    el.tab = 'history';
+    await el.updateComplete;
+    await Promise.resolve();
+    await el.updateComplete;
+    expect(el.renderRoot.textContent).toContain('no live grant');
+  });
+
   it('says it has never run rather than showing an empty box', async () => {
     const el = await mount(flowWith([]));
     el.tab = 'history';

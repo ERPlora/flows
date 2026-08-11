@@ -36,6 +36,14 @@ describe('how long a wait is, said the way a person would say it', () => {
   it('says «no wait» instead of «0 seconds»', () => {
     expect(describeDelay(0, t)).toBe('ui.delayNone');
   });
+
+  it('says «1 día», not «1 día(s)»', () => {
+    // The `(s)` of a lazy plural is on EVERY card of every automation. Spanish and English both
+    // need a singular form, and the catalogue is the only place that knows which word it is.
+    expect(describeDelay(86400, t)).toBe('ui.delayDaysOne(count=1)');
+    expect(describeDelay(3600, t)).toBe('ui.delayHoursOne(count=1)');
+    expect(describeDelay(60, t)).toBe('ui.delayMinutesOne(count=1)');
+  });
 });
 
 describe('what starts a flow, in words that separate an EVENT from a STATE', () => {
@@ -86,8 +94,18 @@ describe('what a step does, said once on the card', () => {
     // The kernel has ONE path. A guard that does not pass ENDS the run — it does not take the
     // other branch, because there is no other branch to take.
     expect(describeStep({ id: 's1', kind: 'condition', when: { 'input.total': { gt: 100 } } }, t)).toBe(
-      'ui.stepGuard(count=1)',
+      'ui.stepGuardOne(count=1)',
     );
+    expect(
+      describeStep(
+        { id: 's1', kind: 'condition', when: { 'input.total': { gt: 100 }, 'input.paid': { eq: true } } },
+        t,
+      ),
+    ).toBe('ui.stepGuard(count=2)');
+  });
+
+  it('asks for the condition instead of announcing «0 conditions»', () => {
+    expect(describeStep({ id: 's1', kind: 'condition', when: {} }, t)).toBe('ui.stepGuardEmpty');
   });
 
   it('names the command a command step runs', () => {

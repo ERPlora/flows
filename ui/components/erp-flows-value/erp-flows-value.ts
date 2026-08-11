@@ -46,8 +46,10 @@ export class ErpFlowsValue extends LitElement {
       border-color: var(--ok-primary, var(--ion-color-primary, #3880ff));
     }
     input {
-      flex: 1 1 4rem;
-      min-width: 3rem;
+      /* A generous basis so a text segment WRAPS to its own line instead of being squeezed into
+         three visible characters between two pills. */
+      flex: 1 1 10rem;
+      min-width: 6rem;
       border: 0;
       outline: none;
       background: transparent;

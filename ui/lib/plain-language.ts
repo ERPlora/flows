@@ -63,10 +63,21 @@ const DAY = 86400;
 export function describeDelay(seconds: number, t: Translator): string {
   const s = Math.max(0, Math.floor(Number(seconds) || 0));
   if (s === 0) return t('ui.delayNone');
-  if (s % DAY === 0) return t('ui.delayDays', { count: s / DAY });
-  if (s % HOUR === 0) return t('ui.delayHours', { count: s / HOUR });
-  if (s % MINUTE === 0) return t('ui.delayMinutes', { count: s / MINUTE });
-  return t('ui.delaySeconds', { count: s });
+  if (s % DAY === 0) return plural(t, 'ui.delayDays', s / DAY);
+  if (s % HOUR === 0) return plural(t, 'ui.delayHours', s / HOUR);
+  if (s % MINUTE === 0) return plural(t, 'ui.delayMinutes', s / MINUTE);
+  return plural(t, 'ui.delaySeconds', s);
+}
+
+/**
+ * One of two keys, by count. `«1 día»` and `«3 días»`, never `«1 día(s)»`.
+ *
+ * The lazy plural would be on EVERY card of every automation, which is exactly the kind of small
+ * sloppiness a shop owner reads as «this was not finished». Only the catalogue knows which word
+ * the singular is, so the choice is a key and not a rule in the code.
+ */
+function plural(t: Translator, base: string, count: number): string {
+  return t(count === 1 ? `${base}One` : base, { count });
 }
 
 /** `"09:30"` → `"30 9 * * *"`. The one schedule an owner asks for without being taught cron. */
@@ -122,8 +133,12 @@ export function describeStep(step: Step, t: Translator): string {
       const command = typeof step.command === 'string' ? step.command.trim() : '';
       return command ? t('ui.stepCommand', { command }) : t('ui.stepCommandEmpty');
     }
-    case 'condition':
-      return t('ui.stepGuard', { count: Object.keys(step.when ?? {}).length });
+    case 'condition': {
+      const count = Object.keys(step.when ?? {}).length;
+      // «Se cumplen 0 condiciones» is a guard nobody wrote on purpose: it lets everything through.
+      // The card asks for the missing half instead of describing an empty one.
+      return count === 0 ? t('ui.stepGuardEmpty') : plural(t, 'ui.stepGuard', count);
+    }
     case 'delay':
       return describeDelay(Number(step.seconds ?? 0), t);
     default:

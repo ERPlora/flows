@@ -57,7 +57,17 @@ describe('picking a field out of REAL data', () => {
     const el = await mount();
     const lines = rows(el).find((r) => r.textContent?.includes('Lines'))!;
     expect(lines.getAttribute('aria-disabled')).toBe('true');
-    expect(lines.textContent).toContain('ui.pickFieldTypeSkipped');
+    expect(lines.textContent).toContain('ui.pickFieldSkipArray');
+  });
+
+  it('tells a GROUP apart from a LIST: one has fields inside to pick, the other has nothing', async () => {
+    // The shape DOES descend into an object, so the useful thing to say about `customer` is «pick
+    // one of the fields inside it». An array has no reachable inside at all, and saying the same
+    // sentence for both would send the owner looking for something that is not there.
+    const el = await mount();
+    const customer = rows(el).find((r) => r.textContent?.includes('ui.pickFieldSkipObject'))!;
+    expect(customer).toBeTruthy();
+    expect(customer.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('searches by the words AND by the value, not only by the key', async () => {

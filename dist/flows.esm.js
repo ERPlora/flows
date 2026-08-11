@@ -1889,8 +1889,10 @@ var ErpFlowsValue = class extends i3 {
       border-color: var(--ok-primary, var(--ion-color-primary, #3880ff));
     }
     input {
-      flex: 1 1 4rem;
-      min-width: 3rem;
+      /* A generous basis so a text segment WRAPS to its own line instead of being squeezed into
+         three visible characters between two pills. */
+      flex: 1 1 10rem;
+      min-width: 6rem;
       border: 0;
       outline: none;
       background: transparent;
@@ -2065,10 +2067,13 @@ var DAY = 86400;
 function describeDelay(seconds, t3) {
   const s4 = Math.max(0, Math.floor(Number(seconds) || 0));
   if (s4 === 0) return t3("ui.delayNone");
-  if (s4 % DAY === 0) return t3("ui.delayDays", { count: s4 / DAY });
-  if (s4 % HOUR === 0) return t3("ui.delayHours", { count: s4 / HOUR });
-  if (s4 % MINUTE === 0) return t3("ui.delayMinutes", { count: s4 / MINUTE });
-  return t3("ui.delaySeconds", { count: s4 });
+  if (s4 % DAY === 0) return plural(t3, "ui.delayDays", s4 / DAY);
+  if (s4 % HOUR === 0) return plural(t3, "ui.delayHours", s4 / HOUR);
+  if (s4 % MINUTE === 0) return plural(t3, "ui.delayMinutes", s4 / MINUTE);
+  return plural(t3, "ui.delaySeconds", s4);
+}
+function plural(t3, base, count) {
+  return t3(count === 1 ? `${base}One` : base, { count });
 }
 function dailyCron(time) {
   const [h3, m3] = time.split(":");
@@ -2105,8 +2110,10 @@ function describeStep(step, t3) {
       const command = typeof step.command === "string" ? step.command.trim() : "";
       return command ? t3("ui.stepCommand", { command }) : t3("ui.stepCommandEmpty");
     }
-    case "condition":
-      return t3("ui.stepGuard", { count: Object.keys(step.when ?? {}).length });
+    case "condition": {
+      const count = Object.keys(step.when ?? {}).length;
+      return count === 0 ? t3("ui.stepGuardEmpty") : plural(t3, "ui.stepGuard", count);
+    }
     case "delay":
       return describeDelay(Number(step.seconds ?? 0), t3);
     default:
@@ -2304,12 +2311,8 @@ var ErpFlowsFieldPicker = class extends i3 {
    * JSON in a message. Both stay VISIBLE with this reason attached.
    */
   skipReason(field) {
-    if (field.type === "array" || field.type === "object") {
-      return this.t("ui.pickFieldTypeSkipped", {
-        type: field.type,
-        wanted: this.t("ui.value")
-      });
-    }
+    if (field.type === "array") return this.t("ui.pickFieldSkipArray");
+    if (field.type === "object") return this.t("ui.pickFieldSkipObject");
     return "";
   }
   get matches() {
@@ -3287,8 +3290,9 @@ var ErpFlowsEditor = class extends i3 {
       this.openStep = open ? null : step.id;
     }}
           >
+            <!-- No eyebrow here on purpose: «…haz esto» is what the SPINE says once, and repeating
+                 it above every card turns the one line that carries meaning into wallpaper. -->
             <span class="grow">
-              <span class="eyebrow">${this.t("ui.thenDo")}</span>
               <span class="title">${describeStep(step, this.t)}</span>
             </span>
           </button>
@@ -3482,11 +3486,11 @@ var ErpFlowsEditor = class extends i3 {
           ${this.document.steps.map((step, i4) => this.renderStepNode(step, i4))}
         </ion-reorder-group>
         ${this.document.steps.length === 0 ? b2`<div class="node"><span class="hint">${this.t("ui.noSteps")}</span></div>` : A}
-      </div>
-      <div class="adders">
-        <button type="button" @click=${() => this.add("command")}>${this.t("ui.addCommand")}</button>
-        <button type="button" @click=${() => this.add("condition")}>${this.t("ui.addGuard")}</button>
-        <button type="button" @click=${() => this.add("delay")}>${this.t("ui.addDelay")}</button>
+        <div class="adders">
+          <button type="button" @click=${() => this.add("command")}>${this.t("ui.addCommand")}</button>
+          <button type="button" @click=${() => this.add("condition")}>${this.t("ui.addGuard")}</button>
+          <button type="button" @click=${() => this.add("delay")}>${this.t("ui.addDelay")}</button>
+        </div>
       </div>`;
   }
   renderPermissions() {
@@ -3551,6 +3555,11 @@ var ErpFlowsEditor = class extends i3 {
               ▾
             </button>
           </div>
+          <!-- The reason goes on the ROW, not behind the chevron. «Se paró por un error» with the
+               error one click away is the shape of a screen that makes somebody phone support. -->
+          ${run.status === "failed" && run.last_error ? b2`<div class="muted" style="font-size:.85rem">
+                ${this.t("ui.ranFailed", { reason: run.last_error })}
+              </div>` : A}
           ${steps ? b2`<ul>
                 ${steps.map(
         (s4) => b2`<li>${describeRunStep(s4, this.t, byId.get(String(s4.step_id)))}</li>`
@@ -3691,7 +3700,9 @@ define("erp-flows-editor", ErpFlowsEditor);
 var es_default = {
   name: "Automatizaciones",
   navigation: {
-    automations: { label: "Automatizaciones" }
+    automations: {
+      label: "Automatizaciones"
+    }
   },
   ui: {
     loading: "Cargando\u2026",
@@ -3750,7 +3761,8 @@ var es_default = {
     addDelay: "Esperar",
     stepCommand: "Ejecuta {command}",
     stepCommandEmpty: "Elige qu\xE9 hace este paso",
-    stepGuard: "Solo sigue si se cumplen {count} condici\xF3n(es)",
+    stepGuard: "se cumplen {count} condiciones",
+    stepGuardOne: "se cumple 1 condici\xF3n",
     stepUnsupported: "Un paso \xAB{kind}\xBB, que este editor todav\xEDa no sabe editar",
     readOnlyStep: "Este paso sigue funcionando. Editarlo necesita una versi\xF3n m\xE1s nueva de este m\xF3dulo.",
     removeStep: "Quitar este paso",
@@ -3784,10 +3796,14 @@ var es_default = {
     opLte: "menor o igual que",
     opInHint: "Separa los valores con una coma.",
     delayNone: "Sin espera",
-    delayDays: "Espera {count} d\xEDa(s)",
-    delayHours: "Espera {count} hora(s)",
-    delayMinutes: "Espera {count} minuto(s)",
-    delaySeconds: "Espera {count} segundo(s)",
+    delayDays: "Espera {count} d\xEDas",
+    delayDaysOne: "Espera 1 d\xEDa",
+    delayHours: "Espera {count} horas",
+    delayHoursOne: "Espera 1 hora",
+    delayMinutes: "Espera {count} minutos",
+    delayMinutesOne: "Espera 1 minuto",
+    delaySeconds: "Espera {count} segundos",
+    delaySecondsOne: "Espera 1 segundo",
     delayAmount: "Cu\xE1nto",
     unitMinutes: "minutos",
     unitHours: "horas",
@@ -3795,11 +3811,10 @@ var es_default = {
     pickFieldTitle: "\xBFQu\xE9 dato?",
     pickFieldSearch: "Busca por nombre o por valor",
     pickFieldEmpty: "Todav\xEDa no hay nada que elegir.",
-    pickFieldFrom: "De {event}",
+    pickFieldFrom: "De cuando {event}",
     pickFieldNoSamples: "Este hub no ha visto esto \xFAltimamente, as\xED que no hay ejemplos que ense\xF1ar. Los datos siguen siendo los correctos.",
     pickFieldRedacted: "ejemplo oculto: podr\xEDa ser de una persona",
     pickFieldOptional: "no siempre viene",
-    pickFieldTypeSkipped: "aqu\xED no se ofrece: es {type} y esta casilla necesita {wanted}",
     grantsTitle: "Qu\xE9 puede hacer esta automatizaci\xF3n",
     grantsIntro: "Una automatizaci\xF3n se ejecuta con sus propios permisos, nunca con los tuyos. Nada de lo de abajo ocurre hasta que lo autorices.",
     grantsNone: "Esta automatizaci\xF3n todav\xEDa no pide nada.",
@@ -3862,7 +3877,10 @@ var es_default = {
     evWhatsappReceived: "llega un WhatsApp",
     evTicketCreated: "se abre una incidencia",
     evTaskCompleted: "se termina una tarea",
-    evStaffTimeOff: "alguien pide vacaciones"
+    evStaffTimeOff: "alguien pide vacaciones",
+    stepGuardEmpty: "elige la condici\xF3n",
+    pickFieldSkipArray: "no se ofrece: es una lista, y una automatizaci\xF3n no sabe entrar dentro",
+    pickFieldSkipObject: "no se ofrece suelto: elige uno de los datos de dentro"
   }
 };
 
@@ -3870,7 +3888,9 @@ var es_default = {
 var en_default = {
   name: "Automations",
   navigation: {
-    automations: { label: "Automations" }
+    automations: {
+      label: "Automations"
+    }
   },
   ui: {
     loading: "Loading\u2026",
@@ -3929,7 +3949,8 @@ var en_default = {
     addDelay: "Wait",
     stepCommand: "Run {command}",
     stepCommandEmpty: "Pick what this step does",
-    stepGuard: "Only continue if {count} condition(s) are met",
+    stepGuard: "{count} conditions are met",
+    stepGuardOne: "one condition is met",
     stepUnsupported: "A \u201C{kind}\u201D step, which this editor cannot edit yet",
     readOnlyStep: "This step keeps working. Editing it needs a newer version of this module.",
     removeStep: "Remove this step",
@@ -3963,10 +3984,14 @@ var en_default = {
     opLte: "less than or equal to",
     opInHint: "Separate the values with a comma.",
     delayNone: "No wait",
-    delayDays: "Wait {count} day(s)",
-    delayHours: "Wait {count} hour(s)",
-    delayMinutes: "Wait {count} minute(s)",
-    delaySeconds: "Wait {count} second(s)",
+    delayDays: "Wait {count} days",
+    delayDaysOne: "Wait 1 day",
+    delayHours: "Wait {count} hours",
+    delayHoursOne: "Wait 1 hour",
+    delayMinutes: "Wait {count} minutes",
+    delayMinutesOne: "Wait 1 minute",
+    delaySeconds: "Wait {count} seconds",
+    delaySecondsOne: "Wait 1 second",
     delayAmount: "How long",
     unitMinutes: "minutes",
     unitHours: "hours",
@@ -3974,11 +3999,10 @@ var en_default = {
     pickFieldTitle: "Which information?",
     pickFieldSearch: "Search by name or by value",
     pickFieldEmpty: "Nothing to pick from yet.",
-    pickFieldFrom: "From {event}",
+    pickFieldFrom: "From when {event}",
     pickFieldNoSamples: "This hub has not seen this happen recently, so there are no examples to show. The fields are still the right ones.",
     pickFieldRedacted: "example hidden: it could be about a person",
     pickFieldOptional: "not always there",
-    pickFieldTypeSkipped: "not offered here: it is {type}, and this box needs {wanted}",
     grantsTitle: "What this automation may do",
     grantsIntro: "An automation runs with its own permissions, never with yours. Nothing below happens until you allow it.",
     grantsNone: "This automation asks for nothing yet.",
@@ -4041,7 +4065,10 @@ var en_default = {
     evWhatsappReceived: "a WhatsApp message arrives",
     evTicketCreated: "a support ticket is opened",
     evTaskCompleted: "a task is finished",
-    evStaffTimeOff: "somebody asks for time off"
+    evStaffTimeOff: "somebody asks for time off",
+    stepGuardEmpty: "pick the condition",
+    pickFieldSkipArray: "not offered: it is a list, and an automation cannot reach inside one",
+    pickFieldSkipObject: "not offered on its own: pick one of the fields inside it"
   }
 };
 

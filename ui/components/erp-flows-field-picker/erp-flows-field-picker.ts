@@ -172,12 +172,13 @@ export class ErpFlowsFieldPicker extends LitElement {
    * JSON in a message. Both stay VISIBLE with this reason attached.
    */
   private skipReason(field: EventFieldShape): string {
-    if (field.type === 'array' || field.type === 'object') {
-      return this.t('ui.pickFieldTypeSkipped', {
-        type: field.type,
-        wanted: this.t('ui.value'),
-      });
-    }
+    // Two shapes, two different sentences — and the difference is actionable. The hub's shape
+    // DESCENDS into an object, so `customer` has `customer.phone` right below it to pick instead.
+    // It does not descend into an array, because `resolve_path` has no indexing: there is nothing
+    // inside `lines` an automation could ever reach, and saying «pick one of the fields inside»
+    // would send the owner looking for something that is not there.
+    if (field.type === 'array') return this.t('ui.pickFieldSkipArray');
+    if (field.type === 'object') return this.t('ui.pickFieldSkipObject');
     return '';
   }
 

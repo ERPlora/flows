@@ -809,8 +809,9 @@ export class ErpFlowsEditor extends LitElement {
               this.openStep = open ? null : step.id;
             }}
           >
+            <!-- No eyebrow here on purpose: «…haz esto» is what the SPINE says once, and repeating
+                 it above every card turns the one line that carries meaning into wallpaper. -->
             <span class="grow">
-              <span class="eyebrow">${this.t('ui.thenDo')}</span>
               <span class="title">${describeStep(step, this.t)}</span>
             </span>
           </button>
@@ -1013,6 +1014,8 @@ export class ErpFlowsEditor extends LitElement {
   }
 
   private renderSpine() {
+    // The adders live INSIDE the column. Outside it they drift to the far left of a 1440px screen,
+    // a hand's width away from the spine they add to.
     return html`<div class="spine">
         ${this.renderTriggerNode()}
         <ion-reorder-group
@@ -1025,11 +1028,11 @@ export class ErpFlowsEditor extends LitElement {
         ${this.document.steps.length === 0
           ? html`<div class="node"><span class="hint">${this.t('ui.noSteps')}</span></div>`
           : nothing}
-      </div>
-      <div class="adders">
-        <button type="button" @click=${() => this.add('command')}>${this.t('ui.addCommand')}</button>
-        <button type="button" @click=${() => this.add('condition')}>${this.t('ui.addGuard')}</button>
-        <button type="button" @click=${() => this.add('delay')}>${this.t('ui.addDelay')}</button>
+        <div class="adders">
+          <button type="button" @click=${() => this.add('command')}>${this.t('ui.addCommand')}</button>
+          <button type="button" @click=${() => this.add('condition')}>${this.t('ui.addGuard')}</button>
+          <button type="button" @click=${() => this.add('delay')}>${this.t('ui.addDelay')}</button>
+        </div>
       </div>`;
   }
 
@@ -1102,6 +1105,13 @@ export class ErpFlowsEditor extends LitElement {
               ▾
             </button>
           </div>
+          <!-- The reason goes on the ROW, not behind the chevron. «Se paró por un error» with the
+               error one click away is the shape of a screen that makes somebody phone support. -->
+          ${run.status === 'failed' && run.last_error
+            ? html`<div class="muted" style="font-size:.85rem">
+                ${this.t('ui.ranFailed', { reason: run.last_error })}
+              </div>`
+            : nothing}
           ${steps
             ? html`<ul>
                 ${steps.map(
