@@ -1,0 +1,46 @@
+{
+  "id": "flows",
+  "name": "Automations",
+  "icon": "git-branch",
+  "version": "0.1.0",
+  "description": "Visual editor for the hub's automation kernel: when something happens, do this. A vertical spine, not a node canvas.",
+  "agent": {
+    "description": "Visual editor for the hub automations (flows): create, edit, enable and pause automations that react to an event, a schedule or a manual trigger; grant them what they may do; and read their run history in plain language. It does not run the automations — the hub's own kernel does.",
+    "keywords": [
+      "automation",
+      "flow",
+      "workflow",
+      "trigger",
+      "when this happens",
+      "schedule",
+      "reminder",
+      "rule"
+    ]
+  },
+  "depends_on": [],
+  "permissions": [
+    "flows.view_flow",
+    "flows.manage_flow"
+  ],
+  "role_permissions": {
+    "admin": [
+      "*"
+    ],
+    "manager": [],
+    "employee": []
+  },
+  "capabilities": {
+    "manage_flows": {}
+  },
+  "navigation": [
+    {
+      "id": "automations",
+      "label": "Automations",
+      "icon": "git-branch",
+      "component": "erp-flows-app"
+    }
+  ],
+  "ui": {
+    "entry": "dist/flows.esm.js"
+  }
+}
