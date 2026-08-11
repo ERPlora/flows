@@ -3,7 +3,7 @@
   "name": "Automations",
   "icon": "git-branch",
   "version": "0.1.1",
-  "description": "Visual editor for the hub's automation kernel: when something happens, do this. A vertical spine, not a node canvas.",
+  "description": "Automate repetitive work without writing code: appointment reminders, low-stock alerts and messages to customers that go out on their own.",
   "agent": {
     "description": "Visual editor for the hub automations (flows): create, edit, enable and pause automations that react to an event, a schedule or a manual trigger; grant them what they may do; and read their run history in plain language. It does not run the automations — the hub's own kernel does.",
     "keywords": [
@@ -42,5 +42,9 @@
   ],
   "ui": {
     "entry": "dist/flows.esm.js"
+  },
+  "billing": {
+    "type": "free",
+    "price": 0
   }
 }

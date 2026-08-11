@@ -1,5 +1,26 @@
 # flows — el editor visual de automatizaciones
 
+## Qué hace por tu negocio
+
+Automatiza el trabajo repetitivo **sin programar**. Le dices *cuándo* (se reserva una cita, el
+stock baja de X, cada día a las 9:00) y *qué hacer* (avisar al cliente, mandarte un recordatorio,
+crear una tarea), y a partir de ahí ocurre solo, sin que nadie esté delante.
+
+Ejemplos de lo que la gente monta el primer día: recordatorio de cita el día antes · aviso cuando
+un producto se queda sin stock · mensaje de «gracias» tras la primera compra · resumen del cierre
+cada noche.
+
+Tú decides además **qué puede tocar** cada automatización: se conceden permisos uno a uno, y el
+historial deja por escrito, en lenguaje llano, todo lo que hizo.
+
+> Es de la casa, **gratis**, y aparece en el menú como **Automatizaciones**. Al instalarlo te pide
+> un permiso (*Administrar automatizaciones*): sin él el editor no abre — se concede en
+> **Ajustes → Permisos**.
+
+---
+
+## Lo técnico
+
 La cara visible del **kernel de automatización** del Hub (ADR-0283, `architecture/hub/flows.md`).
 El motor está en el core y **congelado**; esto es producto, y el producto vive en un módulo, como
 todo lo demás. Diseño: [ERPlora/pm#110](https://github.com/ERPlora/pm/issues/110).
