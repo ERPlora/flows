@@ -5,6 +5,8 @@ import '@erplora/outfitkit/ok-empty-state';
 import '@erplora/outfitkit/ok-inline-feedback';
 import '@erplora/outfitkit/ok-status-pill';
 import '../erp-flows-editor/erp-flows-editor';
+import '../erp-flows-gallery/erp-flows-gallery';
+import '../erp-flows-guide/erp-flows-guide';
 import { readDoc, SCHEMA_VERSION } from '../../lib/flow-doc';
 import { describeTrigger } from '../../lib/plain-language';
 import { catalogEntry } from '../../lib/trigger-catalog';
@@ -66,10 +68,18 @@ export class ErpFlowsApp extends LitElement {
     }
     .list {
       max-width: 44rem;
-      margin: 0 auto;
+      margin: 0 auto 1.25rem;
       display: flex;
       flex-direction: column;
       gap: 0.5rem;
+    }
+    h3.section {
+      margin: 0;
+      font-size: 0.78rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--ok-muted, #6b6a63);
+      font-weight: 600;
     }
     .flow {
       display: flex;
@@ -144,6 +154,11 @@ export class ErpFlowsApp extends LitElement {
   @state() private editing: Flow | null = null;
 
   @state() private isNew = false;
+
+  /** Which tab the editor opens on. A flow straight out of the gallery opens on Permissions. */
+  @state() private editorTab: 'editor' | 'permissions' | 'history' = 'editor';
+
+  @state() private guideOpen = false;
 
   @state() private error = '';
 
@@ -292,21 +307,15 @@ export class ErpFlowsApp extends LitElement {
     </div>`;
   }
 
+  /**
+   * The automations that already exist, above the gallery. Empty is not an error state any more
+   * (flows#1): a hub with nothing automated yet simply has nothing to show HERE, and the gallery
+   * underneath is the answer to «and now what».
+   */
   private renderList() {
-    if (!this.flows.length) {
-      return html`<div class="list">
-        <ok-empty-state
-          icon="git-branch-outline"
-          heading=${this.t('ui.emptyTitle')}
-          message=${this.t('ui.emptyMessage')}
-        >
-          <ion-button slot="action" data-act="new" @click=${() => this.startNew()}>
-            ${this.t('ui.newAutomation')}
-          </ion-button>
-        </ok-empty-state>
-      </div>`;
-    }
+    if (!this.flows.length) return nothing;
     return html`<div class="list">
+      <h3 class="section">${this.t('ui.tplYours')}</h3>
       ${this.flows.map(
         (flow) => html`<div class="flow" data-flow=${flow.id}>
           <button
@@ -347,6 +356,21 @@ export class ErpFlowsApp extends LitElement {
   private startNew(): void {
     this.editing = null;
     this.isNew = true;
+    this.editorTab = 'editor';
+  }
+
+  /**
+   * A template just became a flow: open it, **on the screen that makes it work**.
+   *
+   * A flow with no grants does nothing at all and says nothing about it. Landing the owner on the
+   * step list would leave the one action they must take behind a tab they have no reason to open —
+   * which is the exact place pm#134 reports people getting stuck.
+   */
+  private onTemplateUsed(e: CustomEvent<{ flow: Flow; needsGrants: boolean }>): void {
+    this.editing = e.detail.flow;
+    this.isNew = false;
+    this.editorTab = e.detail.needsGrants ? 'permissions' : 'editor';
+    void this.reload();
   }
 
   render() {
@@ -360,9 +384,11 @@ export class ErpFlowsApp extends LitElement {
         .client=${this.client}
         .flow=${this.editing}
         .t=${this.t}
+        .tab=${this.editorTab}
         @flows-back=${() => {
           this.editing = null;
           this.isNew = false;
+          this.editorTab = 'editor';
           void this.reload();
         }}
         @flows-saved=${(e: CustomEvent<{ flow: Flow }>) => {
@@ -372,10 +398,21 @@ export class ErpFlowsApp extends LitElement {
       ></erp-flows-editor>`;
     }
 
+    if (this.guideOpen) {
+      return html`<div class="body">
+        <erp-flows-guide
+          .t=${this.t}
+          @flows-guide-close=${() => {
+            this.guideOpen = false;
+          }}
+        ></erp-flows-guide>
+      </div>`;
+    }
+
     return html`
       <div class="head">
         <span class="grow"></span>
-        <ion-button size="small" data-act="new" @click=${() => this.startNew()}>
+        <ion-button size="small" fill="outline" data-act="new" @click=${() => this.startNew()}>
           ${this.t('ui.newAutomation')}
         </ion-button>
       </div>
@@ -386,6 +423,15 @@ export class ErpFlowsApp extends LitElement {
             >`
           : nothing}
         ${this.renderList()}
+        <erp-flows-gallery
+          .client=${this.client}
+          .t=${this.t}
+          @flows-template-used=${(e: Event) =>
+            this.onTemplateUsed(e as CustomEvent<{ flow: Flow; needsGrants: boolean }>)}
+          @flows-open-guide=${() => {
+            this.guideOpen = true;
+          }}
+        ></erp-flows-gallery>
       </div>
     `;
   }

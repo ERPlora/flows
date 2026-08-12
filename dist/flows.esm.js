@@ -2120,8 +2120,8 @@ function describeStep(step, t3) {
       return t3("ui.stepUnsupported", { kind: step.kind });
   }
 }
-function runOutcome(run, t3) {
-  switch (run.status) {
+function runOutcome(run2, t3) {
+  switch (run2.status) {
     case "done":
       return { label: t3("ui.runDone"), tone: "success" };
     case "failed":
@@ -3544,21 +3544,21 @@ var ErpFlowsEditor = class extends i3 {
     }
     const byId = new Map(this.document.steps.map((s4) => [s4.id, s4]));
     return b2`<div class="list">
-      ${this.runs.map((run) => {
-      const outcome = runOutcome(run, this.t);
-      const steps = this.runSteps[String(run.id)];
+      ${this.runs.map((run2) => {
+      const outcome = runOutcome(run2, this.t);
+      const steps = this.runSteps[String(run2.id)];
       return b2`<div class="run">
           <div class="row" style="padding:0;gap:.5rem">
             <ok-status-pill tone=${outcome.tone} label=${outcome.label}></ok-status-pill>
-            <span class="grow muted">${this.when(run.started_at ?? run.created_at)}</span>
-            <button type="button" class="icon-btn" @click=${() => void this.toggleRun(String(run.id))}>
+            <span class="grow muted">${this.when(run2.started_at ?? run2.created_at)}</span>
+            <button type="button" class="icon-btn" @click=${() => void this.toggleRun(String(run2.id))}>
               ▾
             </button>
           </div>
           <!-- The reason goes on the ROW, not behind the chevron. «Se paró por un error» with the
                error one click away is the shape of a screen that makes somebody phone support. -->
-          ${run.status === "failed" && run.last_error ? b2`<div class="muted" style="font-size:.85rem">
-                ${this.t("ui.ranFailed", { reason: run.last_error })}
+          ${run2.status === "failed" && run2.last_error ? b2`<div class="muted" style="font-size:.85rem">
+                ${this.t("ui.ranFailed", { reason: run2.last_error })}
               </div>` : A}
           ${steps ? b2`<ul>
                 ${steps.map(
@@ -3662,7 +3662,7 @@ __decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "enabled", 2);
 __decorateClass([
-  r5()
+  n4({ attribute: false })
 ], ErpFlowsEditor.prototype, "tab", 2);
 __decorateClass([
   r5()
@@ -3695,6 +3695,787 @@ __decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "pickerRoot", 2);
 define("erp-flows-editor", ErpFlowsEditor);
+
+// modules/flows/ui/lib/templates.ts
+var SECTORS = ["any", "beauty", "food"];
+var SCHEMA_VERSION2 = 1;
+function run(id, command, params) {
+  return { id, kind: "command", command, params };
+}
+var TEMPLATES = [
+  // ── Any business ────────────────────────────────────────────────────────────────────────────
+  {
+    id: "welcome-new-customer",
+    sector: "any",
+    icon: "happy-outline",
+    nameKey: "tpl.welcome.name",
+    summaryKey: "tpl.welcome.summary",
+    plainKey: "tpl.welcome.plain",
+    blanks: [{ labelKey: "tpl.welcome.blankWait", hintKey: "tpl.welcome.blankWaitHint" }],
+    witnesses: [
+      { event: "customer.created", module: "customers" },
+      { event: "tasks.task.created", module: "tasks" }
+    ],
+    grantReasons: { "tasks.tasks.create": "tpl.grant.tasksCreate" },
+    build: (t3) => ({
+      schema_version: SCHEMA_VERSION2,
+      triggers: [{ kind: "event", event: "customer.created" }],
+      steps: [
+        // A day, not a minute: the welcome call that lands while the customer is still walking out
+        // of the door is the one nobody makes. The owner can change it — that is the blank.
+        { id: "s1", kind: "delay", seconds: 86400 },
+        run("s2", "tasks.tasks.create", {
+          // `input.name` is the customer's name: `customer.created` carries the whole card at the
+          // root (verified against a hub — there is no `customer.` prefix in this payload).
+          title: t3("tpl.welcome.taskTitle"),
+          priority: "medium"
+        })
+      ]
+    })
+  },
+  {
+    id: "note-big-sale",
+    sector: "any",
+    icon: "create-outline",
+    nameKey: "tpl.bigSale.name",
+    summaryKey: "tpl.bigSale.summary",
+    plainKey: "tpl.bigSale.plain",
+    blanks: [{ labelKey: "tpl.bigSale.blankAmount", hintKey: "tpl.bigSale.blankAmountHint" }],
+    witnesses: [
+      { event: "sale.completed", module: "sales" },
+      { event: "customer.created", module: "customers" }
+    ],
+    grantReasons: { "customers.notes.add": "tpl.grant.customersNote" },
+    build: (t3) => ({
+      schema_version: SCHEMA_VERSION2,
+      triggers: [{ kind: "event", event: "sale.completed" }],
+      steps: [
+        {
+          id: "s1",
+          kind: "condition",
+          when: {
+            // Both halves matter. Without a customer there is no card to write on, and the command
+            // would fail on every anonymous ticket — which in a bar is most of them.
+            "input.customer_id": { exists: true },
+            // CENTS. `sale.completed.total` is an integer in cents (ADR-0123): 10000 = 100,00 €.
+            // This is the single most likely thing for an owner to get wrong, so the blank says so.
+            "input.total": { gte: 1e4 }
+          }
+        },
+        run("s2", "customers.notes.add", {
+          customer_id: "input.customer_id",
+          content: t3("tpl.bigSale.noteContent"),
+          author_name: t3("tpl.author")
+        })
+      ]
+    })
+  },
+  // ── Hair and beauty ─────────────────────────────────────────────────────────────────────────
+  {
+    id: "morning-agenda-check",
+    sector: "beauty",
+    icon: "sunny-outline",
+    nameKey: "tpl.morning.name",
+    summaryKey: "tpl.morning.summary",
+    plainKey: "tpl.morning.plain",
+    blanks: [{ labelKey: "tpl.morning.blankTime", hintKey: "tpl.morning.blankTimeHint" }],
+    witnesses: [{ event: "tasks.task.created", module: "tasks" }],
+    grantReasons: { "tasks.tasks.create": "tpl.grant.tasksCreate" },
+    build: (t3) => ({
+      schema_version: SCHEMA_VERSION2,
+      // 09:00 every day. The kernel reads five-field cron; the editor shows it as a clock.
+      triggers: [{ kind: "cron", cron: "0 9 * * *" }],
+      steps: [run("s1", "tasks.tasks.create", { title: t3("tpl.morning.taskTitle"), priority: "high" })]
+    })
+  },
+  {
+    id: "no-show-followup",
+    sector: "beauty",
+    icon: "call-outline",
+    nameKey: "tpl.noShow.name",
+    summaryKey: "tpl.noShow.summary",
+    plainKey: "tpl.noShow.plain",
+    blanks: [],
+    witnesses: [
+      { event: "appointments.appointment.no_show", module: "appointments" },
+      { event: "tasks.task.created", module: "tasks" }
+    ],
+    grantReasons: { "tasks.tasks.create": "tpl.grant.tasksCreate" },
+    build: (t3) => ({
+      schema_version: SCHEMA_VERSION2,
+      triggers: [{ kind: "event", event: "appointments.appointment.no_show" }],
+      steps: [
+        // No name in the title on purpose: this event carries `{appointment_id}` and nothing else
+        // (verified against a hub). Promising «call Marta» and printing a row of hex would be worse
+        // than a task that sends somebody to the diary.
+        run("s1", "tasks.tasks.create", { title: t3("tpl.noShow.taskTitle"), priority: "urgent" })
+      ]
+    })
+  },
+  // ── Bars and restaurants ────────────────────────────────────────────────────────────────────
+  {
+    id: "big-party-reservation",
+    sector: "food",
+    icon: "people-outline",
+    nameKey: "tpl.bigParty.name",
+    summaryKey: "tpl.bigParty.summary",
+    plainKey: "tpl.bigParty.plain",
+    blanks: [{ labelKey: "tpl.bigParty.blankSize", hintKey: "tpl.bigParty.blankSizeHint" }],
+    witnesses: [
+      { event: "reservations.reservation.created", module: "reservations" },
+      { event: "tasks.task.created", module: "tasks" }
+    ],
+    grantReasons: { "tasks.tasks.create": "tpl.grant.tasksCreate" },
+    build: (t3) => ({
+      schema_version: SCHEMA_VERSION2,
+      triggers: [{ kind: "event", event: "reservations.reservation.created" }],
+      steps: [
+        { id: "s1", kind: "condition", when: { "input.party_size": { gte: 6 } } },
+        // `guest_name`, `party_size`, `date` and `time` all travel in this event — checked against
+        // a real payload, not guessed from the create schema.
+        run("s2", "tasks.tasks.create", {
+          title: t3("tpl.bigParty.taskTitle"),
+          description: t3("tpl.bigParty.taskDescription"),
+          priority: "high"
+        })
+      ]
+    })
+  }
+];
+function templateById(id) {
+  return TEMPLATES.find((tpl) => tpl.id === id);
+}
+function templatesOf(sector) {
+  return TEMPLATES.filter((tpl) => tpl.sector === sector);
+}
+function buildTemplate(template, t3) {
+  return template.build(t3);
+}
+function templateGrants(template, t3) {
+  return requiredGrants(buildTemplate(template, t3));
+}
+function missingModules(template, known) {
+  const out = [];
+  for (const witness of template.witnesses) {
+    if (known[witness.event] === false && !out.includes(witness.module)) out.push(witness.module);
+  }
+  return out;
+}
+
+// modules/flows/ui/components/erp-flows-gallery/erp-flows-gallery.ts
+var ErpFlowsGallery = class extends i3 {
+  constructor() {
+    super(...arguments);
+    this.client = null;
+    this.t = (k2) => k2;
+    this.picked = null;
+    this.known = {};
+    this.busy = false;
+    this.error = "";
+  }
+  static {
+    this.styles = i`
+    :host {
+      display: block;
+      color: var(--ok-text, var(--ion-text-color, #1c1b18));
+      font-family: var(--ok-font, var(--ion-font-family, system-ui), sans-serif);
+    }
+    .wrap {
+      max-width: 44rem;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .lede {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .lede p {
+      flex: 1 1 16rem;
+      margin: 0;
+      color: var(--ok-muted, #6b6a63);
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+    .link {
+      font: inherit;
+      font-size: 0.9rem;
+      background: transparent;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-pill, 999px);
+      color: inherit;
+      cursor: pointer;
+      padding: 0 0.9rem;
+      min-height: 2.5rem;
+    }
+    h3 {
+      margin: 0.5rem 0 0;
+      font-size: 0.78rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--ok-muted, #6b6a63);
+      font-weight: 600;
+    }
+    .cards {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .card {
+      background: var(--ok-surface, var(--ion-card-background, #fff));
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius, 14px);
+      overflow: hidden;
+    }
+    .card[data-missing] {
+      background: var(--ok-surface-muted, rgba(0, 0, 0, 0.02));
+    }
+    .card > button.pick {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.7rem;
+      width: 100%;
+      box-sizing: border-box;
+      text-align: left;
+      background: transparent;
+      border: 0;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      /* A finger on the counter tablet, not a mouse. */
+      padding: 0.8rem 0.75rem;
+      min-height: 3.5rem;
+    }
+    .card ion-icon {
+      font-size: 1.4rem;
+      flex: 0 0 auto;
+      margin-top: 0.1rem;
+      color: var(--ok-primary, var(--ion-color-primary, #3880ff));
+    }
+    .grow {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .name {
+      display: block;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: block;
+      margin-top: 0.15rem;
+      font-size: 0.88rem;
+      line-height: 1.45;
+      color: var(--ok-muted, #6b6a63);
+      overflow-wrap: anywhere;
+    }
+    .panel {
+      border-top: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
+      padding: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.7rem;
+      background: var(--ok-surface-muted, rgba(0, 0, 0, 0.02));
+    }
+    .panel .plain {
+      margin: 0;
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+    .block > .head {
+      display: block;
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--ok-muted, #6b6a63);
+      margin-bottom: 0.3rem;
+    }
+    .item {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.45rem 0;
+      border-top: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.06));
+    }
+    .item:first-of-type {
+      border-top: 0;
+    }
+    .item .label {
+      display: block;
+      font-weight: 600;
+      font-size: 0.9rem;
+      overflow-wrap: anywhere;
+    }
+    .item .hint {
+      display: block;
+      font-size: 0.85rem;
+      line-height: 1.45;
+      color: var(--ok-muted, #6b6a63);
+      overflow-wrap: anywhere;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      align-items: center;
+    }
+    .muted {
+      color: var(--ok-muted, #6b6a63);
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+  `;
+  }
+  connectedCallback() {
+    super.connectedCallback();
+    void this.probe();
+  }
+  updated(changed) {
+    if (changed.has("client")) void this.probe();
+  }
+  /**
+   * Asks the hub, once per distinct event, whether it has ever heard of it.
+   *
+   * A `not_found` is the only answer that means «this module is not installed». Anything else —
+   * a network blip, a hub that refused for another reason — leaves the event unknown, because
+   * greying a card out on a transient error tells the owner their hub is missing something it has.
+   */
+  async probe() {
+    const client = this.client;
+    if (!client?.events) return;
+    const events = [...new Set(SECTORS.flatMap((s4) => templatesOf(s4)).flatMap((tpl) => tpl.witnesses.map((w2) => w2.event)))];
+    await Promise.all(
+      events.filter((event) => this.known[event] === void 0).map(async (event) => {
+        try {
+          await client.events.shape(event);
+          this.known = { ...this.known, [event]: true };
+        } catch (e4) {
+          if (errorCode(e4) === "not_found") this.known = { ...this.known, [event]: false };
+        }
+      })
+    );
+  }
+  /** Expands one template's panel. Public so the shell (and the tests) can drive it. */
+  open(id) {
+    this.picked = this.picked === id ? null : id;
+    this.error = "";
+  }
+  /**
+   * Creates the picked template as a **paused** flow and hands it over.
+   *
+   * `needsGrants` travels with it because a flow with no grants does nothing at all, and does it
+   * silently: the screen to land on is Permissions, not the step list.
+   */
+  async use() {
+    const template = this.picked ? templateById(this.picked) : void 0;
+    if (!template || !this.client || this.busy) return;
+    this.busy = true;
+    this.error = "";
+    try {
+      const flow = await this.client.flows.create({
+        name: this.t(template.nameKey),
+        enabled: false,
+        definition: buildTemplate(template, this.t)
+      });
+      this.dispatchEvent(
+        new CustomEvent("flows-template-used", {
+          detail: { flow, needsGrants: templateGrants(template, this.t).length > 0 },
+          bubbles: true,
+          composed: true
+        })
+      );
+      this.picked = null;
+    } catch (e4) {
+      this.error = e4?.message || this.t("ui.errGeneric");
+    } finally {
+      this.busy = false;
+    }
+  }
+  renderPanel(template) {
+    const missing = missingModules(template, this.known);
+    const grants = templateGrants(template, this.t);
+    return b2`<div class="panel">
+      <p class="plain">${this.t(template.plainKey)}</p>
+
+      <div class="block">
+        <span class="head">${this.t("ui.tplBlanksTitle")}</span>
+        ${template.blanks.length ? template.blanks.map(
+      (blank) => b2`<div class="item" data-blank>
+                <span class="grow">
+                  <span class="label">${this.t(blank.labelKey)}</span>
+                  <span class="hint">${this.t(blank.hintKey)}</span>
+                </span>
+              </div>`
+    ) : b2`<span class="muted">${this.t("ui.tplNoBlanks")}</span>`}
+      </div>
+
+      <div class="block">
+        <span class="head">${this.t("ui.tplGrantsTitle")}</span>
+        <span class="muted">${this.t("ui.tplGrantsIntro")}</span>
+        ${grants.map(
+      (grant) => b2`<div class="item" data-grant=${grant.value}>
+            <span class="grow">
+              <span class="label">${this.t(template.grantReasons[grant.value] ?? grant.value)}</span>
+              <span class="hint">${grant.value}</span>
+            </span>
+          </div>`
+    )}
+      </div>
+
+      ${missing.length ? b2`<ok-inline-feedback tone="warning" icon="download-outline">
+            ${this.t("ui.tplNeedsModule", { modules: missing.join(", ") })}
+          </ok-inline-feedback>` : A}
+      ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+            >${this.error}</ok-inline-feedback
+          >` : A}
+
+      <div class="actions">
+        <ion-button
+          size="small"
+          data-act="use"
+          ?disabled=${this.busy || missing.length > 0}
+          @click=${() => void this.use()}
+        >
+          ${this.busy ? this.t("ui.saving") : this.t("ui.tplUse")}
+        </ion-button>
+        <span class="muted">${this.t("ui.tplCreatedPaused")}</span>
+      </div>
+    </div>`;
+  }
+  renderCard(template) {
+    const missing = missingModules(template, this.known);
+    const open = this.picked === template.id;
+    return b2`<div
+      class="card"
+      data-template=${template.id}
+      data-missing=${missing.length ? missing.join(",") : A}
+    >
+      <button
+        type="button"
+        class="pick"
+        aria-expanded=${open ? "true" : "false"}
+        @click=${() => this.open(template.id)}
+      >
+        <ion-icon name=${template.icon} aria-hidden="true"></ion-icon>
+        <span class="grow">
+          <span class="name">${this.t(template.nameKey)}</span>
+          <span class="summary">${this.t(template.summaryKey)}</span>
+        </span>
+        ${missing.length ? b2`<ok-status-pill tone="neutral" label=${this.t("ui.tplUnavailable")}></ok-status-pill>` : A}
+      </button>
+      ${open ? this.renderPanel(template) : A}
+    </div>`;
+  }
+  renderSector(sector) {
+    const templates = templatesOf(sector);
+    if (!templates.length) return A;
+    return b2`<section data-sector=${sector}>
+      <h3>${this.t(`ui.sector_${sector}`)}</h3>
+      <div class="cards">${templates.map((template) => this.renderCard(template))}</div>
+    </section>`;
+  }
+  render() {
+    return b2`<div class="wrap">
+      <div class="lede">
+        <p>${this.t("ui.tplLede")}</p>
+        <button
+          type="button"
+          class="link"
+          data-act="guide"
+          @click=${() => this.dispatchEvent(
+      new CustomEvent("flows-open-guide", { bubbles: true, composed: true })
+    )}
+        >
+          ${this.t("ui.guideOpen")}
+        </button>
+      </div>
+      ${SECTORS.map((sector) => this.renderSector(sector))}
+    </div>`;
+  }
+};
+__decorateClass([
+  n4({ attribute: false })
+], ErpFlowsGallery.prototype, "client", 2);
+__decorateClass([
+  n4({ attribute: false })
+], ErpFlowsGallery.prototype, "t", 2);
+__decorateClass([
+  r5()
+], ErpFlowsGallery.prototype, "picked", 2);
+__decorateClass([
+  r5()
+], ErpFlowsGallery.prototype, "known", 2);
+__decorateClass([
+  r5()
+], ErpFlowsGallery.prototype, "busy", 2);
+__decorateClass([
+  r5()
+], ErpFlowsGallery.prototype, "error", 2);
+define("erp-flows-gallery", ErpFlowsGallery);
+
+// modules/flows/ui/components/erp-flows-guide/erp-flows-guide.ts
+var ErpFlowsGuide = class extends i3 {
+  constructor() {
+    super(...arguments);
+    this.t = (k2) => k2;
+  }
+  static {
+    this.styles = i`
+    :host {
+      display: block;
+      color: var(--ok-text, var(--ion-text-color, #1c1b18));
+      font-family: var(--ok-font, var(--ion-font-family, system-ui), sans-serif);
+    }
+    .wrap {
+      max-width: 44rem;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1.1rem;
+    }
+    .head {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    h2 {
+      margin: 0;
+      flex: 1 1 12rem;
+      font-size: 1.15rem;
+    }
+    .back {
+      font: inherit;
+      font-size: 0.9rem;
+      background: transparent;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-pill, 999px);
+      color: inherit;
+      cursor: pointer;
+      padding: 0 0.9rem;
+      min-height: 2.5rem;
+    }
+    h3 {
+      margin: 0 0 0.35rem;
+      font-size: 1rem;
+    }
+    p {
+      margin: 0 0 0.5rem;
+      line-height: 1.55;
+      font-size: 0.95rem;
+    }
+    ol {
+      margin: 0.2rem 0 0.6rem;
+      padding-left: 1.2rem;
+    }
+    li {
+      line-height: 1.55;
+      font-size: 0.95rem;
+      margin-bottom: 0.35rem;
+    }
+    .muted {
+      color: var(--ok-muted, #6b6a63);
+    }
+    /* ── The drawings ────────────────────────────────────────────────────────────────────────
+       The editor's own shapes: one column, a card for the trigger, a dashed chip for the guard,
+       a card for the action. Same vocabulary, same geometry, no image bytes. */
+    .shot {
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius, 14px);
+      background: var(--ok-surface-muted, rgba(0, 0, 0, 0.02));
+      padding: 0.7rem;
+      margin: 0.4rem 0 0.8rem;
+      overflow-x: auto;
+    }
+    .node {
+      position: relative;
+      padding-left: 1.4rem;
+    }
+    .node::before {
+      content: '';
+      position: absolute;
+      left: 0.36rem;
+      top: 0;
+      bottom: -0.1rem;
+      width: 2px;
+      background: var(--ok-border-soft, rgba(0, 0, 0, 0.12));
+    }
+    .node:last-child::before {
+      bottom: auto;
+      height: 1rem;
+    }
+    .node::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0.75rem;
+      width: 0.8rem;
+      height: 0.8rem;
+      border-radius: 50%;
+      background: var(--ok-border, #d7d5cc);
+      box-shadow: 0 0 0 3px var(--ok-bg, var(--ion-background-color, #fff));
+    }
+    .node.trigger::after {
+      background: var(--ok-primary, var(--ion-color-primary, #3880ff));
+    }
+    .mini-card {
+      background: var(--ok-surface, #fff);
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius, 14px);
+      padding: 0.5rem 0.6rem;
+      margin: 0.3rem 0;
+    }
+    .eyebrow {
+      display: block;
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--ok-muted, #6b6a63);
+    }
+    .title {
+      display: block;
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      margin: 0.3rem 0 0.3rem 0.6rem;
+      background: var(--ok-surface-2, rgba(0, 0, 0, 0.04));
+      border: 1px dashed var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-pill, 999px);
+      padding: 0.3rem 0.6rem;
+      font-size: 0.88rem;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-sm, 10px);
+      background: var(--ok-surface, #fff);
+      margin-bottom: 0.35rem;
+      font-size: 0.9rem;
+    }
+    .row .grow {
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+  `;
+  }
+  heading(section) {
+    return b2`<h3 data-key=${`guide.${section}Title`}>${this.t(`guide.${section}Title`)}</h3>`;
+  }
+  /** The spine as the editor draws it: «When this happens…» → «Only continue if» → the action. */
+  spineShot() {
+    return b2`<div class="shot" data-shot="spine">
+      <div class="node trigger">
+        <div class="mini-card">
+          <span class="eyebrow">${this.t("ui.whenThisHappens")}</span>
+          <span class="title">${this.t("ui.triggerEvent", { event: this.t("ui.evSaleCompleted") })}</span>
+        </div>
+      </div>
+      <div class="node">
+        <span class="chip"
+          ><strong>${this.t("ui.guardTitle")}</strong> ${this.t("guide.shotGuard")}</span
+        >
+      </div>
+      <div class="node">
+        <div class="mini-card">
+          <span class="title">${this.t("guide.shotAction")}</span>
+        </div>
+      </div>
+    </div>`;
+  }
+  permissionsShot() {
+    return b2`<div class="shot" data-shot="permissions">
+      <div class="row">
+        <ok-status-pill tone="warning" label=${this.t("ui.grantsMissing")}></ok-status-pill>
+        <span class="grow">${this.t("guide.shotGrant")}</span>
+      </div>
+      <div class="row">
+        <ok-status-pill tone="success" label=${this.t("ui.grantsGranted")}></ok-status-pill>
+        <span class="grow">${this.t("guide.shotGrantDone")}</span>
+      </div>
+    </div>`;
+  }
+  historyShot() {
+    return b2`<div class="shot" data-shot="history">
+      <div class="row">
+        <ok-status-pill tone="success" label=${this.t("ui.runDone")}></ok-status-pill>
+        <span class="grow muted">${this.t("guide.shotWhen")}</span>
+      </div>
+      <div class="row">
+        <ok-status-pill tone="neutral" label=${this.t("ui.runDone")}></ok-status-pill>
+        <span class="grow muted">${this.t("ui.ranGuardStopped")}</span>
+      </div>
+    </div>`;
+  }
+  render() {
+    return b2`<div class="wrap">
+      <div class="head">
+        <h2>${this.t("guide.title")}</h2>
+        <button
+          type="button"
+          class="back"
+          data-act="back"
+          @click=${() => this.dispatchEvent(
+      new CustomEvent("flows-guide-close", { bubbles: true, composed: true })
+    )}
+        >
+          ${this.t("ui.guideBack")}
+        </button>
+      </div>
+
+      <section data-section="what">
+        ${this.heading("what")}
+        <p>${this.t("guide.whatBody")}</p>
+        <p class="muted">${this.t("guide.whatExample")}</p>
+        ${this.spineShot()}
+      </section>
+
+      <section data-section="first">
+        ${this.heading("first")}
+        <p>${this.t("guide.firstBody")}</p>
+        <ol>
+          ${[1, 2, 3, 4, 5].map((n5) => b2`<li>${this.t(`guide.first${n5}`)}</li>`)}
+        </ol>
+      </section>
+
+      <section data-section="permissions">
+        ${this.heading("permissions")}
+        <p>${this.t("guide.permissionsBody")}</p>
+        <p>${this.t("guide.permissionsWhere")}</p>
+        ${this.permissionsShot()}
+        <p>${this.t("guide.permissionsNothing")}</p>
+      </section>
+
+      <section data-section="history">
+        ${this.heading("history")}
+        <p>${this.t("guide.historyBody")}</p>
+        ${this.historyShot()}
+        <p>${this.t("guide.historyGuard")}</p>
+      </section>
+
+      <section data-section="limits">
+        ${this.heading("limits")}
+        <p>${this.t("guide.limitsBranches")}</p>
+        <p>${this.t("guide.limitsChannels")}</p>
+        <p>${this.t("guide.limitsDates")}</p>
+        <p class="muted">${this.t("guide.limitsInside")}</p>
+      </section>
+    </div>`;
+  }
+};
+__decorateClass([
+  n4({ attribute: false })
+], ErpFlowsGuide.prototype, "t", 2);
+define("erp-flows-guide", ErpFlowsGuide);
 
 // modules/flows/locales/es.json
 var es_default = {
@@ -3880,7 +4661,98 @@ var es_default = {
     evStaffTimeOff: "alguien pide vacaciones",
     stepGuardEmpty: "elige la condici\xF3n",
     pickFieldSkipArray: "no se ofrece: es una lista, y una automatizaci\xF3n no sabe entrar dentro",
-    pickFieldSkipObject: "no se ofrece suelto: elige uno de los datos de dentro"
+    pickFieldSkipObject: "no se ofrece suelto: elige uno de los datos de dentro",
+    tplLede: "Elige una y pasa a ser tuya, apagada, para que la mires antes de que haga nada.",
+    sector_any: "Cualquier negocio",
+    sector_beauty: "Peluquer\xEDa y est\xE9tica",
+    sector_food: "Bares y restaurantes",
+    tplBlanksTitle: "Lo que decides t\xFA",
+    tplNoBlanks: "No hay nada que rellenar. Est\xE1 lista tal cual.",
+    tplGrantsTitle: "Lo que te va a pedir permiso para hacer",
+    tplGrantsIntro: "Una automatizaci\xF3n funciona con sus propios permisos, nunca con los tuyos. Hasta que se los des, no hace nada.",
+    tplNeedsModule: "Esta necesita el m\xF3dulo {modules}, y este hub no lo tiene. Inst\xE1lalo desde el marketplace y funcionar\xE1.",
+    tplUnavailable: "Falta un m\xF3dulo",
+    tplUse: "Usar esta",
+    tplCreatedPaused: "Se crea en pausa. No pasa nada hasta que la enciendas.",
+    tplYours: "Tus automatizaciones",
+    guideOpen: "\xBFC\xF3mo funciona esto?",
+    guideBack: "Volver a las automatizaciones"
+  },
+  tpl: {
+    author: "Automatizaciones",
+    grant: {
+      tasksCreate: "Crear una tarea en tu lista. No sale del hub y no le escribe a ning\xFAn cliente.",
+      customersNote: "A\xF1adir una nota al historial de un cliente. No cambia sus datos ni le escribe."
+    },
+    welcome: {
+      name: "Dar la bienvenida a cada cliente nuevo",
+      summary: "Entra alguien nuevo en tu lista de clientes y te queda el recordatorio de saludarle.",
+      plain: "Cuando se a\xF1ade un cliente nuevo \u2192 espera un d\xEDa \u2192 te deja la tarea de darle la bienvenida.",
+      blankWait: "Cu\xE1nto esperar",
+      blankWaitHint: "Un d\xEDa para empezar. La bienvenida que llega mientras a\xFAn est\xE1n saliendo por la puerta es la que no hace nadie.",
+      taskTitle: "Dar la bienvenida a {{input.name}}"
+    },
+    bigSale: {
+      name: "Apuntar las visitas grandes en la ficha del cliente",
+      summary: "Cada vez que alguien gasta m\xE1s de lo que t\xFA decidas, queda una nota en su historial.",
+      plain: "Cuando se cobra una venta \u2192 solo si tiene cliente y pasa del importe que fijes \u2192 escribe una nota en su ficha.",
+      blankAmount: "El importe a partir del cual la venta es grande",
+      blankAmountHint: "En c\xE9ntimos: 10000 son 100,00 \u20AC. El hub guarda el dinero en c\xE9ntimos, as\xED que poner aqu\xED 100 ser\xEDa un euro.",
+      noteContent: "Visita grande. Merece una atenci\xF3n especial la pr\xF3xima vez."
+    },
+    morning: {
+      name: "Cada ma\xF1ana, repasar la agenda de ma\xF1ana",
+      summary: "Una tarea esper\xE1ndote a primera hora, para que ninguna cita se quede sin confirmar.",
+      plain: "Todos los d\xEDas a las 9:00 \u2192 te deja la tarea de repasar las citas de ma\xF1ana y confirmarlas.",
+      blankTime: "La hora",
+      blankTimeHint: "Las 9:00 para empezar. P\xF3nla cuando abres, no cuando ya est\xE1s liada.",
+      taskTitle: "Repasar las citas de ma\xF1ana y confirmarlas"
+    },
+    noShow: {
+      name: "Quien no vino, no se pierde",
+      summary: "En cuanto se marca una cita como \xABno vino\xBB, llamarle pasa a ser una tarea.",
+      plain: "Cuando se marca una cita como \xABno vino\xBB \u2192 te deja la tarea de llamarle y ofrecerle otra hora.",
+      taskTitle: "Llamar a quien no vino y ofrecerle otra hora"
+    },
+    bigParty: {
+      name: "Las mesas grandes se preparan",
+      summary: "Entra una reserva grande y la sala tiene su tarea antes de que llegue el d\xEDa.",
+      plain: "Cuando entra una reserva \u2192 solo si es para m\xE1s gente de la que fijes \u2192 deja a la sala la tarea de preparar la mesa.",
+      blankSize: "A partir de cu\xE1nta gente la mesa es grande",
+      blankSizeHint: "Seis para empezar. Cuenta las personas, no las mesas.",
+      taskTitle: "Preparar la mesa de {{input.guest_name}} \u2014 {{input.party_size}} personas",
+      taskDescription: "{{input.date}} a las {{input.time}}"
+    }
+  },
+  guide: {
+    title: "C\xF3mo funcionan las automatizaciones",
+    whatTitle: "Qu\xE9 es una automatizaci\xF3n",
+    whatBody: "Es una regla que dejas escrita: cuando pasa algo en tu negocio, el hub hace algo al respecto \u2014 solo, siempre, sin que nadie tenga que acordarse.",
+    whatExample: "En una peluquer\xEDa: en cuanto se marca que alguien no ha venido, aparece en tu lista la tarea de llamarle y ofrecerle otra hora. Nadie tiene que darse cuenta. Ya est\xE1 ah\xED.",
+    firstTitle: "Tu primera automatizaci\xF3n, paso a paso",
+    firstBody: "Lo m\xE1s r\xE1pido es empezar por una de las que ya vienen hechas en la primera pantalla.",
+    first1: "En la pantalla de Automatizaciones, elige una de la galer\xEDa. Lee la frase de debajo: eso es exactamente lo que va a hacer.",
+    first2: "Pulsa \xABUsar esta\xBB. Pasa a ser tuya, y se crea apagada.",
+    first3: "Rellena lo que te pide decidir: un importe, una hora, cu\xE1nto esperar. Siempre llega con una propuesta razonable puesta.",
+    first4: "Ve a Permisos y conc\xE9dele lo que necesita. Hasta que lo hagas, no hace absolutamente nada.",
+    first5: "Enci\xE9ndela con el interruptor de arriba. A partir de ese momento est\xE1 vigilando, de d\xEDa y de noche.",
+    permissionsTitle: "Los permisos: por qu\xE9 hay que decir que s\xED",
+    permissionsBody: "Una automatizaci\xF3n trabaja cuando no est\xE1s mirando, as\xED que nunca toma prestados tus permisos. Solo puede hacer las cosas concretas que le hayas concedido, una a una \u2014 eso es lo que impide que haga m\xE1s de lo que quisiste.",
+    permissionsWhere: "Se conceden dentro de la propia automatizaci\xF3n: \xE1brela y ve a la pesta\xF1a Permisos. Ah\xED est\xE1 todo lo que necesita, con un bot\xF3n que lo concede de golpe.",
+    permissionsNothing: "Una automatizaci\xF3n a la que no le has concedido nada no est\xE1 rota ni va lenta: simplemente no hace nada, y no se queja. Si la tuya no ha hecho nunca nada, mira aqu\xED primero.",
+    historyTitle: "C\xF3mo saber si funcion\xF3",
+    historyBody: "Abre la automatizaci\xF3n y ve a Historial. Cada vez que se despert\xF3 hay una l\xEDnea con el d\xEDa y la hora, y debajo, en palabras, lo que hizo.",
+    historyGuard: "\xABNo se cumpli\xF3 la condici\xF3n, as\xED que par\xF3 aqu\xED\xBB no es un fallo. Es la automatizaci\xF3n funcionando: le dijiste que siguiera solo en ciertos casos, y este no era uno de ellos.",
+    limitsTitle: "Lo que todav\xEDa no puede hacer",
+    limitsBranches: "No hay bifurcaciones. Una automatizaci\xF3n es una sola l\xEDnea de pasos de arriba abajo, y es a prop\xF3sito: si una condici\xF3n no se cumple, para ah\xED \u2014 no coge un segundo camino. Dos desenlaces distintos son dos automatizaciones.",
+    limitsChannels: "Todav\xEDa no puede escribirle a tu cliente. Los pasos que mandan un mensaje, preguntan al asistente o llaman a otro servicio ya funcionan dentro del hub, pero a\xFAn no hay pantalla para configurarlos: si una automatizaci\xF3n ya trae uno, lo ver\xE1s bloqueado.",
+    limitsDates: "Tampoco sabe contar hacia atr\xE1s desde una fecha: \xABel d\xEDa antes de la cita\xBB es algo que a\xFAn no puede calcular. S\xED puede esperar un rato desde que pas\xF3 algo, que no es lo mismo.",
+    limitsInside: "As\xED que de momento una automatizaci\xF3n trabaja de puertas adentro: te deja a ti y a tu equipo la nota, la tarea o el apunte, y quien habla con la gente es una persona.",
+    shotGuard: "el ticket pasa de 100,00 \u20AC",
+    shotAction: "Escribir una nota en la ficha del cliente",
+    shotGrant: "Escribir una nota en la ficha del cliente",
+    shotGrantDone: "A\xF1adir una tarea a tu lista",
+    shotWhen: "Ayer, 19:04"
   }
 };
 
@@ -4068,7 +4940,98 @@ var en_default = {
     evStaffTimeOff: "somebody asks for time off",
     stepGuardEmpty: "pick the condition",
     pickFieldSkipArray: "not offered: it is a list, and an automation cannot reach inside one",
-    pickFieldSkipObject: "not offered on its own: pick one of the fields inside it"
+    pickFieldSkipObject: "not offered on its own: pick one of the fields inside it",
+    tplLede: "Pick one of these and it becomes yours, switched off, ready for you to look at before it does anything.",
+    sector_any: "Any business",
+    sector_beauty: "Hair and beauty",
+    sector_food: "Bars and restaurants",
+    tplBlanksTitle: "What you decide",
+    tplNoBlanks: "Nothing to fill in. It is ready as it is.",
+    tplGrantsTitle: "What it will ask you to allow",
+    tplGrantsIntro: "An automation runs with its own permissions, never with yours. Until you allow these, it does nothing.",
+    tplNeedsModule: "This one needs the {modules} module, and this hub does not have it. Install it from the marketplace and it will work.",
+    tplUnavailable: "Needs a module",
+    tplUse: "Use this one",
+    tplCreatedPaused: "It is created paused. Nothing happens until you turn it on.",
+    tplYours: "Your automations",
+    guideOpen: "How does this work?",
+    guideBack: "Back to the automations"
+  },
+  tpl: {
+    author: "Automations",
+    grant: {
+      tasksCreate: "Create a task in your list. It stays inside the hub and never writes to a customer.",
+      customersNote: "Add a note to a customer's history. It does not change their details and it does not contact them."
+    },
+    welcome: {
+      name: "Welcome every new customer",
+      summary: "Somebody new goes into your customer list and you get a reminder to say hello.",
+      plain: "When a new customer is added \u2192 wait one day \u2192 leave you the task of welcoming them.",
+      blankWait: "How long to wait",
+      blankWaitHint: "One day to start with. A welcome that arrives while they are still walking out of the door is the one nobody makes.",
+      taskTitle: "Welcome {{input.name}}"
+    },
+    bigSale: {
+      name: "Write the big visits into the customer's card",
+      summary: "Every time somebody spends more than the amount you choose, a note lands in their history.",
+      plain: "When a sale is charged \u2192 only if it has a customer and comes to more than the amount you set \u2192 write a note in that customer's card.",
+      blankAmount: "The amount that makes a sale a big one",
+      blankAmountHint: "In cents: 10000 is 100,00 \u20AC. The hub keeps money in cents, so writing 100 here would mean one euro.",
+      noteContent: "Big visit. Worth a personal welcome next time."
+    },
+    morning: {
+      name: "Every morning, go through tomorrow's diary",
+      summary: "A task waiting for you first thing, so nobody's appointment goes unconfirmed.",
+      plain: "Every day at 9:00 \u2192 leave you the task of going through tomorrow's appointments and confirming them.",
+      blankTime: "The time",
+      blankTimeHint: "09:00 to start with. Put it when you open, not when you are already busy.",
+      taskTitle: "Go through tomorrow's appointments and confirm them"
+    },
+    noShow: {
+      name: "Whoever did not turn up does not get lost",
+      summary: "The moment an appointment is marked as a no-show, calling them back becomes a task.",
+      plain: "When an appointment is marked as a no-show \u2192 leave you the task of calling them and offering another time.",
+      taskTitle: "Call whoever did not turn up and offer them another time"
+    },
+    bigParty: {
+      name: "Big tables get prepared",
+      summary: "A large booking comes in and the room has its task before the day arrives.",
+      plain: "When a reservation is taken \u2192 only if it is for more people than you set \u2192 leave the room the task of getting the table ready.",
+      blankSize: "How many people make a table a big one",
+      blankSizeHint: "Six to start with. Count the people, not the tables.",
+      taskTitle: "Prepare the table for {{input.guest_name}} \u2014 {{input.party_size}} people",
+      taskDescription: "{{input.date}} at {{input.time}}"
+    }
+  },
+  guide: {
+    title: "How automations work",
+    whatTitle: "What an automation is",
+    whatBody: "It is a rule you leave written down: when something happens in your business, the hub does something about it \u2014 on its own, every time, without anybody having to remember.",
+    whatExample: "In a salon: the moment somebody is marked as not having turned up, a job appears on your list telling you to ring them and offer another time. Nobody has to notice. It is already there.",
+    firstTitle: "Your first automation, step by step",
+    firstBody: "The quickest way in is one of the ready-made ones on the first screen.",
+    first1: "On the Automations screen, pick one from the gallery. Read the sentence underneath: that is exactly what it will do.",
+    first2: "Press \xABUse this one\xBB. It becomes yours, and it is created switched off.",
+    first3: "Fill in what it asked you to decide \u2014 an amount, a time, how long to wait. It always arrives with a sensible guess in place.",
+    first4: "Go to Permissions and allow what it needs. Until you do, it does nothing at all.",
+    first5: "Turn it on with the switch at the top. From that moment it is watching, day and night.",
+    permissionsTitle: "Permissions: why you have to say yes",
+    permissionsBody: "An automation works while you are not looking, so it never borrows your own permissions. It can only do the exact things you allowed it, one by one \u2014 that is what stops it from ever doing more than you meant.",
+    permissionsWhere: "You allow them inside the automation itself: open it and go to the Permissions tab. Everything it needs is listed there, with one button that allows the lot.",
+    permissionsNothing: "An automation you never allowed anything is not broken and it is not slow: it simply does nothing, and it will not complain. If yours has never done a thing, look here first.",
+    historyTitle: "How to tell it worked",
+    historyBody: "Open the automation and go to History. Every time it woke up there is a line with the day and the hour, and underneath it, in words, what it did.",
+    historyGuard: "\xABThe condition was not met, so it stopped here\xBB is not a fault. That is the automation working: you told it to carry on only in certain cases, and this was not one of them.",
+    limitsTitle: "What it cannot do yet",
+    limitsBranches: "There are no forks. An automation is one line of steps from top to bottom, and that is on purpose: if a condition is not met it stops there \u2014 it does not take a second route. Two different outcomes means two automations.",
+    limitsChannels: "It cannot write to your customer yet. The steps that send a message, ask the assistant or reach another service already work inside the hub, but there is no screen to set them up, so you will find them locked if an automation already has one.",
+    limitsDates: "It cannot count backwards from a date either: \xABthe day before the appointment\xBB is not something it can work out yet. It can wait a while after something happened, which is not the same thing.",
+    limitsInside: "So for now an automation works indoors: it leaves the note, the job or the record for you and your team, and a person does the talking.",
+    shotGuard: "the ticket comes to more than 100,00 \u20AC",
+    shotAction: "Write a note in the customer's card",
+    shotGrant: "Write a note in the customer's card",
+    shotGrantDone: "Add a job to your list",
+    shotWhen: "Yesterday, 19:04"
   }
 };
 
@@ -4082,6 +5045,8 @@ var ErpFlowsApp = class extends i3 {
     this.flows = [];
     this.editing = null;
     this.isNew = false;
+    this.editorTab = "editor";
+    this.guideOpen = false;
     this.error = "";
     this.coreVersion = "";
     this.onLocaleChange = () => this.requestUpdate();
@@ -4123,10 +5088,18 @@ var ErpFlowsApp = class extends i3 {
     }
     .list {
       max-width: 44rem;
-      margin: 0 auto;
+      margin: 0 auto 1.25rem;
       display: flex;
       flex-direction: column;
       gap: 0.5rem;
+    }
+    h3.section {
+      margin: 0;
+      font-size: 0.78rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--ok-muted, #6b6a63);
+      font-weight: 600;
     }
     .flow {
       display: flex;
@@ -4307,21 +5280,15 @@ var ErpFlowsApp = class extends i3 {
       ></ok-empty-state>
     </div>`;
   }
+  /**
+   * The automations that already exist, above the gallery. Empty is not an error state any more
+   * (flows#1): a hub with nothing automated yet simply has nothing to show HERE, and the gallery
+   * underneath is the answer to «and now what».
+   */
   renderList() {
-    if (!this.flows.length) {
-      return b2`<div class="list">
-        <ok-empty-state
-          icon="git-branch-outline"
-          heading=${this.t("ui.emptyTitle")}
-          message=${this.t("ui.emptyMessage")}
-        >
-          <ion-button slot="action" data-act="new" @click=${() => this.startNew()}>
-            ${this.t("ui.newAutomation")}
-          </ion-button>
-        </ok-empty-state>
-      </div>`;
-    }
+    if (!this.flows.length) return A;
     return b2`<div class="list">
+      <h3 class="section">${this.t("ui.tplYours")}</h3>
       ${this.flows.map(
       (flow) => b2`<div class="flow" data-flow=${flow.id}>
           <button
@@ -4360,6 +5327,20 @@ var ErpFlowsApp = class extends i3 {
   startNew() {
     this.editing = null;
     this.isNew = true;
+    this.editorTab = "editor";
+  }
+  /**
+   * A template just became a flow: open it, **on the screen that makes it work**.
+   *
+   * A flow with no grants does nothing at all and says nothing about it. Landing the owner on the
+   * step list would leave the one action they must take behind a tab they have no reason to open —
+   * which is the exact place pm#134 reports people getting stuck.
+   */
+  onTemplateUsed(e4) {
+    this.editing = e4.detail.flow;
+    this.isNew = false;
+    this.editorTab = e4.detail.needsGrants ? "permissions" : "editor";
+    void this.reload();
   }
   render() {
     if (this.gate === "loading") {
@@ -4371,9 +5352,11 @@ var ErpFlowsApp = class extends i3 {
         .client=${this.client}
         .flow=${this.editing}
         .t=${this.t}
+        .tab=${this.editorTab}
         @flows-back=${() => {
         this.editing = null;
         this.isNew = false;
+        this.editorTab = "editor";
         void this.reload();
       }}
         @flows-saved=${(e4) => {
@@ -4382,10 +5365,20 @@ var ErpFlowsApp = class extends i3 {
       }}
       ></erp-flows-editor>`;
     }
+    if (this.guideOpen) {
+      return b2`<div class="body">
+        <erp-flows-guide
+          .t=${this.t}
+          @flows-guide-close=${() => {
+        this.guideOpen = false;
+      }}
+        ></erp-flows-guide>
+      </div>`;
+    }
     return b2`
       <div class="head">
         <span class="grow"></span>
-        <ion-button size="small" data-act="new" @click=${() => this.startNew()}>
+        <ion-button size="small" fill="outline" data-act="new" @click=${() => this.startNew()}>
           ${this.t("ui.newAutomation")}
         </ion-button>
       </div>
@@ -4394,6 +5387,14 @@ var ErpFlowsApp = class extends i3 {
               >${this.error}</ok-inline-feedback
             >` : A}
         ${this.renderList()}
+        <erp-flows-gallery
+          .client=${this.client}
+          .t=${this.t}
+          @flows-template-used=${(e4) => this.onTemplateUsed(e4)}
+          @flows-open-guide=${() => {
+      this.guideOpen = true;
+    }}
+        ></erp-flows-gallery>
       </div>
     `;
   }
@@ -4413,6 +5414,12 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsApp.prototype, "isNew", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApp.prototype, "editorTab", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApp.prototype, "guideOpen", 2);
 __decorateClass([
   r5()
 ], ErpFlowsApp.prototype, "error", 2);

@@ -417,7 +417,11 @@ export class ErpFlowsEditor extends LitElement {
 
   @state() enabled = true;
 
-  @state() tab: 'editor' | 'permissions' | 'history' = 'editor';
+  /**
+   * Which tab is showing. A **property**, not internal state: a flow created from a template opens
+   * on `permissions`, because until it holds a grant it does nothing at all and says nothing.
+   */
+  @property({ attribute: false }) tab: 'editor' | 'permissions' | 'history' = 'editor';
 
   @state() private openStep: string | null = null;
 

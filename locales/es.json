@@ -181,6 +181,97 @@
     "evStaffTimeOff": "alguien pide vacaciones",
     "stepGuardEmpty": "elige la condición",
     "pickFieldSkipArray": "no se ofrece: es una lista, y una automatización no sabe entrar dentro",
-    "pickFieldSkipObject": "no se ofrece suelto: elige uno de los datos de dentro"
+    "pickFieldSkipObject": "no se ofrece suelto: elige uno de los datos de dentro",
+    "tplLede": "Elige una y pasa a ser tuya, apagada, para que la mires antes de que haga nada.",
+    "sector_any": "Cualquier negocio",
+    "sector_beauty": "Peluquería y estética",
+    "sector_food": "Bares y restaurantes",
+    "tplBlanksTitle": "Lo que decides tú",
+    "tplNoBlanks": "No hay nada que rellenar. Está lista tal cual.",
+    "tplGrantsTitle": "Lo que te va a pedir permiso para hacer",
+    "tplGrantsIntro": "Una automatización funciona con sus propios permisos, nunca con los tuyos. Hasta que se los des, no hace nada.",
+    "tplNeedsModule": "Esta necesita el módulo {modules}, y este hub no lo tiene. Instálalo desde el marketplace y funcionará.",
+    "tplUnavailable": "Falta un módulo",
+    "tplUse": "Usar esta",
+    "tplCreatedPaused": "Se crea en pausa. No pasa nada hasta que la enciendas.",
+    "tplYours": "Tus automatizaciones",
+    "guideOpen": "¿Cómo funciona esto?",
+    "guideBack": "Volver a las automatizaciones"
+  },
+  "tpl": {
+    "author": "Automatizaciones",
+    "grant": {
+      "tasksCreate": "Crear una tarea en tu lista. No sale del hub y no le escribe a ningún cliente.",
+      "customersNote": "Añadir una nota al historial de un cliente. No cambia sus datos ni le escribe."
+    },
+    "welcome": {
+      "name": "Dar la bienvenida a cada cliente nuevo",
+      "summary": "Entra alguien nuevo en tu lista de clientes y te queda el recordatorio de saludarle.",
+      "plain": "Cuando se añade un cliente nuevo → espera un día → te deja la tarea de darle la bienvenida.",
+      "blankWait": "Cuánto esperar",
+      "blankWaitHint": "Un día para empezar. La bienvenida que llega mientras aún están saliendo por la puerta es la que no hace nadie.",
+      "taskTitle": "Dar la bienvenida a {{input.name}}"
+    },
+    "bigSale": {
+      "name": "Apuntar las visitas grandes en la ficha del cliente",
+      "summary": "Cada vez que alguien gasta más de lo que tú decidas, queda una nota en su historial.",
+      "plain": "Cuando se cobra una venta → solo si tiene cliente y pasa del importe que fijes → escribe una nota en su ficha.",
+      "blankAmount": "El importe a partir del cual la venta es grande",
+      "blankAmountHint": "En céntimos: 10000 son 100,00 €. El hub guarda el dinero en céntimos, así que poner aquí 100 sería un euro.",
+      "noteContent": "Visita grande. Merece una atención especial la próxima vez."
+    },
+    "morning": {
+      "name": "Cada mañana, repasar la agenda de mañana",
+      "summary": "Una tarea esperándote a primera hora, para que ninguna cita se quede sin confirmar.",
+      "plain": "Todos los días a las 9:00 → te deja la tarea de repasar las citas de mañana y confirmarlas.",
+      "blankTime": "La hora",
+      "blankTimeHint": "Las 9:00 para empezar. Pónla cuando abres, no cuando ya estás liada.",
+      "taskTitle": "Repasar las citas de mañana y confirmarlas"
+    },
+    "noShow": {
+      "name": "Quien no vino, no se pierde",
+      "summary": "En cuanto se marca una cita como «no vino», llamarle pasa a ser una tarea.",
+      "plain": "Cuando se marca una cita como «no vino» → te deja la tarea de llamarle y ofrecerle otra hora.",
+      "taskTitle": "Llamar a quien no vino y ofrecerle otra hora"
+    },
+    "bigParty": {
+      "name": "Las mesas grandes se preparan",
+      "summary": "Entra una reserva grande y la sala tiene su tarea antes de que llegue el día.",
+      "plain": "Cuando entra una reserva → solo si es para más gente de la que fijes → deja a la sala la tarea de preparar la mesa.",
+      "blankSize": "A partir de cuánta gente la mesa es grande",
+      "blankSizeHint": "Seis para empezar. Cuenta las personas, no las mesas.",
+      "taskTitle": "Preparar la mesa de {{input.guest_name}} — {{input.party_size}} personas",
+      "taskDescription": "{{input.date}} a las {{input.time}}"
+    }
+  },
+  "guide": {
+    "title": "Cómo funcionan las automatizaciones",
+    "whatTitle": "Qué es una automatización",
+    "whatBody": "Es una regla que dejas escrita: cuando pasa algo en tu negocio, el hub hace algo al respecto — solo, siempre, sin que nadie tenga que acordarse.",
+    "whatExample": "En una peluquería: en cuanto se marca que alguien no ha venido, aparece en tu lista la tarea de llamarle y ofrecerle otra hora. Nadie tiene que darse cuenta. Ya está ahí.",
+    "firstTitle": "Tu primera automatización, paso a paso",
+    "firstBody": "Lo más rápido es empezar por una de las que ya vienen hechas en la primera pantalla.",
+    "first1": "En la pantalla de Automatizaciones, elige una de la galería. Lee la frase de debajo: eso es exactamente lo que va a hacer.",
+    "first2": "Pulsa «Usar esta». Pasa a ser tuya, y se crea apagada.",
+    "first3": "Rellena lo que te pide decidir: un importe, una hora, cuánto esperar. Siempre llega con una propuesta razonable puesta.",
+    "first4": "Ve a Permisos y concédele lo que necesita. Hasta que lo hagas, no hace absolutamente nada.",
+    "first5": "Enciéndela con el interruptor de arriba. A partir de ese momento está vigilando, de día y de noche.",
+    "permissionsTitle": "Los permisos: por qué hay que decir que sí",
+    "permissionsBody": "Una automatización trabaja cuando no estás mirando, así que nunca toma prestados tus permisos. Solo puede hacer las cosas concretas que le hayas concedido, una a una — eso es lo que impide que haga más de lo que quisiste.",
+    "permissionsWhere": "Se conceden dentro de la propia automatización: ábrela y ve a la pestaña Permisos. Ahí está todo lo que necesita, con un botón que lo concede de golpe.",
+    "permissionsNothing": "Una automatización a la que no le has concedido nada no está rota ni va lenta: simplemente no hace nada, y no se queja. Si la tuya no ha hecho nunca nada, mira aquí primero.",
+    "historyTitle": "Cómo saber si funcionó",
+    "historyBody": "Abre la automatización y ve a Historial. Cada vez que se despertó hay una línea con el día y la hora, y debajo, en palabras, lo que hizo.",
+    "historyGuard": "«No se cumplió la condición, así que paró aquí» no es un fallo. Es la automatización funcionando: le dijiste que siguiera solo en ciertos casos, y este no era uno de ellos.",
+    "limitsTitle": "Lo que todavía no puede hacer",
+    "limitsBranches": "No hay bifurcaciones. Una automatización es una sola línea de pasos de arriba abajo, y es a propósito: si una condición no se cumple, para ahí — no coge un segundo camino. Dos desenlaces distintos son dos automatizaciones.",
+    "limitsChannels": "Todavía no puede escribirle a tu cliente. Los pasos que mandan un mensaje, preguntan al asistente o llaman a otro servicio ya funcionan dentro del hub, pero aún no hay pantalla para configurarlos: si una automatización ya trae uno, lo verás bloqueado.",
+    "limitsDates": "Tampoco sabe contar hacia atrás desde una fecha: «el día antes de la cita» es algo que aún no puede calcular. Sí puede esperar un rato desde que pasó algo, que no es lo mismo.",
+    "limitsInside": "Así que de momento una automatización trabaja de puertas adentro: te deja a ti y a tu equipo la nota, la tarea o el apunte, y quien habla con la gente es una persona.",
+    "shotGuard": "el ticket pasa de 100,00 €",
+    "shotAction": "Escribir una nota en la ficha del cliente",
+    "shotGrant": "Escribir una nota en la ficha del cliente",
+    "shotGrantDone": "Añadir una tarea a tu lista",
+    "shotWhen": "Ayer, 19:04"
   }
 }
