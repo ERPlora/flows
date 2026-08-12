@@ -2,7 +2,7 @@
   "id": "flows",
   "name": "Automations",
   "icon": "git-branch",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Automate repetitive work without writing code: appointment reminders, low-stock alerts and messages to customers that go out on their own.",
   "agent": {
     "description": "Visual editor for the hub automations (flows): create, edit, enable and pause automations that react to an event, a schedule or a manual trigger; grant them what they may do; and read their run history in plain language. It does not run the automations — the hub's own kernel does.",

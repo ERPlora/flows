@@ -1,7 +1,7 @@
 {
   "name": "@erplora/module-flows",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "description": "Módulo flows (editor visual del kernel de automatización, ADR-0283 / pm#110). Solo UI: no declara queries, commands ni migraciones — habla con `/api/hub/flows*` por la superficie tipada del SDK (hub#714). Se compila con @erplora/module-cli.",
   "dependencies": {
