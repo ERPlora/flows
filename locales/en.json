@@ -181,6 +181,97 @@
     "evStaffTimeOff": "somebody asks for time off",
     "stepGuardEmpty": "pick the condition",
     "pickFieldSkipArray": "not offered: it is a list, and an automation cannot reach inside one",
-    "pickFieldSkipObject": "not offered on its own: pick one of the fields inside it"
+    "pickFieldSkipObject": "not offered on its own: pick one of the fields inside it",
+    "tplLede": "Pick one of these and it becomes yours, switched off, ready for you to look at before it does anything.",
+    "sector_any": "Any business",
+    "sector_beauty": "Hair and beauty",
+    "sector_food": "Bars and restaurants",
+    "tplBlanksTitle": "What you decide",
+    "tplNoBlanks": "Nothing to fill in. It is ready as it is.",
+    "tplGrantsTitle": "What it will ask you to allow",
+    "tplGrantsIntro": "An automation runs with its own permissions, never with yours. Until you allow these, it does nothing.",
+    "tplNeedsModule": "This one needs the {modules} module, and this hub does not have it. Install it from the marketplace and it will work.",
+    "tplUnavailable": "Needs a module",
+    "tplUse": "Use this one",
+    "tplCreatedPaused": "It is created paused. Nothing happens until you turn it on.",
+    "tplYours": "Your automations",
+    "guideOpen": "How does this work?",
+    "guideBack": "Back to the automations"
+  },
+  "tpl": {
+    "author": "Automations",
+    "grant": {
+      "tasksCreate": "Create a task in your list. It stays inside the hub and never writes to a customer.",
+      "customersNote": "Add a note to a customer's history. It does not change their details and it does not contact them."
+    },
+    "welcome": {
+      "name": "Welcome every new customer",
+      "summary": "Somebody new goes into your customer list and you get a reminder to say hello.",
+      "plain": "When a new customer is added → wait one day → leave you the task of welcoming them.",
+      "blankWait": "How long to wait",
+      "blankWaitHint": "One day to start with. A welcome that arrives while they are still walking out of the door is the one nobody makes.",
+      "taskTitle": "Welcome {{input.name}}"
+    },
+    "bigSale": {
+      "name": "Write the big visits into the customer's card",
+      "summary": "Every time somebody spends more than the amount you choose, a note lands in their history.",
+      "plain": "When a sale is charged → only if it has a customer and comes to more than the amount you set → write a note in that customer's card.",
+      "blankAmount": "The amount that makes a sale a big one",
+      "blankAmountHint": "In cents: 10000 is 100,00 €. The hub keeps money in cents, so writing 100 here would mean one euro.",
+      "noteContent": "Big visit. Worth a personal welcome next time."
+    },
+    "morning": {
+      "name": "Every morning, go through tomorrow's diary",
+      "summary": "A task waiting for you first thing, so nobody's appointment goes unconfirmed.",
+      "plain": "Every day at 9:00 → leave you the task of going through tomorrow's appointments and confirming them.",
+      "blankTime": "The time",
+      "blankTimeHint": "09:00 to start with. Put it when you open, not when you are already busy.",
+      "taskTitle": "Go through tomorrow's appointments and confirm them"
+    },
+    "noShow": {
+      "name": "Whoever did not turn up does not get lost",
+      "summary": "The moment an appointment is marked as a no-show, calling them back becomes a task.",
+      "plain": "When an appointment is marked as a no-show → leave you the task of calling them and offering another time.",
+      "taskTitle": "Call whoever did not turn up and offer them another time"
+    },
+    "bigParty": {
+      "name": "Big tables get prepared",
+      "summary": "A large booking comes in and the room has its task before the day arrives.",
+      "plain": "When a reservation is taken → only if it is for more people than you set → leave the room the task of getting the table ready.",
+      "blankSize": "How many people make a table a big one",
+      "blankSizeHint": "Six to start with. Count the people, not the tables.",
+      "taskTitle": "Prepare the table for {{input.guest_name}} — {{input.party_size}} people",
+      "taskDescription": "{{input.date}} at {{input.time}}"
+    }
+  },
+  "guide": {
+    "title": "How automations work",
+    "whatTitle": "What an automation is",
+    "whatBody": "It is a rule you leave written down: when something happens in your business, the hub does something about it — on its own, every time, without anybody having to remember.",
+    "whatExample": "In a salon: the moment somebody is marked as not having turned up, a job appears on your list telling you to ring them and offer another time. Nobody has to notice. It is already there.",
+    "firstTitle": "Your first automation, step by step",
+    "firstBody": "The quickest way in is one of the ready-made ones on the first screen.",
+    "first1": "On the Automations screen, pick one from the gallery. Read the sentence underneath: that is exactly what it will do.",
+    "first2": "Press «Use this one». It becomes yours, and it is created switched off.",
+    "first3": "Fill in what it asked you to decide — an amount, a time, how long to wait. It always arrives with a sensible guess in place.",
+    "first4": "Go to Permissions and allow what it needs. Until you do, it does nothing at all.",
+    "first5": "Turn it on with the switch at the top. From that moment it is watching, day and night.",
+    "permissionsTitle": "Permissions: why you have to say yes",
+    "permissionsBody": "An automation works while you are not looking, so it never borrows your own permissions. It can only do the exact things you allowed it, one by one — that is what stops it from ever doing more than you meant.",
+    "permissionsWhere": "You allow them inside the automation itself: open it and go to the Permissions tab. Everything it needs is listed there, with one button that allows the lot.",
+    "permissionsNothing": "An automation you never allowed anything is not broken and it is not slow: it simply does nothing, and it will not complain. If yours has never done a thing, look here first.",
+    "historyTitle": "How to tell it worked",
+    "historyBody": "Open the automation and go to History. Every time it woke up there is a line with the day and the hour, and underneath it, in words, what it did.",
+    "historyGuard": "«The condition was not met, so it stopped here» is not a fault. That is the automation working: you told it to carry on only in certain cases, and this was not one of them.",
+    "limitsTitle": "What it cannot do yet",
+    "limitsBranches": "There are no forks. An automation is one line of steps from top to bottom, and that is on purpose: if a condition is not met it stops there — it does not take a second route. Two different outcomes means two automations.",
+    "limitsChannels": "It cannot write to your customer yet. The steps that send a message, ask the assistant or reach another service already work inside the hub, but there is no screen to set them up, so you will find them locked if an automation already has one.",
+    "limitsDates": "It cannot count backwards from a date either: «the day before the appointment» is not something it can work out yet. It can wait a while after something happened, which is not the same thing.",
+    "limitsInside": "So for now an automation works indoors: it leaves the note, the job or the record for you and your team, and a person does the talking.",
+    "shotGuard": "the ticket comes to more than 100,00 €",
+    "shotAction": "Write a note in the customer's card",
+    "shotGrant": "Write a note in the customer's card",
+    "shotGrantDone": "Add a job to your list",
+    "shotWhen": "Yesterday, 19:04"
   }
 }

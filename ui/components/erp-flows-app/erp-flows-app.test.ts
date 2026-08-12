@@ -118,10 +118,13 @@ describe('the list of automations', () => {
     expect(row.textContent).not.toContain('appointments.appointment.created');
   });
 
-  it('offers a first automation instead of an empty page', async () => {
+  // flows#1: what used to be here was an empty list with a «New automation» button — a blank
+  // canvas with an extra step. A hub with nothing automated yet opens on the gallery.
+  it('opens on the gallery of ready-made ones, never on an empty page', async () => {
     const client = fakeClient({ flows: { list: vi.fn(async () => []) } });
     const el = await mount(client);
-    expect(el.renderRoot.querySelector('ok-empty-state')).toBeTruthy();
+    expect(el.renderRoot.querySelector('erp-flows-gallery')).toBeTruthy();
+    expect(el.renderRoot.querySelector('ok-empty-state')).toBeNull();
   });
 
   it('pauses one WITHOUT touching what it does', async () => {
@@ -154,5 +157,76 @@ describe('the list of automations', () => {
     const editor = el.renderRoot.querySelector('erp-flows-editor') as { flow?: unknown };
     expect(editor).toBeTruthy();
     expect(editor.flow).toBeNull();
+  });
+});
+
+describe('the gallery is the way in (flows#1)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it('still shows the automations that already exist, above the gallery', async () => {
+    const el = await mount(fakeClient());
+    expect(el.renderRoot.querySelector('[data-flow="f1"]')).toBeTruthy();
+    expect(el.renderRoot.querySelector('erp-flows-gallery')).toBeTruthy();
+  });
+
+  // A flow with no grants does nothing at all, and does it in silence. Landing on the step list
+  // would leave the owner one hidden tab away from the only screen that makes it work — which is
+  // exactly the place pm#134 says people get stuck.
+  it('opens a brand new template on its PERMISSIONS, not on its steps', async () => {
+    const el = await mount(fakeClient());
+    const created = { id: 'from-template', name: 'x', enabled: false, definition: { steps: [] } };
+    el.renderRoot
+      .querySelector('erp-flows-gallery')!
+      .dispatchEvent(
+        new CustomEvent('flows-template-used', {
+          detail: { flow: created, needsGrants: true },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    await el.updateComplete;
+
+    const editor = el.renderRoot.querySelector('erp-flows-editor') as {
+      flow?: { id: string };
+      tab?: string;
+    };
+    expect(editor?.flow?.id).toBe('from-template');
+    expect(editor?.tab).toBe('permissions');
+  });
+
+  it('opens a template that asks for nothing on its steps', async () => {
+    const el = await mount(fakeClient());
+    el.renderRoot.querySelector('erp-flows-gallery')!.dispatchEvent(
+      new CustomEvent('flows-template-used', {
+        detail: { flow: { id: 'f9', name: 'x', enabled: false, definition: {} }, needsGrants: false },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    await el.updateComplete;
+    expect((el.renderRoot.querySelector('erp-flows-editor') as { tab?: string })?.tab).toBe('editor');
+  });
+});
+
+describe('the guide (pm#134)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it('opens from the gallery and comes back to it', async () => {
+    const el = await mount(fakeClient());
+    el.renderRoot
+      .querySelector('erp-flows-gallery')!
+      .dispatchEvent(new CustomEvent('flows-open-guide', { bubbles: true, composed: true }));
+    await el.updateComplete;
+    const guide = el.renderRoot.querySelector('erp-flows-guide');
+    expect(guide).toBeTruthy();
+
+    guide!.dispatchEvent(new CustomEvent('flows-guide-close', { bubbles: true, composed: true }));
+    await el.updateComplete;
+    expect(el.renderRoot.querySelector('erp-flows-guide')).toBeNull();
+    expect(el.renderRoot.querySelector('erp-flows-gallery')).toBeTruthy();
   });
 });

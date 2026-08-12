@@ -13,6 +13,14 @@ cada noche.
 Tú decides además **qué puede tocar** cada automatización: se conceden permisos uno a uno, y el
 historial deja por escrito, en lenguaje llano, todo lo que hizo.
 
+Al abrirlo **no te encuentras una pantalla en blanco**: hay una galería de automatizaciones ya
+hechas, por sector, que se eligen de una en una. La que elijas se crea **apagada**, con lo que
+tienes que decidir señalado y con los permisos que necesita explicados **antes** de encenderla.
+
+Y hay una **guía dentro del propio módulo** («¿Cómo funciona esto?», en la galería): qué es una
+automatización, tu primera paso a paso, los permisos, cómo saber si funcionó y —sin adornos— lo
+que todavía no puede hacer.
+
 > Es de la casa, **gratis**, y aparece en el menú como **Automatizaciones**. Al instalarlo te pide
 > un permiso (*Administrar automatizaciones*): sin él el editor no abre — se concede en
 > **Ajustes → Permisos**.
@@ -72,8 +80,10 @@ módulo se actualiza por su cuenta, así que una copia sería la foto del hub co
 | Selector de datos con **valores reales** del hub (`GET /api/hub/events/shape`, hub#715) | ✅ |
 | Conceder/retirar permisos (`grants`) desde la UI | ✅ |
 | Historial de ejecuciones en lenguaje llano | ✅ |
+| **Galería de plantillas por sector** — la entrada del módulo (flows#1) | ✅ |
+| **Guía del dueño** dentro del módulo (pm#134) | ✅ |
 | Steps `http` · `ai` · `notify` | 👀 se **abren en solo lectura** y se guardan intactos |
-| Galería de plantillas · «Probar» antes de activar · borrador por IA | ⛔ fuera de esta entrega |
+| «Probar» antes de activar · borrador por IA | ⛔ fuera de esta entrega |
 
 Un documento que este editor no sabe editar del todo **se abre igual**: pintarlo sin un step y
 después guardarlo es como se borra en silencio una automatización que funcionaba.
@@ -87,7 +97,10 @@ ui/lib/flow-doc.ts          el documento y el lenguaje de mapeo (puro, sin DOM)
 ui/lib/plain-language.ts    todo lo que el dueño lee, en palabras
 ui/lib/trigger-catalog.ts   los eventos que se ofrecen (el hub es la autoridad, no este fichero)
 ui/lib/hub-flows.ts         la puerta al kernel + los tipos de la superficie
-ui/components/erp-flows-app          la pantalla que monta el shell: puerta + lista
+ui/lib/templates.ts         las plantillas de la galería (documento + huecos + permisos)
+ui/components/erp-flows-app          la pantalla que monta el shell: puerta + lista + galería
+ui/components/erp-flows-gallery      la galería por sector y el panel que explica una plantilla
+ui/components/erp-flows-guide        la guía del dueño (vive aquí porque `docs/` NO viaja en el zip)
 ui/components/erp-flows-editor       la espina vertical
 ui/components/erp-flows-value        un valor compuesto de texto y pills
 ui/components/erp-flows-field-picker el selector de datos, con ejemplos REALES

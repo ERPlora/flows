@@ -10,8 +10,6 @@
 
 ## Fuera de esta entrega (v1)
 
-- **Galería de plantillas.** La entrada sigue siendo la lista con su estado vacío. Las plantillas
-  sectoriales van con los blueprints y llegan después.
 - **«Probar» antes de activar** contra la última venta/cita real. Probablemente la función de más
   valor del editor (Brackenbury et al., CHI 2019: la gente **no** predice bien el comportamiento
   de un flujo con un fallo, ni leyéndolo). Necesita `POST …/run` con un input sintetizado y una
@@ -23,6 +21,22 @@
   Un `http` necesita además la pantalla de secretos (write-only) y los grants por patrón de URL;
   un `ai`, la de aprobaciones. Cada una es su propia entrega.
 - **La bandeja de aprobación** (`GET …/approvals`) como pantalla.
+
+## Lo que la galería NO ofrece, y por qué (flows#1)
+
+Las dos plantillas que todo el mundo pide primero **no se pueden construir** con el motor de hoy, y
+por eso no están: ofrecerlas sería vender algo que no funciona.
+
+- **«Recordar la cita el día antes».** El `delay` del kernel espera **desde ahora**, no hasta una
+  fecha que venga en el evento, y el lenguaje de mapeo no hace aritmética con fechas. Lo más
+  parecido que sí funciona —y que está en la galería— es un disparador de reloj: cada mañana, la
+  tarea de repasar la agenda de mañana.
+- **«Avisar cuando el stock baje de X».** `inventory.stock_changed` lleva `{product_id, qty}` —
+  **lo que se ha movido**, no las existencias que quedan (verificado contra un hub real). No hay
+  evento de nivel de stock; `inventory.products.low_stock` es una **query**, y el motor v1 no tiene
+  paso de lectura ni grants de tipo `query`.
+
+Las dos se nombran en la guía del dueño, en «Lo que todavía no puede hacer».
 
 ## Limitaciones que son deuda del hub, no de este módulo
 
