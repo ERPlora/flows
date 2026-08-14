@@ -23,6 +23,14 @@ function fakeClient(overrides: Record<string, unknown> = {}) {
       runs: vi.fn(async () => ({ data: [] })),
       getRun: vi.fn(async () => ({ run: {}, steps: [], events: [] })),
       schema: vi.fn(async () => ({ schema_version: 1, core_version: '1.0.2', schema: {} })),
+      // Write-only by contract: names come back, values never do — there is no `getSecret`, and
+      // the tests below assert that absence rather than trusting it.
+      secrets: vi.fn(async () => []),
+      putSecret: vi.fn(async (name: string) => ({ name })),
+      deleteSecret: vi.fn(async () => ({ deleted: true })),
+      approvals: vi.fn(async () => []),
+      approve: vi.fn(async () => ({})),
+      reject: vi.fn(async () => ({})),
       ...(overrides.flows as object),
     },
     events: { shape: vi.fn(async () => SHAPE), ...(overrides.events as object) },
@@ -118,19 +126,345 @@ describe('the spine: one column, top to bottom', () => {
     expect(node.textContent).toContain('ui.delayDays:3');
   });
 
-  it('opens a step it cannot edit, read-only, instead of dropping it', async () => {
-    // A flow written by a newer editor (or a blueprint) can carry `http`/`ai`/`notify`. Rendering
-    // the document without them and then SAVING would delete a working step in silence.
+  it('opens a step from a NEWER editor read-only, instead of dropping it', async () => {
+    // A flow written by a newer editor (or a blueprint) can carry a step this one has never heard
+    // of. Rendering the document without it and then SAVING would delete a working step in silence.
     const el = await mount(
       flowWith([
-        { id: 'h', kind: 'http', url: 'https://api.example.com/x' },
+        { id: 'h', kind: 'teleport', target: 'mars' },
         { id: 'a', kind: 'command', command: 'one' },
       ]),
     );
     const node = el.renderRoot.querySelector('[data-node="h"]')!;
-    expect(node.textContent).toContain('ui.stepUnsupported:http');
+    expect(node.textContent).toContain('ui.stepUnsupported:teleport');
     expect(node.querySelector('button[data-act="remove"]')).toBeTruthy();
-    expect(el.document.steps.map((s) => s.kind)).toEqual(['http', 'command']);
+    expect(el.document.steps.map((s) => s.kind)).toEqual(['teleport', 'command']);
+  });
+});
+
+describe('the http step (flows#3)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const openStep = async (el: ErpFlowsEditor, id: string): Promise<Element> => {
+    (el.renderRoot.querySelector(`[data-node="${id}"] button.open`) as HTMLButtonElement).click();
+    await el.updateComplete;
+    return el.renderRoot.querySelector(`[data-node="${id}"] .panel`)!;
+  };
+
+  it('opens for EDITING now, not read-only', async () => {
+    const el = await mount(flowWith([{ id: 'h', kind: 'http', method: 'GET', url: 'https://a.test/x' }]));
+    const panel = await openStep(el, 'h');
+    expect(panel.textContent).not.toContain('ui.readOnlyStep');
+    expect(panel.querySelector('select[data-field="method"]')).toBeTruthy();
+  });
+
+  it('offers only the five methods the kernel accepts', async () => {
+    // `CONNECT` and `TRACE` are absent by design: they are how a permitted URL becomes a tunnel.
+    const el = await mount(flowWith([{ id: 'h', kind: 'http', url: 'https://a.test/x' }]));
+    const panel = await openStep(el, 'h');
+    const methods = Array.from(
+      panel.querySelectorAll('select[data-field="method"] option'),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(methods).toEqual(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
+  });
+
+  it('writes the URL as a TEMPLATE, never as a bare path', async () => {
+    const el = await mount(flowWith([{ id: 'h', kind: 'http', url: '' }]));
+    const panel = await openStep(el, 'h');
+    const box = panel.querySelector('erp-flows-value[data-field="url"]')!;
+    box.dispatchEvent(
+      new CustomEvent('flows-value-change', {
+        detail: { parts: [{ kind: 'field', path: 'input.endpoint' }] },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    await el.updateComplete;
+    expect(el.document.steps[0].url).toBe('{{input.endpoint}}');
+  });
+
+  it('refuses a timeout the hub would reject, instead of letting the save fail', async () => {
+    const el = await mount(flowWith([{ id: 'h', kind: 'http', url: 'https://a.test/x' }]));
+    const panel = await openStep(el, 'h');
+    const input = panel.querySelector('input[data-field="timeout"]') as HTMLInputElement;
+    input.value = '90';
+    input.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.document.steps[0].timeout).toBe(30);
+  });
+
+  it('never writes a key the kernel would refuse at save', async () => {
+    // `def.rs` is a STRICT whitelist per kind. One stray key and the whole document is refused.
+    const el = await mount(flowWith([{ id: 'h', kind: 'http', url: 'https://a.test/x' }]));
+    const panel = await openStep(el, 'h');
+    (panel.querySelector('button[data-act="add-header"]') as HTMLButtonElement).click();
+    await el.updateComplete;
+    const allowed = ['id', 'kind', 'method', 'url', 'headers', 'body', 'timeout'];
+    expect(Object.keys(el.document.steps[0]).filter((k) => !allowed.includes(k))).toEqual([]);
+  });
+});
+
+describe('secrets: the credential the owner has to put somewhere (flows#3)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const httpFlow = () => flowWith([{ id: 'h', kind: 'http', url: 'https://a.test/x', headers: {} }]);
+
+  const openHttp = async (el: ErpFlowsEditor): Promise<Element> => {
+    (el.renderRoot.querySelector('[data-node="h"] button.open') as HTMLButtonElement).click();
+    await el.updateComplete;
+    await Promise.resolve();
+    await el.updateComplete;
+    return el.renderRoot.querySelector('[data-node="h"] .panel')!;
+  };
+
+  it('lists the NAMES the hub holds, because there is no endpoint that returns a value', async () => {
+    const client = fakeClient({
+      flows: { secrets: vi.fn(async () => [{ name: 'STRIPE_KEY' }, { name: 'CRM_TOKEN' }]) },
+    });
+    const el = await mount(httpFlow(), client);
+    const panel = await openHttp(el);
+    expect(panel.textContent).toContain('STRIPE_KEY');
+    expect(panel.textContent).toContain('CRM_TOKEN');
+  });
+
+  it('never shows a secret VALUE, and never asks the hub for one', async () => {
+    // The absence of a read endpoint IS the design (ADR-0283 §4). The editor must not grow a
+    // «reveal» affordance that then has nothing to reveal.
+    const client = fakeClient({
+      flows: { secrets: vi.fn(async () => [{ name: 'STRIPE_KEY' }]) },
+    });
+    const el = await mount(httpFlow(), client);
+    const panel = await openHttp(el);
+    // The positive control FIRST: without it, «there is no reveal button» would also be true of a
+    // panel that failed to render at all, and the test would pass by describing nothing.
+    expect(panel.textContent).toContain('STRIPE_KEY');
+    expect(panel.querySelector('[data-act="delete-secret"]')).toBeTruthy();
+    expect(panel.querySelector('[data-act="reveal-secret"]')).toBeNull();
+    expect(Object.keys(client.flows)).not.toContain('getSecret');
+  });
+
+  it('stores a new secret write-only and forgets the value it just typed', async () => {
+    const putSecret = vi.fn(async () => ({ name: 'STRIPE_KEY' }));
+    const client = fakeClient({ flows: { secrets: vi.fn(async () => []), putSecret } });
+    const el = await mount(httpFlow(), client);
+    const panel = await openHttp(el);
+    (panel.querySelector('input[data-field="secret-name"]') as HTMLInputElement).value = 'STRIPE_KEY';
+    (panel.querySelector('input[data-field="secret-name"]') as HTMLInputElement).dispatchEvent(
+      new Event('input'),
+    );
+    (panel.querySelector('input[data-field="secret-value"]') as HTMLInputElement).value = 'sk_live_x';
+    (panel.querySelector('input[data-field="secret-value"]') as HTMLInputElement).dispatchEvent(
+      new Event('input'),
+    );
+    await el.updateComplete;
+    (panel.querySelector('button[data-act="save-secret"]') as HTMLButtonElement).click();
+    await el.updateComplete;
+    await Promise.resolve();
+    await el.updateComplete;
+    expect(putSecret).toHaveBeenCalledWith('STRIPE_KEY', 'sk_live_x');
+    // The value must not survive in the component after the round trip: a re-render that put it
+    // back in a box is a credential sitting on a shop counter's screen.
+    expect(el.renderRoot.textContent).not.toContain('sk_live_x');
+    const value = el.renderRoot.querySelector('input[data-field="secret-value"]') as HTMLInputElement;
+    expect(value?.value ?? '').toBe('');
+  });
+
+  it('offers a secret ONLY inside an http step, which is the only place it is legal', async () => {
+    // `secret.X` in any other step is refused at SAVE. Offering it there would be the editor
+    // teaching a syntax that makes the document unsavable.
+    const client = fakeClient({ flows: { secrets: vi.fn(async () => [{ name: 'K' }]) } });
+    const el = await mount(
+      flowWith([
+        { id: 'h', kind: 'http', url: 'https://a.test/x' },
+        { id: 'c', kind: 'command', command: 'tasks.tasks.create', params: { a: 'b' } },
+      ]),
+      client,
+    );
+    await openHttp(el);
+    expect(el.renderRoot.querySelector('[data-node="h"] [data-act="insert-secret"]')).toBeTruthy();
+    (el.renderRoot.querySelector('[data-node="c"] button.open') as HTMLButtonElement).click();
+    await el.updateComplete;
+    expect(el.renderRoot.querySelector('[data-node="c"] [data-act="insert-secret"]')).toBeNull();
+  });
+});
+
+describe('the ai step (flows#3)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const open = async (el: ErpFlowsEditor): Promise<Element> => {
+    (el.renderRoot.querySelector('[data-node="a"] button.open') as HTMLButtonElement).click();
+    await el.updateComplete;
+    return el.renderRoot.querySelector('[data-node="a"] .panel')!;
+  };
+
+  it('defaults a new ai step to asking first', async () => {
+    const el = await mount(flowWith([]));
+    (el.renderRoot.querySelector('.adders button[data-add="ai"]') as HTMLButtonElement).click();
+    await el.updateComplete;
+    const step = el.document.steps.find((s) => s.kind === 'ai');
+    expect(step?.policy).toBe('manual');
+  });
+
+  it('SAYS what turning approval off means, where the switch is', async () => {
+    // `auto` means a model writing to the business at 3 AM with nobody watching. A select with two
+    // words and no sentence is how that gets picked by accident.
+    const el = await mount(flowWith([{ id: 'a', kind: 'ai', prompt: 'x', policy: 'auto' }]));
+    const panel = await open(el);
+    expect(panel.textContent).toContain('ui.aiPolicyAutoWarning');
+  });
+
+  it('keeps max_iters inside the cap the kernel refuses above', async () => {
+    const el = await mount(flowWith([{ id: 'a', kind: 'ai', prompt: 'x', max_iters: 6 }]));
+    const panel = await open(el);
+    const input = panel.querySelector('input[data-field="max-iters"]') as HTMLInputElement;
+    input.value = '50';
+    input.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.document.steps[0].max_iters).toBe(10);
+  });
+
+  it('says a tool is offered, NOT allowed — the grant is a separate decision', async () => {
+    const el = await mount(
+      flowWith([
+        { id: 'a', kind: 'ai', prompt: 'x', tools: { queries: ['sales.sale.list'], commands: [] } },
+      ]),
+    );
+    const panel = await open(el);
+    expect(panel.textContent).toContain('ui.aiToolsHint');
+  });
+
+  it('adds a tool without inventing a key the kernel refuses', async () => {
+    const el = await mount(flowWith([{ id: 'a', kind: 'ai', prompt: 'x' }]));
+    const panel = await open(el);
+    (panel.querySelector('button[data-act="add-query"]') as HTMLButtonElement).click();
+    await el.updateComplete;
+    const allowed = ['id', 'kind', 'prompt', 'tools', 'policy', 'max_iters'];
+    expect(Object.keys(el.document.steps[0]).filter((k) => !allowed.includes(k))).toEqual([]);
+    expect(Object.keys(el.document.steps[0].tools ?? {}).sort()).toEqual(['commands', 'queries']);
+  });
+});
+
+describe('the notify step (flows#3)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const open = async (el: ErpFlowsEditor): Promise<Element> => {
+    (el.renderRoot.querySelector('[data-node="n"] button.open') as HTMLButtonElement).click();
+    await el.updateComplete;
+    return el.renderRoot.querySelector('[data-node="n"] .panel')!;
+  };
+
+  const notifyFlow = () =>
+    flowWith([
+      {
+        id: 'n',
+        kind: 'notify',
+        channel: 'email',
+        to: { query: 'customers.customer.get', params: {}, field: 'email' },
+        vars: {},
+      },
+    ]);
+
+  it('offers the two channels that have a transport, and NOT sms', async () => {
+    // `sms` is in ADR-0012's vocabulary and is refused by name at save and at grant time. Offering
+    // it would be a step that can never be delivered, chosen from a list that looked complete.
+    const el = await mount(notifyFlow());
+    const panel = await open(el);
+    const channels = Array.from(
+      panel.querySelectorAll('select[data-field="channel"] option'),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(channels).toEqual(['email', 'whatsapp']);
+  });
+
+  it('has NO way to type an address by hand, and that absence is the point', async () => {
+    // Without it, an author (or a marketplace template) would write `to: "{{input.email}}"` and
+    // send the message to whatever the event payload carried.
+    const el = await mount(notifyFlow());
+    const panel = await open(el);
+    expect(panel.querySelector('input[type="email"]')).toBeNull();
+    expect(panel.querySelector('[data-field="to-literal"]')).toBeNull();
+    expect(panel.querySelector('[data-field="to-query"]')).toBeTruthy();
+    expect(panel.querySelector('[data-field="to-field"]')).toBeTruthy();
+  });
+
+  it('keeps `to` an object, because the document does not save otherwise', async () => {
+    const el = await mount(notifyFlow());
+    const panel = await open(el);
+    const field = panel.querySelector('input[data-field="to-field"]') as HTMLInputElement;
+    field.value = 'phone';
+    field.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.document.steps[0].to).toEqual({
+      query: 'customers.customer.get',
+      params: {},
+      field: 'phone',
+    });
+  });
+
+  it('warns that WhatsApp is the one that costs money every time', async () => {
+    const el = await mount(
+      flowWith([
+        { id: 'n', kind: 'notify', channel: 'whatsapp', to: { query: 'q', params: {}, field: 'phone' } },
+      ]),
+    );
+    const panel = await open(el);
+    expect(panel.textContent).toContain('ui.notifyWhatsappCost');
+  });
+
+  it('composes the message with pills, which is what this box was built for', async () => {
+    const el = await mount(notifyFlow());
+    const panel = await open(el);
+    const box = panel.querySelector('erp-flows-value[data-field="var-text"]')!;
+    box.dispatchEvent(
+      new CustomEvent('flows-value-change', {
+        detail: {
+          parts: [
+            { kind: 'text', text: 'Hola ' },
+            { kind: 'field', path: 'input.name' },
+          ],
+        },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    await el.updateComplete;
+    expect((el.document.steps[0].vars as Record<string, unknown>).text).toBe('Hola {{input.name}}');
+  });
+});
+
+describe('the permissions tab, for the three steps it used to ignore (flows#3)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it('asks for every grant the new steps need, instead of «nothing yet»', async () => {
+    // This is the failure that mattered: a flow with an http step read «this automation asks for
+    // nothing» on the one screen whose job is to say what it needs to run at all.
+    const el = await mount(
+      flowWith([
+        { id: 'h', kind: 'http', url: 'https://api.example.com/v1/orders' },
+        {
+          id: 'n',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: { query: 'customers.customer.get', field: 'phone' },
+        },
+      ]),
+    );
+    el.tab = 'permissions';
+    await el.updateComplete;
+    const text = el.renderRoot.textContent ?? '';
+    expect(text).toContain('https://api.example.com/v1/orders*');
+    expect(text).toContain('whatsapp');
+    expect(text).toContain('customers.customer.get#phone');
+    expect(text).not.toContain('ui.grantsNone');
   });
 });
 

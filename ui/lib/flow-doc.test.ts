@@ -14,6 +14,8 @@ import {
   missingGrants,
   mergeGrants,
   isSpineKind,
+  partsToTemplate,
+  httpPatternFor,
 } from './flow-doc';
 
 describe('the document a flow is', () => {
@@ -190,14 +192,198 @@ describe('what a flow needs permission to do', () => {
 });
 
 describe('what the spine can draw', () => {
-  it('draws the three kinds this editor owns, and refuses to pretend about the rest', () => {
-    // `http` and `ai` are real steps of the kernel; this editor does not edit them yet. A flow
-    // that has one must still OPEN — read-only — instead of being silently rewritten without it.
-    expect(isSpineKind('command')).toBe(true);
-    expect(isSpineKind('condition')).toBe(true);
-    expect(isSpineKind('delay')).toBe(true);
-    expect(isSpineKind('http')).toBe(false);
-    expect(isSpineKind('ai')).toBe(false);
-    expect(isSpineKind('notify')).toBe(false);
+  it('draws all SIX kinds the kernel executes (flows#3)', () => {
+    // Until flows#3 the last three opened read-only, which meant the owner could see the step and
+    // not fix it. All six are editable now; anything else is still a document from a newer editor
+    // and must open untouched rather than be rewritten without it.
+    for (const kind of ['command', 'condition', 'delay', 'http', 'ai', 'notify']) {
+      expect(isSpineKind(kind), kind).toBe(true);
+    }
+    expect(isSpineKind('whatever-comes-next')).toBe(false);
+  });
+});
+
+describe('a step is born with exactly the keys the kernel allows', () => {
+  // `def.rs:1018-1025` is a STRICT whitelist per kind and an unknown key is refused at save. A
+  // blank step carrying a stray field would make the very first save fail on a document the owner
+  // never typed into.
+  const KEYS: Record<string, string[]> = {
+    command: ['id', 'kind', 'command', 'params'],
+    condition: ['id', 'kind', 'when'],
+    delay: ['id', 'kind', 'seconds', 'until'],
+    http: ['id', 'kind', 'method', 'url', 'headers', 'body', 'timeout'],
+    ai: ['id', 'kind', 'prompt', 'tools', 'policy', 'max_iters'],
+    notify: ['id', 'kind', 'channel', 'to', 'template', 'vars'],
+  };
+
+  for (const [kind, allowed] of Object.entries(KEYS)) {
+    it(`a blank ${kind} step declares nothing the hub would refuse`, () => {
+      const doc = addStep(emptyDoc(), kind as never);
+      expect(Object.keys(doc.steps[0]).filter((k) => !allowed.includes(k))).toEqual([]);
+    });
+  }
+
+  it('a new http step is a GET, because the harmless verb is the one to default to', () => {
+    const step = addStep(emptyDoc(), 'http').steps[0];
+    expect(step.method).toBe('GET');
+    expect(step.url).toBe('');
+  });
+
+  it('a new ai step asks for approval, exactly as the kernel defaults', () => {
+    // `policy` defaults to `manual` in def.rs and the default is the RESTRICTIVE one on purpose.
+    // Writing it out loud is the point: the permissive option is the one nobody types and
+    // everybody assumes, and here it means a model writing to the business at 3 AM.
+    const step = addStep(emptyDoc(), 'ai').steps[0];
+    expect(step.policy).toBe('manual');
+    expect(step.max_iters).toBe(6);
+    expect(step.tools).toEqual({ queries: [], commands: [] });
+  });
+
+  it('a new notify step has NO recipient, because there is no default person to write to', () => {
+    const step = addStep(emptyDoc(), 'notify').steps[0];
+    expect(step.channel).toBe('email');
+    expect(step.to).toEqual({ query: '', params: {}, field: '' });
+  });
+});
+
+describe('a URL is always a template, never a bare path', () => {
+  // `url` is `type: string` in the schema. A lone field would be stored as the bare path
+  // `input.endpoint`, which the kernel reads as a LITERAL URL and refuses — the one place where
+  // the type-preserving rule of `partsToValue` is the wrong rule.
+  it('wraps a single field in braces instead of writing it bare', () => {
+    expect(partsToTemplate([{ kind: 'field', path: 'input.endpoint' }])).toBe('{{input.endpoint}}');
+  });
+
+  it('joins text and fields the way the kernel templates them', () => {
+    expect(
+      partsToTemplate([
+        { kind: 'text', text: 'https://api.example.com/orders/' },
+        { kind: 'field', path: 'input.order_id' },
+      ]),
+    ).toBe('https://api.example.com/orders/{{input.order_id}}');
+  });
+
+  it('an empty composition is an empty string, not the word undefined in a URL bar', () => {
+    expect(partsToTemplate([])).toBe('');
+  });
+});
+
+describe('a secret is written the ONE way the kernel documents', () => {
+  it('always templates a secret, even when it is the only thing in the box', () => {
+    // `{{secret.X}}` is the documented form (flows.md §4). A bare `secret.API_KEY` may well
+    // resolve too, but «may well» is exactly the kind of silent difference that ships a header
+    // carrying the literal eighteen characters of a path — the bug hub#662 already lived once.
+    expect(partsToValue([{ kind: 'field', path: 'secret.API_KEY' }])).toBe('{{secret.API_KEY}}');
+    expect(
+      partsToValue([
+        { kind: 'text', text: 'Bearer ' },
+        { kind: 'field', path: 'secret.API_KEY' },
+      ]),
+    ).toBe('Bearer {{secret.API_KEY}}');
+  });
+
+  it('reads that form back into the pill it was written from', () => {
+    expect(valueToParts('{{secret.API_KEY}}')).toEqual([{ kind: 'field', path: 'secret.API_KEY' }]);
+  });
+});
+
+describe('what a flow with the other three steps needs permission to do', () => {
+  // Before flows#3 `requiredGrants` only ever looked at `command` steps, so the Permissions tab of
+  // a flow with an `http`, an `ai` or a `notify` step said «this automation asks for nothing yet»
+  // about a flow that could not run a single step. Reading «allowed» about a flow that is not is
+  // the worst possible thing for this screen to do.
+  const doc = readDoc({
+    schema_version: 1,
+    triggers: [{ kind: 'manual' }],
+    steps: [
+      { id: 's1', kind: 'http', method: 'POST', url: 'https://api.example.com/v1/orders' },
+      {
+        id: 's2',
+        kind: 'ai',
+        prompt: 'summarise',
+        tools: { queries: ['sales.sale.list'], commands: ['tasks.tasks.create'] },
+      },
+      {
+        id: 's3',
+        kind: 'notify',
+        channel: 'whatsapp',
+        to: { query: 'customers.customer.get', field: 'phone' },
+      },
+    ],
+  });
+
+  it('asks for the http grant as a PATTERN the hub will accept', () => {
+    expect(requiredGrants(doc)).toContainEqual({
+      kind: 'http',
+      value: 'https://api.example.com/v1/orders*',
+    });
+  });
+
+  it('asks for a grant per ai tool, because offering a tool is not authorising it', () => {
+    expect(requiredGrants(doc)).toContainEqual({ kind: 'query', value: 'sales.sale.list' });
+    expect(requiredGrants(doc)).toContainEqual({ kind: 'command', value: 'tasks.tasks.create' });
+  });
+
+  it('asks for the channel and the recipient SEPARATELY, because they are two decisions', () => {
+    // Meta charges for every WhatsApp and an email is free: allowing the reminder by email is not
+    // agreeing to pay for it by WhatsApp. And allowing the channel says nothing about who is written to.
+    expect(requiredGrants(doc)).toContainEqual({ kind: 'notify', value: 'whatsapp' });
+    expect(requiredGrants(doc)).toContainEqual({
+      kind: 'recipient_query',
+      value: 'customers.customer.get#phone',
+    });
+  });
+
+  it('asks for nothing it cannot name yet, so a half-typed step does not invent a grant', () => {
+    const half = readDoc({
+      schema_version: 1,
+      steps: [
+        { id: 's1', kind: 'http', url: '' },
+        { id: 's2', kind: 'notify', channel: 'email', to: { query: '', field: '' } },
+        { id: 's3', kind: 'ai', prompt: '', tools: { queries: [''], commands: [] } },
+      ],
+    });
+    // The channel is the one thing that IS known: it is picked from a closed list, never typed.
+    expect(requiredGrants(half)).toEqual([{ kind: 'notify', value: 'email' }]);
+  });
+});
+
+describe('the http grant pattern suggested from a URL', () => {
+  // `check_http_pattern` refuses a pattern with no concrete host, with no path, or written in any
+  // form other than the one it will be compared in. A suggestion that gets refused at grant time
+  // is worse than no suggestion: the owner reads it as a permission they already gave.
+  it('covers the endpoint and nothing above it', () => {
+    expect(httpPatternFor('https://api.example.com/v1/orders')).toBe(
+      'https://api.example.com/v1/orders*',
+    );
+  });
+
+  it('stops at the first template, because what follows is whatever the event brought', () => {
+    expect(httpPatternFor('https://api.example.com/v1/orders/{{input.id}}')).toBe(
+      'https://api.example.com/v1/orders/*',
+    );
+  });
+
+  it('refuses to guess when the HOST itself is templated', () => {
+    // A pattern without a concrete host is refused by the hub (`flow.invalid_http_pattern`) and
+    // would be meaningless anyway: it authorises every host the payload can name.
+    expect(httpPatternFor('{{input.base}}/orders')).toBe('');
+    expect(httpPatternFor('https://{{input.host}}/orders')).toBe('');
+  });
+
+  it('never suggests a bare origin, which the hub refuses for having no path', () => {
+    expect(httpPatternFor('https://api.example.com')).toBe('https://api.example.com/*');
+    expect(httpPatternFor('https://api.example.com/')).toBe('https://api.example.com/*');
+  });
+
+  it('drops the query string: the grant is compared against the resolved PATH', () => {
+    expect(httpPatternFor('https://api.example.com/v1/orders?since=today')).toBe(
+      'https://api.example.com/v1/orders*',
+    );
+  });
+
+  it('says nothing about a URL that is not one yet', () => {
+    expect(httpPatternFor('')).toBe('');
+    expect(httpPatternFor('not a url')).toBe('');
   });
 });

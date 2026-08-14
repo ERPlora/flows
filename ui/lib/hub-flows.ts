@@ -69,6 +69,40 @@ export interface EventShape {
   fields: EventFieldShape[];
 }
 
+/**
+ * A secret, as `GET /api/hub/flows/secrets` answers: **the name and when it was touched, never
+ * the value**. There is no endpoint that returns a value, and that absence is the design
+ * (ADR-0283 §4) — so there is no field here to hold one, on purpose.
+ */
+export interface SecretInfo {
+  name: string;
+  created_at?: string;
+  updated_at?: string;
+  updated_by?: string;
+}
+
+/**
+ * One proposal an `ai` step made under `policy: manual`, waiting for a person.
+ *
+ * Without a screen for these, a `policy: manual` step leaves proposals hanging where nobody sees
+ * them — the run sits in `waiting_approval` until its 72-hour TTL quietly expires it.
+ */
+export interface Approval {
+  id: string;
+  run_id?: string;
+  flow_id?: string;
+  step_id?: string;
+  command?: string;
+  payload?: Record<string, unknown>;
+  reason?: string;
+  status?: string;
+  decided_by?: string;
+  decided_at?: string;
+  expires_at?: string;
+  error?: string;
+  created_at?: string;
+}
+
 /** The frozen §9 method list, as this module uses it. */
 export interface FlowsApi {
   list(): Promise<Flow[]>;
@@ -82,6 +116,13 @@ export interface FlowsApi {
   runs(id: string, page?: { limit?: number; before?: string }): Promise<RunPage>;
   getRun(runId: string): Promise<unknown>;
   schema(): Promise<FlowSchema>;
+  /** Names only. **There is deliberately no `getSecret`** — see {@link SecretInfo}. */
+  secrets?(): Promise<SecretInfo[]>;
+  putSecret?(name: string, value: string): Promise<unknown>;
+  deleteSecret?(name: string): Promise<unknown>;
+  approvals?(status?: string): Promise<Approval[]>;
+  approve?(id: string, body?: Record<string, unknown>): Promise<unknown>;
+  reject?(id: string, body?: Record<string, unknown>): Promise<unknown>;
 }
 
 export interface EventsApi {

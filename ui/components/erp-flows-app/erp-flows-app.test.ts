@@ -230,3 +230,46 @@ describe('the guide (pm#134)', () => {
     expect(el.renderRoot.querySelector('erp-flows-gallery')).toBeTruthy();
   });
 });
+
+describe('the approval tray on the automations screen (flows#3)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+    (globalThis as { erplora?: unknown }).erplora = undefined;
+  });
+
+  it('shows the tray ABOVE the list when something is waiting on a person', async () => {
+    // A proposal from a `policy: manual` ai step parks its run in `waiting_approval` and dies on
+    // its own after 72 hours. Putting the tray behind a tab nobody opens is the same as not
+    // having one — so it goes at the top of the screen the owner already lands on.
+    const approvals = vi.fn(async () => [
+      { id: 'ap1', command: 'customers.notes.add', payload: {}, status: 'pending' },
+    ]);
+    const el = await mount(fakeClient({ flows: { approvals } }));
+    await Promise.resolve();
+    await el.updateComplete;
+    const tray = el.renderRoot.querySelector('erp-flows-approvals');
+    expect(tray).toBeTruthy();
+    const body = el.renderRoot.querySelector('.body')!;
+    const nodes = Array.from(body.children);
+    expect(nodes.indexOf(tray!)).toBeLessThan(
+      nodes.findIndex((n) => n.classList.contains('list')),
+    );
+  });
+
+  it('does NOT take over the screen when nothing is waiting', async () => {
+    // An empty tray with a heading is a permanent box saying «nothing here», on the screen whose
+    // job is to show the automations. It appears only when it has something to say.
+    const el = await mount(fakeClient({ flows: { approvals: vi.fn(async () => []) } }));
+    await Promise.resolve();
+    await el.updateComplete;
+    expect(el.renderRoot.querySelector('erp-flows-approvals')).toBeNull();
+  });
+
+  it('survives a hub whose core cannot answer about approvals', async () => {
+    const el = await mount(fakeClient({ flows: { approvals: undefined } }));
+    await Promise.resolve();
+    await el.updateComplete;
+    // The list is still there: an older core costs the tray, never the screen.
+    expect(el.renderRoot.querySelector('.flow')).toBeTruthy();
+  });
+});

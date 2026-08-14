@@ -8,9 +8,9 @@
  *
  * Three rules decide what may be in here, and each one is a way of not lying to somebody:
  *
- * 1. **Only steps this editor can edit.** `http`, `ai` and `notify` open READ-ONLY (they exist in
- *    the kernel, the screen for them is `flows#3`). A template carrying one would hand the owner an
- *    automation with a card they cannot finish, which is worse than not offering it.
+ * 1. **Only steps this editor can edit.** All six kinds are editable since flows#3, so this rule no
+ *    longer excludes any of them — but it still binds: a template must not carry a step whose form
+ *    this editor cannot draw, because that hands the owner an automation they cannot finish.
  * 2. **Only commands and events this hub really has.** Every name here was executed against a real
  *    hub with the 24 modules installed, and every field mapped below came back from
  *    `GET /api/hub/events/shape` — not from a manifest, and not from memory. A command that does
