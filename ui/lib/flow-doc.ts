@@ -391,6 +391,18 @@ export function requiredGrants(doc: FlowDoc): Grant[] {
 }
 
 /**
+ * The grants ONE step needs, as `"<kind> <value>"` keys.
+ *
+ * Same derivation as {@link requiredGrants}, per step, so the preview can point at the step that
+ * would be refused rather than at a list somewhere else on another tab.
+ */
+export function grantsForStep(step: Step): string[] {
+  return requiredGrants({ schema_version: SCHEMA_VERSION, triggers: [], steps: [step] }).map(
+    (g) => `${g.kind} ${g.value}`,
+  );
+}
+
+/**
  * The `http` grant pattern that covers a URL, **written the way the hub will compare it**.
  *
  * `check_http_pattern` refuses a pattern with no concrete host, with no path, or written in any
@@ -424,7 +436,10 @@ export function httpPatternFor(url: string): string {
   return `${parsed.origin}${path}*`;
 }
 
-const key = (g: Grant): string => `${g.kind} ${g.value}`;
+/** A grant, as one comparable string. A NUL joins the two halves so that a `kind` and a `value`
+ *  cannot run together into the same key by accident — written as the ESCAPE, because a raw NUL
+ *  byte in the source makes git call this whole file binary and every diff of it unreadable. */
+const key = (g: Grant): string => `${g.kind}\u0000${g.value}`;
 
 /** The required grants this flow does not hold yet. */
 export function missingGrants(doc: FlowDoc, live: Grant[]): Grant[] {

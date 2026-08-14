@@ -1851,7 +1851,7 @@ __decorateClass4([
 ], OkStatusPill.prototype, "size");
 define("ok-status-pill", OkStatusPill);
 
-// modules/.wt-flows-4/ui/components/erp-flows-value/erp-flows-value.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-value/erp-flows-value.ts
 var ErpFlowsValue = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2060,7 +2060,7 @@ __decorateClass([
 ], ErpFlowsValue.prototype, "name", 2);
 define("erp-flows-value", ErpFlowsValue);
 
-// modules/.wt-flows-4/ui/lib/plain-language.ts
+// modules/.wt-flows-ib/ui/lib/plain-language.ts
 var MINUTE = 60;
 var HOUR = 3600;
 var DAY = 86400;
@@ -2127,7 +2127,7 @@ function describeStep(step, t3) {
       const prompt = typeof step.prompt === "string" ? step.prompt.trim() : "";
       if (!prompt) return t3("ui.stepAiEmpty");
       const key2 = step.policy === "auto" ? "ui.stepAiAuto" : "ui.stepAiManual";
-      return t3(key2, { prompt: shorten(prompt) });
+      return t3(key2, { prompt: shorten(inWords(prompt)) });
     }
     case "notify": {
       const field = step.to?.field;
@@ -2147,6 +2147,12 @@ function hostOf(url) {
   } catch {
     return "";
   }
+}
+function inWords(text) {
+  return text.replace(
+    /\{\{\s*([^}]+?)\s*\}\}/g,
+    (_all, path) => humaniseField(String(path).replace(/^(input|event|steps|secret)\./, ""))
+  );
 }
 function shorten(text, max = 70) {
   if (text.length <= max) return text;
@@ -2203,7 +2209,7 @@ function describeSample(field, t3) {
   return field.truncated ? `${text}\u2026` : text;
 }
 
-// modules/.wt-flows-4/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
 var ErpFlowsFieldPicker = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2447,7 +2453,7 @@ __decorateClass([
 ], ErpFlowsFieldPicker.prototype, "t", 2);
 define("erp-flows-field-picker", ErpFlowsFieldPicker);
 
-// modules/.wt-flows-4/ui/lib/flow-doc.ts
+// modules/.wt-flows-ib/ui/lib/flow-doc.ts
 var SCHEMA_VERSION = 1;
 var PATH_ROOTS = ["input", "steps", "event", "secret"];
 var OPERATORS = [
@@ -2622,6 +2628,11 @@ function requiredGrants(doc) {
   }
   return out;
 }
+function grantsForStep(step) {
+  return requiredGrants({ schema_version: SCHEMA_VERSION, triggers: [], steps: [step] }).map(
+    (g3) => `${g3.kind} ${g3.value}`
+  );
+}
 function httpPatternFor(url) {
   const raw = (url ?? "").trim();
   if (!raw) return "";
@@ -2657,7 +2668,7 @@ function mergeGrants(live, add, revoke) {
   return out;
 }
 
-// modules/.wt-flows-4/ui/lib/trigger-catalog.ts
+// modules/.wt-flows-ib/ui/lib/trigger-catalog.ts
 var TRIGGER_CATALOG = [
   { event: "sale.completed", labelKey: "ui.evSaleCompleted", module: "sales" },
   { event: "sale.voided", labelKey: "ui.evSaleVoided", module: "sales" },
@@ -2724,7 +2735,284 @@ function catalogEntry(event) {
   return TRIGGER_CATALOG.find((e4) => e4.event === event);
 }
 
-// modules/.wt-flows-4/ui/lib/hub-flows.ts
+// modules/.wt-flows-ib/ui/lib/simulate.ts
+var REDACTED = "\0redacted\0";
+var REDACTED_MARK = "\u2022\u2022\u2022\u2022";
+var UNKNOWN = "\0unknown\0";
+var UNKNOWN_MARK = "\u2026";
+function inputFromShape(shape) {
+  const input = {};
+  const redactedPaths = [];
+  if (!shape || !shape.samples || !Array.isArray(shape.fields)) {
+    return { input, redactedPaths, hasRealData: false };
+  }
+  for (const field of shape.fields) {
+    if (!field?.path) continue;
+    if (field.redacted) {
+      redactedPaths.push(field.path);
+      place(input, field.path, REDACTED);
+      continue;
+    }
+    if (field.type === "array") {
+      place(input, field.path, new Array(field.items ?? 0).fill(null));
+      continue;
+    }
+    if (field.type === "object") continue;
+    place(input, field.path, field.sample === void 0 ? null : field.sample);
+  }
+  return { input, redactedPaths, hasRealData: true };
+}
+function place(root, path, value) {
+  const parts = path.split(".");
+  let cursor = root;
+  for (let i4 = 0; i4 < parts.length - 1; i4 += 1) {
+    const key2 = parts[i4];
+    if (typeof cursor[key2] !== "object" || cursor[key2] === null || Array.isArray(cursor[key2])) {
+      cursor[key2] = {};
+    }
+    cursor = cursor[key2];
+  }
+  cursor[parts[parts.length - 1]] = value;
+}
+function resolvePath(path, scope) {
+  let cursor = scope;
+  for (const segment of path.split(".")) {
+    if (typeof cursor !== "object" || cursor === null) return void 0;
+    cursor = cursor[segment];
+    if (cursor === void 0) return void 0;
+  }
+  return cursor;
+}
+var PATH_ROOTS2 = ["input", "steps", "event", "secret"];
+function isPath2(s4) {
+  const root = s4.split(".")[0];
+  return PATH_ROOTS2.includes(root) && s4.length > root.length + 1 && s4[root.length] === ".";
+}
+function stringify(value) {
+  if (value === null || value === void 0) return "";
+  if (value === REDACTED) return REDACTED_MARK;
+  if (value === UNKNOWN) return UNKNOWN_MARK;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return String(value);
+  }
+}
+function renderTemplate(text, scope) {
+  let out = "";
+  let rest = text;
+  for (; ; ) {
+    const start = rest.indexOf("{{");
+    if (start < 0) break;
+    out += rest.slice(0, start);
+    const after = rest.slice(start + 2);
+    const end = after.indexOf("}}");
+    if (end < 0) return out + rest.slice(start);
+    out += stringify(lookup(after.slice(0, end).trim(), scope));
+    rest = after.slice(end + 2);
+  }
+  return out + rest;
+}
+function lookup(path, scope) {
+  if (path.startsWith("secret.")) return REDACTED;
+  if (path.startsWith("steps.")) {
+    const found2 = resolvePath(path, scope);
+    return found2 === void 0 ? UNKNOWN : found2;
+  }
+  const found = resolvePath(path, scope);
+  return found === void 0 ? null : found;
+}
+function resolveExpr(expr, scope) {
+  if (typeof expr === "string") {
+    if (isPath2(expr)) return lookup(expr, scope);
+    if (expr.includes("{{")) return renderTemplate(expr, scope);
+    return expr;
+  }
+  if (Array.isArray(expr)) return expr.map((v2) => resolveExpr(v2, scope));
+  if (typeof expr === "object" && expr !== null) {
+    return Object.fromEntries(
+      Object.entries(expr).map(([k2, v2]) => [k2, resolveExpr(v2, scope)])
+    );
+  }
+  return expr;
+}
+function asNumber(v2) {
+  if (typeof v2 === "number") return Number.isFinite(v2) ? v2 : null;
+  if (typeof v2 === "string") {
+    const text = v2.trim();
+    if (text === "") return null;
+    const n5 = Number(text);
+    return Number.isFinite(n5) ? n5 : null;
+  }
+  return null;
+}
+function asText(v2) {
+  if (typeof v2 === "string") return v2;
+  if (typeof v2 === "number" || typeof v2 === "boolean") return String(v2);
+  return null;
+}
+function jsonEq(a3, b3) {
+  if (a3 === b3) return true;
+  if (a3 === null || b3 === null || a3 === void 0 || b3 === void 0) return false;
+  const [x2, y3] = [asNumber(a3), asNumber(b3)];
+  if (x2 !== null && y3 !== null) return x2 === y3;
+  const [s4, t3] = [asText(a3), asText(b3)];
+  return s4 !== null && t3 !== null && s4 === t3;
+}
+function compare(a3, b3) {
+  if (a3 === null || b3 === null || a3 === void 0 || b3 === void 0) return null;
+  const [x2, y3] = [asNumber(a3), asNumber(b3)];
+  if (x2 !== null && y3 !== null) return x2 === y3 ? 0 : x2 < y3 ? -1 : 1;
+  const [s4, t3] = [asText(a3), asText(b3)];
+  if (s4 === null || t3 === null) return null;
+  return s4 === t3 ? 0 : s4 < t3 ? -1 : 1;
+}
+function evalOp(op, actual, expected) {
+  switch (op) {
+    case "eq":
+      return jsonEq(actual, expected);
+    case "neq":
+      return !jsonEq(actual, expected);
+    case "exists": {
+      const present = actual !== null && actual !== void 0;
+      return (typeof expected === "boolean" ? expected : true) === present;
+    }
+    case "in":
+      return Array.isArray(expected) && expected.some((item) => jsonEq(actual, item));
+    case "contains":
+      if (Array.isArray(actual)) return actual.some((item) => jsonEq(item, expected));
+      if (typeof actual === "string") {
+        const needle = asText(expected);
+        return needle !== null && actual.includes(needle);
+      }
+      return false;
+    default: {
+      const ordering = compare(actual, expected);
+      if (ordering === null) return false;
+      if (op === "gt") return ordering > 0;
+      if (op === "gte") return ordering >= 0;
+      if (op === "lt") return ordering < 0;
+      return ordering <= 0;
+    }
+  }
+}
+function conditionResult(when, scope) {
+  const failed = [];
+  let uncertain = false;
+  for (const [path, ops] of Object.entries(when ?? {})) {
+    const actual = lookup(path, scope);
+    for (const [op, expected] of Object.entries(ops ?? {})) {
+      const operator = op;
+      if (actual === REDACTED && operator !== "exists") {
+        uncertain = true;
+        continue;
+      }
+      if (!evalOp(operator, actual, expected)) failed.push({ path, op: operator, expected });
+    }
+  }
+  return { matched: failed.length === 0 && !uncertain, failed, uncertain };
+}
+function pathsIn(expr, out = []) {
+  if (typeof expr === "string") {
+    if (isPath2(expr)) {
+      out.push(expr);
+      return out;
+    }
+    let rest = expr;
+    for (; ; ) {
+      const start = rest.indexOf("{{");
+      if (start < 0) break;
+      const after = rest.slice(start + 2);
+      const end = after.indexOf("}}");
+      if (end < 0) break;
+      out.push(after.slice(0, end).trim());
+      rest = after.slice(end + 2);
+    }
+    return out;
+  }
+  if (Array.isArray(expr)) {
+    for (const item of expr) pathsIn(item, out);
+  } else if (typeof expr === "object" && expr !== null) {
+    for (const value of Object.values(expr)) pathsIn(value, out);
+  }
+  return out;
+}
+function stepValues(step, scope) {
+  const out = [];
+  const add = (label, expr) => {
+    const text = stringify(resolveExpr(expr, scope));
+    let blank = false;
+    let redacted = false;
+    let unknown = false;
+    for (const path of pathsIn(expr)) {
+      const value = lookup(path, scope);
+      if (value === REDACTED) redacted = true;
+      else if (value === UNKNOWN) unknown = true;
+      else if (value === null || value === void 0) blank = true;
+    }
+    out.push({ label, text, blank, redacted, ...unknown ? { unknown } : {} });
+  };
+  if (step.kind === "command") {
+    for (const [key2, value] of Object.entries(step.params ?? {})) add(key2, value);
+  } else if (step.kind === "http") {
+    add("url", step.url ?? "");
+    for (const [key2, value] of Object.entries(step.headers ?? {})) add(key2, value);
+    if (step.body !== void 0 && step.body !== "") add("body", step.body);
+  } else if (step.kind === "ai") {
+    add("prompt", step.prompt ?? "");
+  } else if (step.kind === "notify") {
+    for (const [key2, value] of Object.entries(step.vars ?? {})) add(key2, value);
+  }
+  return out;
+}
+function simulate(doc, input) {
+  const scope = { input, event: input, steps: {} };
+  const trigger = doc.triggers?.[0];
+  const triggerCondition = trigger?.kind === "event" && trigger.filter ? conditionResult(trigger.filter, scope) : void 0;
+  const triggerMatched = triggerCondition ? triggerCondition.matched : true;
+  const steps = [];
+  let stopped = !triggerMatched;
+  let stoppedAt;
+  for (const step of doc.steps ?? []) {
+    if (stopped) {
+      steps.push({ id: step.id, kind: step.kind, outcome: "not-reached", values: [] });
+      continue;
+    }
+    if (step.kind === "condition") {
+      const condition = conditionResult(step.when, scope);
+      const passes = condition.matched || condition.uncertain;
+      steps.push({
+        id: step.id,
+        kind: step.kind,
+        outcome: passes ? "would-run" : "stops-here",
+        values: [],
+        condition
+      });
+      if (!passes) {
+        stopped = true;
+        stoppedAt = step.id;
+      }
+      continue;
+    }
+    steps.push({
+      id: step.id,
+      kind: step.kind,
+      outcome: "would-run",
+      values: stepValues(step, scope)
+    });
+  }
+  return {
+    triggerMatched,
+    ...triggerCondition ? { triggerCondition } : {},
+    steps,
+    ...stoppedAt ? { stoppedAt } : {},
+    blanks: steps.reduce((n5, s4) => n5 + s4.values.filter((v2) => v2.blank).length, 0),
+    failed: false
+  };
+}
+
+// modules/.wt-flows-ib/ui/lib/hub-flows.ts
 var CAPABILITY_DENIED = "capability_denied";
 function hasFlows(candidate) {
   const c4 = candidate;
@@ -2740,7 +3028,7 @@ function errorCode(e4) {
   return typeof code === "string" ? code : "";
 }
 
-// modules/.wt-flows-4/ui/components/erp-flows-editor/erp-flows-editor.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-editor/erp-flows-editor.ts
 function guardRows(when) {
   const rows = [];
   for (const [path, ops] of Object.entries(when ?? {})) {
@@ -2757,6 +3045,9 @@ function guardRows(when) {
 function clamp(value, min, max, fallback) {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, Math.round(value)));
+}
+function option(value, label, current) {
+  return b2`<option value=${value} ?selected=${value === current}>${label}</option>`;
 }
 function rowsToWhen(rows) {
   const out = {};
@@ -2810,6 +3101,11 @@ var ErpFlowsEditor = class extends i3 {
       align-items: center;
       gap: 0.5rem;
       flex-wrap: wrap;
+      /* Both bars refuse to shrink. They are flex children of a full-height column whose body
+         takes the rest, so without this the tab strip gets squeezed to 18px of its 44 the moment
+         the header wraps to two lines — which is what a 390px screen does, and what adding the
+         «Probar» button made happen sooner. */
+      flex: 0 0 auto;
       padding: 0.6rem 0.75rem;
       border-bottom: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
     }
@@ -3032,11 +3328,17 @@ var ErpFlowsEditor = class extends i3 {
     .value-row {
       display: flex;
       align-items: flex-end;
+      /* Wraps on a phone: without it the secret picker and the box's own «insert a field» button
+         end up on the same line and overlap, which is what a 390px screen showed. */
+      flex-wrap: wrap;
       gap: 0.4rem;
       min-width: 0;
     }
     .value-row erp-flows-value {
-      flex: 1 1 auto;
+      /* A 12rem basis, not auto: with auto the box shrinks to its longest unbreakable word while
+         the select keeps its own width, and the address ends up three characters wide next to a
+         full-size dropdown. */
+      flex: 1 1 12rem;
       min-width: 0;
     }
     .value-row select {
@@ -3044,10 +3346,85 @@ var ErpFlowsEditor = class extends i3 {
       font-size: 0.8rem;
       padding: 0 0.5rem;
       min-height: 2.4rem;
-      max-width: 9rem;
+      max-width: 100%;
       border: 1px dashed var(--ok-border, #d7d5cc);
       border-radius: var(--ok-radius-pill, 999px);
       background: transparent;
+      color: var(--ok-muted, #6b6a63);
+    }
+    /* The method sits BESIDE the address only when there is room for both. Below that it stacks —
+       and it has to be a class, because an inline grid-template-columns would win over the media
+       query at every width and crush the address on a phone. */
+    .method-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.4rem;
+      align-items: end;
+    }
+    @media (min-width: 560px) {
+      .method-row {
+        grid-template-columns: auto 1fr;
+      }
+    }
+    /* ── The preview ──────────────────────────────────────────────────────────────────────── */
+    .preview {
+      max-width: 44rem;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .pstep {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-left: 3px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-sm, 10px);
+      background: var(--ok-surface, #fff);
+      padding: 0.6rem 0.7rem;
+    }
+    .pstep[data-outcome='would-run'] {
+      border-left-color: var(--ok-success, #2dd36f);
+    }
+    /* A guard that stops the run is the flow WORKING, so it is not painted as an error. */
+    .pstep[data-outcome='stops-here'],
+    .pstep[data-outcome='trigger-blocked'] {
+      border-left-color: var(--ok-warning, #ffc409);
+    }
+    .pstep[data-outcome='not-reached'] {
+      opacity: 0.6;
+    }
+    .pvalue {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      font-size: 0.88rem;
+      padding: 0.15rem 0;
+    }
+    .pkey {
+      color: var(--ok-muted, #6b6a63);
+      min-width: 6rem;
+    }
+    .pval {
+      overflow-wrap: anywhere;
+    }
+    .pvalue[data-blank='true'] {
+      background: var(--ok-danger-soft, rgba(235, 68, 90, 0.08));
+      border-radius: var(--ok-radius-sm, 10px);
+      padding: 0.15rem 0.35rem;
+    }
+    .bad {
+      color: var(--ok-danger, var(--ion-color-danger, #eb445a));
+      font-size: 0.85rem;
+    }
+    .verdict {
+      font-size: 0.85rem;
+    }
+    .clauses {
+      margin: 0.1rem 0 0;
+      padding-left: 1rem;
+      font-size: 0.85rem;
       color: var(--ok-muted, #6b6a63);
     }
     .secrets {
@@ -3078,6 +3455,7 @@ var ErpFlowsEditor = class extends i3 {
     .tabs {
       display: flex;
       gap: 0.25rem;
+      flex: 0 0 auto;
       padding: 0 0.75rem;
       border-bottom: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
       overflow-x: auto;
@@ -3393,13 +3771,14 @@ var ErpFlowsEditor = class extends i3 {
         <label for="trigger-kind">${this.t("ui.whenThisHappens")}</label>
         <select
           id="trigger-kind"
+          data-field="trigger-kind"
           .value=${trigger.kind}
           @change=${(e4) => this.setTrigger({ kind: e4.target.value })}
         >
-          <option value="event">${this.t("ui.triggerKindEvent")}</option>
-          <option value="cron">${this.t("ui.triggerKindCron")}</option>
-          <option value="at">${this.t("ui.triggerKindAt")}</option>
-          <option value="manual">${this.t("ui.triggerKindManual")}</option>
+          ${option("event", this.t("ui.triggerKindEvent"), trigger.kind)}
+          ${option("cron", this.t("ui.triggerKindCron"), trigger.kind)}
+          ${option("at", this.t("ui.triggerKindAt"), trigger.kind)}
+          ${option("manual", this.t("ui.triggerKindManual"), trigger.kind)}
         </select>
       </div>
       ${trigger.kind === "event" ? this.renderEventChoice(trigger) : A}
@@ -3437,10 +3816,8 @@ var ErpFlowsEditor = class extends i3 {
           @change=${(e4) => this.setTrigger({ event: e4.target.value })}
         >
           <option value="">—</option>
-          ${TRIGGER_CATALOG.map(
-      (entry) => b2`<option value=${entry.event}>${this.t(entry.labelKey)}</option>`
-    )}
-          ${chosen && !catalogEntry(chosen) ? b2`<option value=${chosen}>${chosen}</option>` : A}
+          ${TRIGGER_CATALOG.map((entry) => option(entry.event, this.t(entry.labelKey), chosen))}
+          ${chosen && !catalogEntry(chosen) ? option(chosen, chosen, chosen) : A}
         </select>
         <span class="hint">
           ${!chosen ? this.t("ui.eventOtherHint") : this.shape ? this.shape.samples === 0 ? this.t("ui.eventNoSamples") : this.t("ui.eventSamples", { count: this.shape.samples }) : this.t("ui.eventNotInHub", {
@@ -3600,7 +3977,7 @@ var ErpFlowsEditor = class extends i3 {
     const setHeaders = (entries) => this.setDoc(patchStep(this.document, index, { headers: Object.fromEntries(entries) }));
     const pattern = httpPatternFor(String(step.url ?? ""));
     return b2`
-      <div class="param-row" style="grid-template-columns:auto 1fr">
+      <div class="method-row">
         <div class="field">
           <label for="m-${step.id}">${this.t("ui.httpMethod")}</label>
           <select
@@ -3611,7 +3988,7 @@ var ErpFlowsEditor = class extends i3 {
       patchStep(this.document, index, { method: e4.target.value })
     )}
           >
-            ${HTTP_METHODS.map((m3) => b2`<option value=${m3}>${m3}</option>`)}
+            ${HTTP_METHODS.map((m3) => option(m3, m3, String(step.method ?? "GET")))}
           </select>
         </div>
         ${this.renderValue({
@@ -3818,8 +4195,8 @@ var ErpFlowsEditor = class extends i3 {
       })
     )}
         >
-          <option value="manual">${this.t("ui.aiPolicyManual")}</option>
-          <option value="auto">${this.t("ui.aiPolicyAuto")}</option>
+          ${option("manual", this.t("ui.aiPolicyManual"), String(step.policy ?? "manual"))}
+          ${option("auto", this.t("ui.aiPolicyAuto"), String(step.policy ?? "manual"))}
         </select>
       </div>
       ${auto ? b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline"
@@ -3907,7 +4284,7 @@ var ErpFlowsEditor = class extends i3 {
                refused by name at save AND at grant time. A third option here would be a step that
                can never be delivered, picked from a list that looked complete. -->
           ${NOTIFY_CHANNELS.map(
-      (c4) => b2`<option value=${c4}>${this.t(`ui.notifyChannel_${c4}`)}</option>`
+      (c4) => option(c4, this.t(`ui.notifyChannel_${c4}`), String(step.channel ?? "email"))
     )}
         </select>
       </div>
@@ -3991,9 +4368,9 @@ var ErpFlowsEditor = class extends i3 {
       })
     )}
         >
-          <option value="60">${this.t("ui.unitMinutes")}</option>
-          <option value="3600">${this.t("ui.unitHours")}</option>
-          <option value="86400">${this.t("ui.unitDays")}</option>
+          ${option("60", this.t("ui.unitMinutes"), String(unit))}
+          ${option("3600", this.t("ui.unitHours"), String(unit))}
+          ${option("86400", this.t("ui.unitDays"), String(unit))}
         </select>
       </div>
     </div>`;
@@ -4029,6 +4406,7 @@ var ErpFlowsEditor = class extends i3 {
           <div class="field">
             <label>${this.t("ui.operator")}</label>
             <select
+              data-field="operator"
               .value=${row.op}
               @change=${(e4) => update(
         rows.map(
@@ -4037,9 +4415,7 @@ var ErpFlowsEditor = class extends i3 {
       )}
             >
               ${OPERATORS.map(
-        (op) => b2`<option value=${op}>
-                    ${this.t(`ui.op${op.charAt(0).toUpperCase()}${op.slice(1)}`)}
-                  </option>`
+        (op) => option(op, this.t(`ui.op${op.charAt(0).toUpperCase()}${op.slice(1)}`), row.op)
       )}
             </select>
           </div>
@@ -4191,6 +4567,96 @@ var ErpFlowsEditor = class extends i3 {
           </div>` : A}
     </div>`;
   }
+  /**
+   * **«Probar»: what this flow would do with the owner's own data — and it does none of it.**
+   *
+   * The two things flows#2 originally asked for were changes to the KERNEL, and the kernel is
+   * frozen (ADR-0283). Checked against the code, not assumed: `POST …/flows/{id}/run` executes for
+   * real (a «probar» that charged a test sale is worse than no button at all) and there is no
+   * dry-run parameter anywhere in the runtime or the server. Nor is there any endpoint that
+   * returns a real event payload — ADR-0312 refuses that on purpose, because handing a marketplace
+   * module the last N payloads of any event is exporting the customer book with an editor on top.
+   *
+   * So this screen asks the hub for NOTHING beyond the event shape the picker already loads, and
+   * runs the walk in {@link simulate}. Every sentence on it is about what WOULD happen.
+   */
+  renderPreview() {
+    const built = inputFromShape(this.shape);
+    const run2 = simulate(this.document, built.input);
+    const missing = missingGrants(this.document, this.grants);
+    const byId = new Map(this.document.steps.map((s4) => [s4.id, s4]));
+    return b2`<div class="preview">
+      <!-- First thing on the screen, and it stays there while it is read. Every other automation
+           tool's «test» button runs the automation; an owner has every reason to assume this one
+           does too, and the assumption is only expensive in one direction. -->
+      <ok-inline-feedback tone="info" icon="eye-outline"
+        >${this.t("ui.testNothingHappened")}</ok-inline-feedback
+      >
+      ${!built.hasRealData ? b2`<ok-inline-feedback tone="warning" icon="help-circle-outline"
+            >${this.t("ui.testNoRealData")}</ok-inline-feedback
+          >` : b2`<span class="hint"
+            >${this.t("ui.testUsingReal", {
+      event: this.eventLabel(this.trigger.event),
+      count: this.shape?.samples ?? 0
+    })}</span
+          >`}
+      ${run2.blanks ? b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline"
+            >${this.t(
+      run2.blanks === 1 ? "ui.testBlanksFoundOne" : "ui.testBlanksFound",
+      { count: run2.blanks }
+    )}</ok-inline-feedback
+          >` : A}
+      ${!run2.triggerMatched ? b2`<div class="pstep" data-outcome="trigger-blocked">
+            <span class="title">${this.t("ui.testTriggerBlocked")}</span>
+            ${this.renderFailedClauses(run2.triggerCondition)}
+          </div>` : A}
+      ${run2.steps.map((step) => {
+      const spec = byId.get(step.id);
+      const refused = step.outcome === "would-run" && spec ? missing.filter((g3) => grantsForStep(spec).some((need) => need === `${g3.kind} ${g3.value}`)) : [];
+      return b2`<div
+          class="pstep"
+          data-node-outcome=${step.id}
+          data-outcome=${step.outcome}
+        >
+          <span class="title">${spec ? describeStep(spec, this.t) : step.kind}</span>
+          ${step.outcome === "stops-here" ? b2`<span class="verdict">${this.t("ui.testStoppedIsWorking")}</span>` : A}
+          ${step.outcome === "not-reached" ? b2`<span class="muted">${this.t("ui.testNotReached")}</span>` : A}
+          ${step.condition?.uncertain ? b2`<span class="verdict">${this.t("ui.testUncertain")}</span>` : A}
+          ${step.outcome === "stops-here" ? this.renderFailedClauses(step.condition) : A}
+          ${step.values.map(
+        (value) => b2`<div class="pvalue" data-blank=${value.blank ? "true" : "false"}>
+              <span class="pkey">${value.label}</span>
+              <!-- The rendered line comes FIRST, even with a hole in it. «Gracias, Marta Ruiz. Te
+                   esperamos en ␣» is what makes the fault obvious at a glance; replacing the whole
+                   value with the words «would arrive empty» hides WHICH half went missing, which
+                   is the only part the owner can act on. -->
+              ${value.text ? b2`<span class="pval">${value.text}</span>` : A}
+              ${value.blank ? b2`<span class="bad">${this.t("ui.testBlank")}</span>` : value.redacted ? b2`<span class="muted">${this.t("ui.testHidden")}</span>` : value.unknown ? b2`<span class="muted">${this.t("ui.testUnknown")}</span>` : A}
+            </div>`
+      )}
+          ${refused.length ? b2`<span class="bad"
+                >${this.t("ui.testWouldBeRefused", {
+        what: refused.map((g3) => g3.value).join(", ")
+      })}</span
+              >` : A}
+        </div>`;
+    })}
+    </div>`;
+  }
+  renderFailedClauses(condition) {
+    if (!condition?.failed.length) return A;
+    return b2`<ul class="clauses">
+      ${condition.failed.map(
+      (clause) => b2`<li>
+          ${this.t("ui.testClauseFailed", {
+        field: this.fieldLabel(clause.path),
+        op: this.t(`ui.op${clause.op.charAt(0).toUpperCase()}${clause.op.slice(1)}`),
+        expected: String(clause.expected)
+      })}
+        </li>`
+    )}
+    </ul>`;
+  }
   async toggleRun(runId) {
     if (this.runSteps[runId] || !this.client) return;
     try {
@@ -4272,13 +4738,25 @@ var ErpFlowsEditor = class extends i3 {
       this.enabled = !!e4.target.checked;
     }}
         ></ion-toggle>
+        <!-- «Probar» sits with the switch on purpose: it is the thing to press BEFORE turning an
+             automation on, and a button on another tab is one nobody presses first. -->
+        <ion-button
+          size="small"
+          fill="outline"
+          data-act="test"
+          @click=${() => {
+      this.tab = "test";
+    }}
+        >
+          ${this.t("ui.testRun")}
+        </ion-button>
         <ion-button size="small" ?disabled=${this.saving} @click=${() => void this.save()}>
           ${this.saving ? this.t("ui.saving") : this.t("ui.save")}
         </ion-button>
       </div>
 
       <div class="tabs" role="tablist">
-        ${["editor", "permissions", "history"].map(
+        ${["editor", "test", "permissions", "history"].map(
       (tab) => b2`<button
             type="button"
             role="tab"
@@ -4300,7 +4778,7 @@ var ErpFlowsEditor = class extends i3 {
               >${this.notice}</ok-inline-feedback
             >` : A}
         ${this.renderDraftBanner()}
-        ${this.tab === "editor" ? this.renderSpine() : this.tab === "permissions" ? this.renderPermissions() : this.renderHistory()}
+        ${this.tab === "editor" ? this.renderSpine() : this.tab === "test" ? this.renderPreview() : this.tab === "permissions" ? this.renderPermissions() : this.renderHistory()}
       </div>
 
       <erp-flows-field-picker
@@ -4382,7 +4860,7 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "pickerRoot", 2);
 define("erp-flows-editor", ErpFlowsEditor);
 
-// modules/.wt-flows-4/ui/lib/templates.ts
+// modules/.wt-flows-ib/ui/lib/templates.ts
 var SECTORS = ["any", "beauty", "food"];
 var SCHEMA_VERSION2 = 1;
 function run(id, command, params) {
@@ -4548,7 +5026,7 @@ function missingModules(template, known) {
   return out;
 }
 
-// modules/.wt-flows-4/ui/components/erp-flows-gallery/erp-flows-gallery.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-gallery/erp-flows-gallery.ts
 var ErpFlowsGallery = class extends i3 {
   constructor() {
     super(...arguments);
@@ -4901,7 +5379,7 @@ __decorateClass([
 ], ErpFlowsGallery.prototype, "error", 2);
 define("erp-flows-gallery", ErpFlowsGallery);
 
-// modules/.wt-flows-4/ui/components/erp-flows-guide/erp-flows-guide.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-guide/erp-flows-guide.ts
 var ErpFlowsGuide = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5163,7 +5641,7 @@ __decorateClass([
 ], ErpFlowsGuide.prototype, "t", 2);
 define("erp-flows-guide", ErpFlowsGuide);
 
-// modules/.wt-flows-4/ui/components/erp-flows-approvals/erp-flows-approvals.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-approvals/erp-flows-approvals.ts
 var ErpFlowsApprovals = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5378,7 +5856,7 @@ __decorateClass([
 ], ErpFlowsApprovals.prototype, "busy", 2);
 define("erp-flows-approvals", ErpFlowsApprovals);
 
-// modules/.wt-flows-4/ui/lib/ai-draft.ts
+// modules/.wt-flows-ib/ui/lib/ai-draft.ts
 var DRAFT_STEP_KINDS = ["command", "condition", "delay"];
 function readNotes(raw) {
   const value = typeof raw === "string" ? safeParse(raw) : raw;
@@ -5572,7 +6050,7 @@ function draftGaps(doc, known) {
   return out;
 }
 
-// modules/.wt-flows-4/locales/es.json
+// modules/.wt-flows-ib/locales/es.json
 var es_default = {
   name: "Automatizaciones",
   navigation: {
@@ -5833,7 +6311,23 @@ var es_default = {
     approvalWould: "Quiere ejecutar {command}",
     approvalExpires: "Si no haces nada, esto caduca el {when} y no se ejecuta.",
     approvalApprove: "Aprobar",
-    approvalReject: "No"
+    approvalReject: "No",
+    tabTest: "Probar",
+    testRun: "Probar",
+    testNothingHappened: "Nada de esto es real. No se env\xEDa ning\xFAn mensaje, no se cobra nada y no se apunta nada: esto es solo lo que HAR\xCDA tu automatizaci\xF3n.",
+    testUsingReal: "Con lo que pas\xF3 de verdad la \xFAltima vez que {event}, de las {count} \xFAltimas de tu propio hub.",
+    testNoRealData: "Esto no ha pasado en tu hub \xFAltimamente, as\xED que no hay un ejemplo real con el que probarlo. Los pasos de abajo siguen siendo los correctos, pero no hay con qu\xE9 rellenarlos.",
+    testBlanksFound: "{count} cosas saldr\xEDan vac\xEDas. Ah\xED es donde est\xE1 el fallo casi siempre.",
+    testBlank: "saldr\xEDa vac\xEDo",
+    testHidden: "s\xED hay un valor, pero aqu\xED no se ense\xF1a",
+    testUnknown: "sale de un paso anterior, as\xED que no se sabe hasta que se ejecute",
+    testStoppedIsWorking: "Se parar\xEDa aqu\xED, y eso es la automatizaci\xF3n funcionando: no hay un segundo camino.",
+    testNotReached: "No llegar\xEDa hasta aqu\xED.",
+    testTriggerBlocked: "Ni siquiera arrancar\xEDa: lo que ha pasado no encaja con lo que pediste.",
+    testUncertain: "Esto no se puede comprobar aqu\xED: mira algo que el hub oculta porque podr\xEDa ser de una persona. Puede salir de las dos formas.",
+    testClauseFailed: "{field} no es {op} {expected}",
+    testWouldBeRefused: "Se lo rechazar\xEDan: todav\xEDa no le has permitido {what}.",
+    testBlanksFoundOne: "1 cosa saldr\xEDa vac\xEDa. Ah\xED es donde est\xE1 el fallo casi siempre."
   },
   tpl: {
     author: "Automatizaciones",
@@ -5945,7 +6439,7 @@ var es_default = {
   }
 };
 
-// modules/.wt-flows-4/locales/en.json
+// modules/.wt-flows-ib/locales/en.json
 var en_default = {
   name: "Automations",
   navigation: {
@@ -6206,7 +6700,23 @@ var en_default = {
     approvalWould: "It wants to run {command}",
     approvalExpires: "If you do nothing, this expires on {when} and never runs.",
     approvalApprove: "Approve",
-    approvalReject: "No"
+    approvalReject: "No",
+    tabTest: "Try it",
+    testRun: "Try it",
+    testNothingHappened: "Nothing here is real. No message is sent, nothing is charged and nothing is written down \u2014 this is only what your automation WOULD do.",
+    testUsingReal: "Using what really happened the last time {event}, from the last {count} of them in your own hub.",
+    testNoRealData: "This has not happened in your hub recently, so there is no real example to try it with. The steps below are still the right ones, but there is nothing to fill them in with.",
+    testBlanksFound: "{count} things would come out empty. That is almost always the mistake.",
+    testBlank: "would arrive empty",
+    testHidden: "there is a value, and it is not shown here",
+    testUnknown: "comes from an earlier step, so it is only known once it has run",
+    testStoppedIsWorking: "It would stop here, and that is the automation working: there is no second path.",
+    testNotReached: "It would not get this far.",
+    testTriggerBlocked: "It would not even start: what happened does not match what you asked for.",
+    testUncertain: "This cannot be checked here: it looks at something the hub hides because it could be about a person. It may go either way.",
+    testClauseFailed: "{field} is not {op} {expected}",
+    testWouldBeRefused: "It would be refused: you have not allowed {what} yet.",
+    testBlanksFoundOne: "1 thing would come out empty. That is almost always the mistake."
   },
   tpl: {
     author: "Automations",
@@ -6318,7 +6828,7 @@ var en_default = {
   }
 };
 
-// modules/.wt-flows-4/ui/components/erp-flows-app/erp-flows-app.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-app/erp-flows-app.ts
 var CATALOG = { es: es_default, en: en_default };
 var ErpFlowsApp = class extends i3 {
   constructor() {

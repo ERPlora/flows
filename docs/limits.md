@@ -8,6 +8,28 @@
   (`def.rs::resolve_path`). El selector muestra una lista **en gris, con el motivo**, en vez de
   ofrecer un `lines.0.total` que el kernel no sabría resolver.
 
+## «Probar» no ejecuta — y no es una simplificación
+
+El botón **Probar** (flows#2) NO llama a `POST …/flows/{id}/run`: ese endpoint ejecuta **de
+verdad**, commands incluidos, y un «probar» que cobra una venta de prueba es peor que no tenerlo.
+Tampoco hay modo dry-run en el kernel, y el kernel está **congelado** (ADR-0283) — comprobado
+contra el código, no supuesto: no hay `dry_run`/`simulate`/`test_mode` en `crates/runtime` ni en
+`crates/server`.
+
+Y tampoco hay endpoint que devuelva un payload real: `…/events/shape` devuelve la **forma**
+(ADR-0312 lo decide así a propósito). Lo que sí trae son **muestras reales por campo**, y de ahí
+se reconstruye el `input`. Es dato del hub, no un mock.
+
+Consecuencias que la pantalla dice en voz alta en vez de disimular:
+
+- una **muestra retenida** (`redacted`) no es un hueco: se marca como «hay valor y no se enseña»;
+- una guarda que lee un campo retenido contesta **«no se puede saber»**, nunca un veredicto: estar
+  seguro y equivocado sería lo único que haría esta función peor que no tenerla;
+- `steps.<id>.…` es la salida de un paso que **no ha corrido**: se marca como desconocida, no como
+  vacía;
+- un `{{secret.X}}` **jamás** se resuelve aquí — sería el único sitio del producto donde una
+  credencial write-only se vuelve legible.
+
 ## Fuera de esta entrega (v1)
 
 - **«Probar» antes de activar** contra la última venta/cita real. Probablemente la función de más

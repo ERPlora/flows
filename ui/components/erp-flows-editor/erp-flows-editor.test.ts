@@ -654,3 +654,274 @@ describe('the data picker, wired to the real event of THIS flow', () => {
     expect(client.events.shape).not.toHaveBeenCalled();
   });
 });
+
+describe('«Probar» before activating (flows#2)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const SALE_SHAPE = {
+    event_name: 'sale.completed',
+    declared_by: ['sales'],
+    samples: 4,
+    fields: [
+      { path: 'total', type: 'number', sample: 4250, redacted: false, truncated: false, seen_in: 4 },
+      { path: 'customer.name', type: 'string', sample: 'Marta', redacted: false, truncated: false, seen_in: 4 },
+      { path: 'customer.email', type: 'string', redacted: true, truncated: false, seen_in: 4 },
+    ],
+  };
+
+  const withShape = (shape: unknown = SALE_SHAPE) =>
+    fakeClient({ events: { shape: vi.fn(async () => shape) } });
+
+  const saleFlow = (steps: unknown[]) =>
+    flowWith(steps, [{ kind: 'event', event: 'sale.completed' }]);
+
+  const test = async (el: ErpFlowsEditor): Promise<Element> => {
+    el.tab = 'test';
+    await el.updateComplete;
+    await Promise.resolve();
+    await el.updateComplete;
+    return el.renderRoot.querySelector('.preview')!;
+  };
+
+  it('EXECUTES NOTHING — no run, no command, no message', async () => {
+    // `POST …/flows/{id}/run` executes for real, commands included. A «probar» that charged a
+    // test sale would be worse than not having the button at all, and the kernel is frozen
+    // (ADR-0283): there is no dry-run to ask for. So this screen calls nothing.
+    const client = withShape();
+    const el = await mount(saleFlow([{ id: 's1', kind: 'command', command: 'x', params: {} }]), client);
+    await test(el);
+    expect(client.flows.run).not.toHaveBeenCalled();
+    expect(client.flows.update).not.toHaveBeenCalled();
+    expect(client.flows.create).not.toHaveBeenCalled();
+  });
+
+  it('SAYS that nothing happened, where the owner is looking', async () => {
+    const el = await mount(saleFlow([{ id: 's1', kind: 'command', command: 'x', params: {} }]), withShape());
+    const panel = await test(el);
+    expect(panel.textContent).toContain('ui.testNothingHappened');
+  });
+
+  it('uses the REAL last sale of this hub, and says which one', async () => {
+    const el = await mount(
+      saleFlow([
+        { id: 's1', kind: 'command', command: 'tasks.tasks.create', params: { title: 'Gracias {{input.customer.name}}' } },
+      ]),
+      withShape(),
+    );
+    const panel = await test(el);
+    // The owner's own customer, from their own event — not a mock, and not a made-up name.
+    expect(panel.textContent).toContain('Gracias Marta');
+  });
+
+  it('points at the mapping that would arrive EMPTY', async () => {
+    const el = await mount(
+      saleFlow([
+        { id: 's1', kind: 'command', command: 'tasks.tasks.create', params: { title: 'Llama a {{input.phone}}' } },
+      ]),
+      withShape(),
+    );
+    const panel = await test(el);
+    expect(panel.querySelector('[data-blank="true"]')).toBeTruthy();
+    expect(panel.textContent).toContain('ui.testBlank');
+  });
+
+  it('does NOT flag a value the hub is merely hiding as a mistake', async () => {
+    const el = await mount(
+      saleFlow([
+        { id: 's1', kind: 'command', command: 'x', params: { to: '{{input.customer.email}}' } },
+      ]),
+      withShape(),
+    );
+    const panel = await test(el);
+    expect(panel.querySelector('[data-blank="true"]')).toBeNull();
+    expect(panel.textContent).toContain('ui.testHidden');
+  });
+
+  it('shows where the flow STOPS, and that stopping there is it working', async () => {
+    const el = await mount(
+      saleFlow([
+        { id: 'g', kind: 'condition', when: { 'input.total': { gte: 100000 } } },
+        { id: 's2', kind: 'command', command: 'x', params: {} },
+      ]),
+      withShape(),
+    );
+    const panel = await test(el);
+    expect(panel.querySelector('[data-outcome="stops-here"]')).toBeTruthy();
+    expect(panel.querySelector('[data-node-outcome="s2"]')?.getAttribute('data-outcome')).toBe(
+      'not-reached',
+    );
+    expect(panel.textContent).toContain('ui.testStoppedIsWorking');
+  });
+
+  it('warns that a step would be REFUSED for a permission that is not granted', async () => {
+    // The likeliest real failure, and one a preview can catch for free: a flow whose grants are
+    // missing dies at the first step with `flow.grant_denied` and nothing else on any screen
+    // connects the two.
+    const el = await mount(
+      saleFlow([{ id: 's1', kind: 'command', command: 'tasks.tasks.create', params: {} }]),
+      withShape(),
+    );
+    const panel = await test(el);
+    expect(panel.textContent).toContain('ui.testWouldBeRefused');
+  });
+
+  it('says it cannot tell when a guard reads a field the hub withholds', async () => {
+    // Being confidently wrong is the one outcome that would make this feature worse than nothing.
+    const el = await mount(
+      saleFlow([{ id: 'g', kind: 'condition', when: { 'input.customer.email': { eq: 'x@y.z' } } }]),
+      withShape(),
+    );
+    const panel = await test(el);
+    expect(panel.textContent).toContain('ui.testUncertain');
+  });
+
+  it('admits there is no real data instead of inventing a sale', async () => {
+    const el = await mount(
+      saleFlow([{ id: 's1', kind: 'command', command: 'x', params: {} }]),
+      withShape({ ...SALE_SHAPE, samples: 0 }),
+    );
+    const panel = await test(el);
+    expect(panel.textContent).toContain('ui.testNoRealData');
+  });
+
+  it('is reachable from the header, next to the switch it is meant to be pressed before', async () => {
+    const el = await mount(saleFlow([{ id: 's1', kind: 'command', command: 'x', params: {} }]), withShape());
+    const button = el.renderRoot.querySelector('.head [data-act="test"]') as HTMLElement;
+    expect(button).toBeTruthy();
+    button.click();
+    await el.updateComplete;
+    expect(el.tab).toBe('test');
+  });
+});
+
+describe('every dropdown shows what the document ACTUALLY says', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  /**
+   * Found in a real browser, not by happy-dom: Lit applies `.value` to a `<select>` BEFORE its
+   * `<option>` children exist, so the property is discarded and the control falls back to the
+   * first option. A `POST` step opened as `GET`, and a `whatsapp` step opened as `email` — and
+   * then saving wrote back what the box said, silently downgrading the request and switching the
+   * channel the owner is billed for.
+   *
+   * The check is on the `selected` ATTRIBUTE rather than on `.value`, because that is the half
+   * that is wrong on first paint and the half a DOM implementation cannot paper over.
+   *
+   * `policy` is in this table on purpose even though it was never broken: its value happens to be
+   * the first option, so it passed by luck. A control that is right by coincidence is not a check.
+   */
+  const selected = (el: ErpFlowsEditor, node: string, field: string): string | null => {
+    const select = el.renderRoot.querySelector(`[data-node="${node}"] select[data-field="${field}"]`);
+    const option = select?.querySelector('option[selected]') as HTMLOptionElement | null;
+    return option ? option.value : null;
+  };
+
+  const openNode = async (el: ErpFlowsEditor, id: string): Promise<void> => {
+    (el.renderRoot.querySelector(`[data-node="${id}"] button.open`) as HTMLButtonElement).click();
+    await el.updateComplete;
+    await Promise.resolve();
+    await el.updateComplete;
+  };
+
+  it('opens an http step on the method it really has, not on the first one', async () => {
+    const el = await mount(flowWith([{ id: 'h', kind: 'http', method: 'POST', url: 'https://a.test/x' }]));
+    await openNode(el, 'h');
+    expect(selected(el, 'h', 'method')).toBe('POST');
+  });
+
+  it('opens a notify step on the channel it really has — the one that costs money', async () => {
+    const el = await mount(
+      flowWith([
+        { id: 'n', kind: 'notify', channel: 'whatsapp', to: { query: 'q', params: {}, field: 'phone' } },
+      ]),
+    );
+    await openNode(el, 'n');
+    expect(selected(el, 'n', 'channel')).toBe('whatsapp');
+  });
+
+  it('opens an ai step on the policy it really has', async () => {
+    const el = await mount(flowWith([{ id: 'a', kind: 'ai', prompt: 'x', policy: 'auto' }]));
+    await openNode(el, 'a');
+    expect(selected(el, 'a', 'policy')).toBe('auto');
+  });
+
+  it('opens the TRIGGER on the kind it really has (this was broken before flows#3 too)', async () => {
+    const el = await mount(flowWith([], [{ kind: 'cron', cron: '0 9 * * *' }]));
+    (el.renderRoot.querySelector('[data-node="trigger"] button.open') as HTMLButtonElement).click();
+    await el.updateComplete;
+    const option = el.renderRoot.querySelector(
+      '[data-node="trigger"] select[data-field="trigger-kind"] option[selected]',
+    ) as HTMLOptionElement | null;
+    expect(option?.value).toBe('cron');
+  });
+
+  it('opens a guard on the operator it really has', async () => {
+    const el = await mount(
+      flowWith([{ id: 'g', kind: 'condition', when: { 'input.total': { gte: 100 } } }]),
+    );
+    await openNode(el, 'g');
+    const option = el.renderRoot.querySelector(
+      '[data-node="g"] select[data-field="operator"] option[selected]',
+    ) as HTMLOptionElement | null;
+    expect(option?.value).toBe('gte');
+  });
+});
+
+describe('«Probar»: the two things a browser caught that happy-dom could not', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const SHAPE = {
+    event_name: 'sale.completed',
+    declared_by: ['sales'],
+    samples: 5,
+    fields: [
+      { path: 'total', type: 'number', sample: 4250, redacted: false, truncated: false, seen_in: 5 },
+      { path: 'customer.name', type: 'string', sample: 'Marta Ruiz', redacted: false, truncated: false, seen_in: 5 },
+    ],
+  };
+
+  const preview = async (steps: unknown[]): Promise<Element> => {
+    const el = await mount(
+      flowWith(steps, [{ kind: 'event', event: 'sale.completed' }]),
+      fakeClient({ events: { shape: vi.fn(async () => SHAPE) } }),
+    );
+    el.tab = 'test';
+    await el.updateComplete;
+    await Promise.resolve();
+    await el.updateComplete;
+    return el.renderRoot.querySelector('.preview')!;
+  };
+
+  it('says «1 cosa», never «1 cosas»', async () => {
+    // The lazy plural sits on the headline of the screen that is supposed to look finished. The
+    // module already has the two-key helper for exactly this; this one line was not using it.
+    const panel = await preview([
+      { id: 's1', kind: 'command', command: 'x', params: { a: '{{input.nope}}' } },
+    ]);
+    expect(panel.textContent).toContain('ui.testBlanksFoundOne');
+    expect(panel.textContent).not.toContain('ui.testBlanksFound:');
+  });
+
+  it('still SHOWS the line that would go out, so the hole in it is visible', async () => {
+    // Replacing the whole value with «would arrive empty» hides which half is missing. «Gracias,
+    // Marta Ruiz. Te esperamos en ␣» is the thing that makes the fault obvious at a glance.
+    const panel = await preview([
+      {
+        id: 's1',
+        kind: 'notify',
+        channel: 'whatsapp',
+        to: { query: 'q', params: {}, field: 'phone' },
+        vars: { text: 'Gracias, {{input.customer.name}}. Te esperamos en {{input.shop_name}}' },
+      },
+    ]);
+    expect(panel.textContent).toContain('Gracias, Marta Ruiz. Te esperamos en');
+    expect(panel.textContent).toContain('ui.testBlank');
+    expect(panel.querySelector('[data-blank="true"]')).toBeTruthy();
+  });
+});

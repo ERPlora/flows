@@ -92,7 +92,7 @@ módulo se actualiza por su cuenta, así que una copia sería la foto del hub co
 | **Bandeja de aprobación** (`…/approvals`) para los `ai` con `policy: manual` | ✅ (flows#3) |
 | Permisos derivados de los cinco `kind` de grant, patrón de URL incluido | ✅ (flows#3) |
 | **Borrador escrito por el asistente** — bandeja de propuestas (flows#4) | ✅ |
-| «Probar» antes de activar | ⛔ fuera de esta entrega |
+| **«Probar» antes de activar** contra el último evento REAL del hub, sin ejecutar nada (flows#2) | ✅ |
 
 Un documento escrito por un editor **más nuevo** se abre igual, en solo lectura, y se guarda
 intacto: pintarlo sin un step y después guardarlo es como se borra en silencio una automatización
