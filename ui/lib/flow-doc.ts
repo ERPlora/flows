@@ -436,7 +436,10 @@ export function httpPatternFor(url: string): string {
   return `${parsed.origin}${path}*`;
 }
 
-const key = (g: Grant): string => `${g.kind} ${g.value}`;
+/** A grant, as one comparable string. A NUL joins the two halves so that a `kind` and a `value`
+ *  cannot run together into the same key by accident — written as the ESCAPE, because a raw NUL
+ *  byte in the source makes git call this whole file binary and every diff of it unreadable. */
+const key = (g: Grant): string => `${g.kind}\u0000${g.value}`;
 
 /** The required grants this flow does not hold yet. */
 export function missingGrants(doc: FlowDoc, live: Grant[]): Grant[] {

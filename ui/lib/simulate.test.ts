@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   REDACTED,
+  UNKNOWN,
   conditionResult,
   inputFromShape,
   renderTemplate,
@@ -309,5 +310,26 @@ describe('«probar»: what this flow WOULD do, with nothing actually happening',
     const value = out.steps[1].values.find((v) => v.label === 'ref')!;
     expect(value.blank).toBe(false);
     expect(value.unknown).toBe(true);
+  });
+});
+
+describe('the sentinels are exactly the strings they claim to be', () => {
+  // They are written in the source as NUL escapes rather than raw bytes, because a literal NUL
+  // makes git treat the file as binary and every diff of it unreadable. This pins that the escape
+  // still produces the SAME value the raw byte did: a well-meaning cleanup to a plain space would
+  // otherwise be invisible here and only surface as a sentinel colliding with a customer's data.
+  const NUL = String.fromCharCode(0);
+
+  it('wraps the redaction sentinel in NUL, so no real sample can collide with it', () => {
+    expect(REDACTED).toBe(`${NUL}redacted${NUL}`);
+  });
+
+  it('wraps the unknown sentinel the same way', () => {
+    expect(UNKNOWN).toBe(`${NUL}unknown${NUL}`);
+  });
+
+  it('and neither is a string a payload could plausibly contain on its own', () => {
+    expect(REDACTED).not.toBe('redacted');
+    expect(REDACTED.includes(' ')).toBe(false);
   });
 });
