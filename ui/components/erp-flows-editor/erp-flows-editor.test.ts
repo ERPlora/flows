@@ -36,7 +36,17 @@ function fakeClient(overrides: Record<string, unknown> = {}) {
       reject: vi.fn(async () => ({})),
       ...(overrides.flows as object),
     },
-    events: { shape: vi.fn(async () => SHAPE), ...(overrides.events as object) },
+    events: {
+      shape: vi.fn(async () => SHAPE),
+      // What a hub running hub#823 answers. Three events, deliberately NOT in the order the
+      // module's own label dictionary lists them.
+      list: vi.fn(async () => [
+        { name: 'customer.created', declared_by: ['customers'] },
+        { name: 'sale.completed', declared_by: ['sales'], last_seen_at: '2026-08-13T10:00:00Z' },
+        { name: 'shop.refund_issued', declared_by: ['shop'] },
+      ]),
+      ...(overrides.events as object),
+    },
   };
 }
 
@@ -871,6 +881,154 @@ describe('every dropdown shows what the document ACTUALLY says', () => {
       '[data-node="g"] select[data-field="operator"] option[selected]',
     ) as HTMLOptionElement | null;
     expect(option?.value).toBe('gte');
+  });
+});
+
+describe('the triggers on offer are the ones THIS hub fires (flows#8)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const openTrigger = async (el: ErpFlowsEditor): Promise<void> => {
+    (el.renderRoot.querySelector('[data-node="trigger"] button.open') as HTMLButtonElement).click();
+    await el.updateComplete;
+    await Promise.resolve();
+    await Promise.resolve();
+    await el.updateComplete;
+  };
+
+  const eventSelect = (el: ErpFlowsEditor): HTMLSelectElement =>
+    el.renderRoot.querySelector('select[data-field="trigger-event"]') as HTMLSelectElement;
+
+  const offered = (el: ErpFlowsEditor): string[] =>
+    Array.from(eventSelect(el).querySelectorAll('option'))
+      .map((o) => o.value)
+      .filter(Boolean);
+
+  it('fills the dropdown from the hub, not from the list typed into this module', async () => {
+    const client = fakeClient();
+    const el = await mount(flowWith([], [{ kind: 'event', event: 'sale.completed' }]), client);
+    await openTrigger(el);
+
+    expect(client.events.list).toHaveBeenCalled();
+    expect(offered(el)).toEqual([
+      'customer.created',
+      'sale.completed',
+      // A name this module has never heard of, offered anyway: the hub is the authority on which
+      // events exist. Under the old hand-written catalogue it could not be picked at all.
+      'shop.refund_issued',
+    ]);
+  });
+
+  it('lends its own words where it has them and shows the raw name where it does not', async () => {
+    const el = await mount(flowWith([], [{ kind: 'event', event: 'sale.completed' }]));
+    await openTrigger(el);
+    const labels = Array.from(eventSelect(el).querySelectorAll('option')).map((o) => o.textContent);
+
+    expect(labels).toContain('ui.evSaleCompleted');
+    expect(labels).toContain('shop.refund_issued');
+  });
+
+  /**
+   * The trap this screen is known for. Lit applies `.value` to a `<select>` BEFORE its `<option>`
+   * children exist, so the control falls back to the first option — and the change handler then
+   * writes back what the box says. Filling this dropdown from the network makes that window WIDER,
+   * not narrower: the options do not exist for a whole round trip.
+   *
+   * Checked with several saved values on purpose. `customer.created` happens to be the first thing
+   * the hub lists, so a run against it alone would pass by coincidence and prove nothing.
+   */
+  for (const saved of ['sale.completed', 'shop.refund_issued', 'customer.created']) {
+    it(`reopens a saved flow on «${saved}», even though the options arrive later`, async () => {
+      let release!: (rows: unknown) => void;
+      const client = fakeClient({
+        events: {
+          shape: vi.fn(async () => SHAPE),
+          list: vi.fn(() => new Promise((resolve) => (release = resolve))),
+        },
+      });
+      const el = await mount(flowWith([], [{ kind: 'event', event: saved }]), client);
+      await openTrigger(el);
+
+      // Mid-flight: the dropdown has no catalogue yet, and it still must not lose the saved value.
+      expect(eventSelect(el).querySelector('option[selected]')?.getAttribute('value')).toBe(saved);
+
+      release([
+        { name: 'customer.created', declared_by: ['customers'] },
+        { name: 'sale.completed', declared_by: ['sales'] },
+        { name: 'shop.refund_issued', declared_by: ['shop'] },
+      ]);
+      await Promise.resolve();
+      await Promise.resolve();
+      await el.updateComplete;
+
+      expect(eventSelect(el).querySelector('option[selected]')?.getAttribute('value')).toBe(saved);
+      expect(eventSelect(el).value).toBe(saved);
+      // And nothing was written back to the document while the options were missing.
+      expect(el.document.triggers[0]).toMatchObject({ kind: 'event', event: saved });
+    });
+  }
+
+  it('keeps a saved event the hub no longer lists, instead of silently swapping it', async () => {
+    const el = await mount(flowWith([], [{ kind: 'event', event: 'gone.for.good' }]));
+    await openTrigger(el);
+
+    expect(eventSelect(el).querySelector('option[selected]')?.getAttribute('value')).toBe(
+      'gone.for.good',
+    );
+    expect(offered(el)).toContain('gone.for.good');
+  });
+
+  it('SAYS the hub cannot list its events — it does not quietly show the old list', async () => {
+    // A hub older than the SDK method (`events.list` simply is not there). Falling back to
+    // `TRIGGER_CATALOG` would be flows#8 all over again, wearing a disguise.
+    const client = fakeClient({ events: { shape: vi.fn(async () => SHAPE) } });
+    delete (client.events as Record<string, unknown>).list;
+    const el = await mount(flowWith([], [{ kind: 'event', event: '' }]), client);
+    await openTrigger(el);
+
+    expect(el.renderRoot.querySelector('[data-catalog="unsupported"]')).toBeTruthy();
+    expect(offered(el)).toEqual([]);
+    // The way out is still on screen: the free-text box takes any name.
+    expect(el.renderRoot.querySelector('#trigger-event-other')).toBeTruthy();
+  });
+
+  it('names the missing grant when the hub refuses, so the owner can go and give it', async () => {
+    const client = fakeClient({
+      events: {
+        shape: vi.fn(async () => SHAPE),
+        list: vi.fn(async () => {
+          throw Object.assign(new Error('nope'), { code: 'capability_denied' });
+        }),
+      },
+    });
+    const el = await mount(flowWith([], [{ kind: 'event', event: '' }]), client);
+    await openTrigger(el);
+
+    const banner = el.renderRoot.querySelector('[data-catalog="failed"]');
+    expect(banner).toBeTruthy();
+    expect(banner!.textContent).toContain('ui.eventCatalogDenied');
+    expect(offered(el)).toEqual([]);
+  });
+
+  it('says «this hub declares no events yet» rather than showing an empty dropdown', async () => {
+    const client = fakeClient({
+      events: { shape: vi.fn(async () => SHAPE), list: vi.fn(async () => []) },
+    });
+    const el = await mount(flowWith([], [{ kind: 'event', event: '' }]), client);
+    await openTrigger(el);
+
+    expect(el.renderRoot.querySelector('[data-catalog="empty"]')).toBeTruthy();
+  });
+
+  it('asks the hub once, not once per keystroke on the panel', async () => {
+    const client = fakeClient();
+    const el = await mount(flowWith([], [{ kind: 'event', event: 'sale.completed' }]), client);
+    await openTrigger(el);
+    await openTrigger(el);
+    await openTrigger(el);
+
+    expect(client.events.list).toHaveBeenCalledTimes(1);
   });
 });
 

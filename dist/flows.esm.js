@@ -1851,7 +1851,7 @@ __decorateClass4([
 ], OkStatusPill.prototype, "size");
 define("ok-status-pill", OkStatusPill);
 
-// modules/.wt-flows-4/ui/components/erp-flows-value/erp-flows-value.ts
+// modules/.wt-flows-8/ui/components/erp-flows-value/erp-flows-value.ts
 var ErpFlowsValue = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2060,7 +2060,7 @@ __decorateClass([
 ], ErpFlowsValue.prototype, "name", 2);
 define("erp-flows-value", ErpFlowsValue);
 
-// modules/.wt-flows-4/ui/lib/plain-language.ts
+// modules/.wt-flows-8/ui/lib/plain-language.ts
 var MINUTE = 60;
 var HOUR = 3600;
 var DAY = 86400;
@@ -2209,7 +2209,7 @@ function describeSample(field, t3) {
   return field.truncated ? `${text}\u2026` : text;
 }
 
-// modules/.wt-flows-4/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
+// modules/.wt-flows-8/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
 var ErpFlowsFieldPicker = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2453,7 +2453,7 @@ __decorateClass([
 ], ErpFlowsFieldPicker.prototype, "t", 2);
 define("erp-flows-field-picker", ErpFlowsFieldPicker);
 
-// modules/.wt-flows-4/ui/lib/flow-doc.ts
+// modules/.wt-flows-8/ui/lib/flow-doc.ts
 var SCHEMA_VERSION = 1;
 var PATH_ROOTS = ["input", "steps", "event", "secret"];
 var OPERATORS = [
@@ -2668,7 +2668,7 @@ function mergeGrants(live, add, revoke) {
   return out;
 }
 
-// modules/.wt-flows-4/ui/lib/trigger-catalog.ts
+// modules/.wt-flows-8/ui/lib/trigger-catalog.ts
 var TRIGGER_CATALOG = [
   { event: "sale.completed", labelKey: "ui.evSaleCompleted", module: "sales" },
   { event: "sale.voided", labelKey: "ui.evSaleVoided", module: "sales" },
@@ -2735,7 +2735,35 @@ function catalogEntry(event) {
   return TRIGGER_CATALOG.find((e4) => e4.event === event);
 }
 
-// modules/.wt-flows-4/ui/lib/simulate.ts
+// modules/.wt-flows-8/ui/lib/event-catalog.ts
+var BAD_CATALOG = "flows.bad_catalog";
+function toOption(row) {
+  const event = typeof row?.name === "string" ? row.name.trim() : "";
+  if (!event) return null;
+  const entry = catalogEntry(event);
+  return {
+    event,
+    ...entry ? { labelKey: entry.labelKey } : {},
+    declaredBy: Array.isArray(row.declared_by) ? row.declared_by : [],
+    ...typeof row.last_seen_at === "string" ? { lastSeenAt: row.last_seen_at } : {}
+  };
+}
+async function loadEventCatalog(client) {
+  const list = client?.events?.list;
+  if (typeof list !== "function") return { status: "unsupported" };
+  let rows;
+  try {
+    rows = await list.call(client.events);
+  } catch (e4) {
+    const code = e4?.code;
+    return { status: "failed", code: typeof code === "string" && code ? code : BAD_CATALOG };
+  }
+  if (!Array.isArray(rows)) return { status: "failed", code: BAD_CATALOG };
+  const options = rows.map((row) => toOption(row)).filter((o6) => o6 !== null);
+  return options.length ? { status: "ready", options } : { status: "empty" };
+}
+
+// modules/.wt-flows-8/ui/lib/simulate.ts
 var REDACTED = "\0redacted\0";
 var REDACTED_MARK = "\u2022\u2022\u2022\u2022";
 var UNKNOWN = "\0unknown\0";
@@ -3012,7 +3040,7 @@ function simulate(doc, input) {
   };
 }
 
-// modules/.wt-flows-4/ui/lib/hub-flows.ts
+// modules/.wt-flows-8/ui/lib/hub-flows.ts
 var CAPABILITY_DENIED = "capability_denied";
 function hasFlows(candidate) {
   const c4 = candidate;
@@ -3028,7 +3056,7 @@ function errorCode(e4) {
   return typeof code === "string" ? code : "";
 }
 
-// modules/.wt-flows-4/ui/components/erp-flows-editor/erp-flows-editor.ts
+// modules/.wt-flows-8/ui/components/erp-flows-editor/erp-flows-editor.ts
 function guardRows(when) {
   const rows = [];
   for (const [path, ops] of Object.entries(when ?? {})) {
@@ -3074,6 +3102,9 @@ var ErpFlowsEditor = class extends i3 {
     this.runs = [];
     this.runSteps = {};
     this.shape = null;
+    this.eventCatalog = { status: "loading" };
+    /** One round trip per editor, not one per re-render of a panel that toggles open and shut. */
+    this.catalogAsked = false;
     this.secrets = [];
     this.secretName = "";
     this.secretValue = "";
@@ -3545,6 +3576,30 @@ var ErpFlowsEditor = class extends i3 {
   }
   updated(changed) {
     if (changed.has("tab") && this.tab === "history") void this.loadRuns();
+    if (this.openStep === "trigger") void this.ensureEventCatalog();
+    this.pinEventSelect();
+  }
+  /**
+   * Put the saved event back into the trigger `<select>` once its `<option>` children exist.
+   *
+   * The `?selected` attribute of `option()` fixes the FIRST paint, and it is not enough here: this
+   * dropdown's options arrive from the network a round trip later, and Lit **dirty-checks `.value`**
+   * — the binding was already committed with this same string while the list was empty, so on the
+   * re-render that finally adds the options Lit skips it, the browser keeps the selectedness it
+   * computed from an empty list, and the control sits on the first option. Then the change handler
+   * writes back what the box says.
+   *
+   * That is the v0.1.6 bug with a wider window, and it is why this is done in `updated()` — after
+   * the children are in the DOM — instead of trusting the binding. Only when they actually differ,
+   * so it can never fight a person mid-choice.
+   */
+  pinEventSelect() {
+    const select = this.renderRoot.querySelector(
+      'select[data-field="trigger-event"]'
+    );
+    if (!select) return;
+    const chosen = this.trigger.kind === "event" ? this.trigger.event ?? "" : "";
+    if (select.value !== chosen) select.value = chosen;
   }
   // ── Loading ─────────────────────────────────────────────────────────────────────────────────
   get trigger() {
@@ -3558,6 +3613,17 @@ var ErpFlowsEditor = class extends i3 {
     } catch {
       this.grants = [];
     }
+  }
+  /**
+   * The events this hub can fire, asked when the trigger panel first opens and not on mount.
+   *
+   * Not on mount because most of this screen is steps, and this is a third admin-only round trip
+   * on the first paint. Not per open because the answer is a property of the HUB, not of the panel.
+   */
+  async ensureEventCatalog() {
+    if (this.catalogAsked) return;
+    this.catalogAsked = true;
+    this.eventCatalog = await loadEventCatalog(this.client);
   }
   async loadShape() {
     const event = this.trigger.kind === "event" ? this.trigger.event : "";
@@ -3805,20 +3871,55 @@ var ErpFlowsEditor = class extends i3 {
           </div>` : A}
     `;
   }
+  /**
+   * Why the dropdown is not the dropdown — said on screen, never papered over.
+   *
+   * Each of these is a different thing for the owner to do: wait, update the hub, grant a
+   * permission, install a module, or type the name in the box below. Rendering the module's own
+   * hand-written list here instead would be flows#8 again in disguise.
+   */
+  renderCatalogState() {
+    const catalog = this.eventCatalog;
+    if (catalog.status === "ready") return A;
+    if (catalog.status === "loading") {
+      return b2`<span class="hint" data-catalog="loading">${this.t("ui.eventCatalogLoading")}</span>`;
+    }
+    const message = catalog.status === "unsupported" ? this.t("ui.eventCatalogUnsupported") : catalog.status === "empty" ? this.t("ui.eventCatalogEmpty") : catalog.code === CAPABILITY_DENIED ? this.t("ui.eventCatalogDenied") : this.t("ui.eventCatalogFailed", { code: catalog.code });
+    return b2`<ok-inline-feedback
+      tone="warning"
+      icon="alert-circle-outline"
+      data-catalog=${catalog.status}
+      >${message}</ok-inline-feedback
+    >`;
+  }
   renderEventChoice(trigger) {
     const chosen = trigger.event ?? "";
+    const catalog = this.eventCatalog;
+    const options = catalog.status === "ready" ? catalog.options : [];
+    const listed = options.some((o6) => o6.event === chosen);
     return b2`
       <div class="field">
         <label for="trigger-event">${this.t("ui.eventPick")}</label>
         <select
           id="trigger-event"
+          data-field="trigger-event"
           .value=${chosen}
           @change=${(e4) => this.setTrigger({ event: e4.target.value })}
         >
           <option value="">—</option>
-          ${TRIGGER_CATALOG.map((entry) => option(entry.event, this.t(entry.labelKey), chosen))}
-          ${chosen && !catalogEntry(chosen) ? option(chosen, chosen, chosen) : A}
+          ${options.map(
+      (entry) => option(entry.event, entry.labelKey ? this.t(entry.labelKey) : entry.event, chosen)
+    )}
+          <!--
+            The saved event, kept on offer even when the catalogue has not arrived, or arrived
+            without it (the module that emitted it was uninstalled). Dropping it would leave the
+            control on «—» and the next change handler would save that emptiness over a working
+            trigger — the exact shape of the bug fixed in v0.1.6, only now with a network round trip
+            widening the window.
+          -->
+          ${chosen && !listed ? option(chosen, this.eventLabel(chosen), chosen) : A}
         </select>
+        ${this.renderCatalogState()}
         <span class="hint">
           ${!chosen ? this.t("ui.eventOtherHint") : this.shape ? this.shape.samples === 0 ? this.t("ui.eventNoSamples") : this.t("ui.eventSamples", { count: this.shape.samples }) : this.t("ui.eventNotInHub", {
       module: catalogEntry(chosen)?.module ?? "\u2014"
@@ -4836,6 +4937,9 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "shape", 2);
 __decorateClass([
   r5()
+], ErpFlowsEditor.prototype, "eventCatalog", 2);
+__decorateClass([
+  r5()
 ], ErpFlowsEditor.prototype, "secrets", 2);
 __decorateClass([
   r5()
@@ -4860,7 +4964,7 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "pickerRoot", 2);
 define("erp-flows-editor", ErpFlowsEditor);
 
-// modules/.wt-flows-4/ui/lib/templates.ts
+// modules/.wt-flows-8/ui/lib/templates.ts
 var SECTORS = ["any", "beauty", "food"];
 var SCHEMA_VERSION2 = 1;
 function run(id, command, params) {
@@ -5026,7 +5130,7 @@ function missingModules(template, known) {
   return out;
 }
 
-// modules/.wt-flows-4/ui/components/erp-flows-gallery/erp-flows-gallery.ts
+// modules/.wt-flows-8/ui/components/erp-flows-gallery/erp-flows-gallery.ts
 var ErpFlowsGallery = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5379,7 +5483,7 @@ __decorateClass([
 ], ErpFlowsGallery.prototype, "error", 2);
 define("erp-flows-gallery", ErpFlowsGallery);
 
-// modules/.wt-flows-4/ui/components/erp-flows-guide/erp-flows-guide.ts
+// modules/.wt-flows-8/ui/components/erp-flows-guide/erp-flows-guide.ts
 var ErpFlowsGuide = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5641,7 +5745,7 @@ __decorateClass([
 ], ErpFlowsGuide.prototype, "t", 2);
 define("erp-flows-guide", ErpFlowsGuide);
 
-// modules/.wt-flows-4/ui/components/erp-flows-approvals/erp-flows-approvals.ts
+// modules/.wt-flows-8/ui/components/erp-flows-approvals/erp-flows-approvals.ts
 var ErpFlowsApprovals = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5856,7 +5960,7 @@ __decorateClass([
 ], ErpFlowsApprovals.prototype, "busy", 2);
 define("erp-flows-approvals", ErpFlowsApprovals);
 
-// modules/.wt-flows-4/ui/lib/ai-draft.ts
+// modules/.wt-flows-8/ui/lib/ai-draft.ts
 var DRAFT_STEP_KINDS = ["command", "condition", "delay"];
 function readNotes(raw) {
   const value = typeof raw === "string" ? safeParse(raw) : raw;
@@ -6050,7 +6154,7 @@ function draftGaps(doc, known) {
   return out;
 }
 
-// modules/.wt-flows-4/locales/es.json
+// modules/.wt-flows-8/locales/es.json
 var es_default = {
   name: "Automatizaciones",
   navigation: {
@@ -6100,6 +6204,11 @@ var es_default = {
     triggerKindManual: "Solo a mano",
     eventPick: "Elige qu\xE9 pasa",
     eventChecking: "Consultando a este hub\u2026",
+    eventCatalogLoading: "Preguntando a este hub qu\xE9 eventos puede lanzar\u2026",
+    eventCatalogUnsupported: "Este hub es demasiado antiguo para listar sus eventos. Actual\xEDzalo para elegir de una lista \u2014 mientras tanto, escribe el nombre exacto abajo.",
+    eventCatalogEmpty: "Este hub todav\xEDa no tiene ning\xFAn evento. Instala un m\xF3dulo que los produzca \u2014 mientras tanto, escribe el nombre exacto abajo.",
+    eventCatalogDenied: "Automatizaciones a\xFAn no puede leer los eventos de este hub. Conc\xE9deselo en Ajustes \u2192 Permisos y vuelve a abrir el flujo.",
+    eventCatalogFailed: "Este hub no ha podido listar sus eventos ({code}). Escribe el nombre exacto abajo.",
     eventNotInHub: "Este hub no lo tiene \u2014 lo trae el m\xF3dulo {module}",
     eventNoSamples: "A\xFAn no hay ejemplos: aqu\xED no ha pasado nada as\xED en los \xFAltimos 90 d\xEDas",
     eventSamples: "{count} ejemplos recientes",
@@ -6439,7 +6548,7 @@ var es_default = {
   }
 };
 
-// modules/.wt-flows-4/locales/en.json
+// modules/.wt-flows-8/locales/en.json
 var en_default = {
   name: "Automations",
   navigation: {
@@ -6489,6 +6598,11 @@ var en_default = {
     triggerKindManual: "Only by hand",
     eventPick: "Pick what happens",
     eventChecking: "Checking with this hub\u2026",
+    eventCatalogLoading: "Asking this hub which events it can fire\u2026",
+    eventCatalogUnsupported: "This hub is too old to list its own events. Update it to pick from a list \u2014 meanwhile, type the exact name below.",
+    eventCatalogEmpty: "This hub does not have any event yet. Install a module that produces some \u2014 meanwhile, type the exact name below.",
+    eventCatalogDenied: "Automations may not read this hub\u2019s events yet. Grant it in Settings \u2192 Permissions, then reopen this flow.",
+    eventCatalogFailed: "This hub could not list its events ({code}). Type the exact name below.",
     eventNotInHub: "This hub does not have it \u2014 it comes with the {module} module",
     eventNoSamples: "No examples yet: nothing like this has happened here in the last 90 days",
     eventSamples: "{count} recent examples",
@@ -6828,7 +6942,7 @@ var en_default = {
   }
 };
 
-// modules/.wt-flows-4/ui/components/erp-flows-app/erp-flows-app.ts
+// modules/.wt-flows-8/ui/components/erp-flows-app/erp-flows-app.ts
 var CATALOG = { es: es_default, en: en_default };
 var ErpFlowsApp = class extends i3 {
   constructor() {

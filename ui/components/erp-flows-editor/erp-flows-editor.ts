@@ -50,10 +50,12 @@ import {
   runOutcome,
 } from '../../lib/plain-language';
 import type { RunRow, RunStepRow, Translator } from '../../lib/plain-language';
-import { TRIGGER_CATALOG, catalogEntry } from '../../lib/trigger-catalog';
+import { catalogEntry } from '../../lib/trigger-catalog';
+import { loadEventCatalog } from '../../lib/event-catalog';
+import type { EventCatalog } from '../../lib/event-catalog';
 import { inputFromShape, simulate } from '../../lib/simulate';
 import type { ConditionResult } from '../../lib/simulate';
-import { errorCode } from '../../lib/hub-flows';
+import { CAPABILITY_DENIED, errorCode } from '../../lib/hub-flows';
 import type { EventShape, Flow, ModuleClient, SecretInfo } from '../../lib/hub-flows';
 import type { DraftGap } from '../../lib/ai-draft';
 
@@ -630,6 +632,17 @@ export class ErpFlowsEditor extends LitElement {
 
   @state() private shape: EventShape | null = null;
 
+  /**
+   * Which events THIS hub can fire (flows#8). Asked once, the first time the trigger panel opens.
+   *
+   * Every non-`ready` branch is drawn on screen instead of being papered over with the module's own
+   * hand-written list: see `event-catalog.ts` for why that fall back would be the bug again.
+   */
+  @state() private eventCatalog: EventCatalog = { status: 'loading' };
+
+  /** One round trip per editor, not one per re-render of a panel that toggles open and shut. */
+  private catalogAsked = false;
+
   /** The secret NAMES this hub holds. Never a value: no endpoint returns one (ADR-0283 §4). */
   @state() private secrets: SecretInfo[] = [];
 
@@ -671,6 +684,31 @@ export class ErpFlowsEditor extends LitElement {
 
   updated(changed: Map<string, unknown>): void {
     if (changed.has('tab') && this.tab === 'history') void this.loadRuns();
+    if (this.openStep === 'trigger') void this.ensureEventCatalog();
+    this.pinEventSelect();
+  }
+
+  /**
+   * Put the saved event back into the trigger `<select>` once its `<option>` children exist.
+   *
+   * The `?selected` attribute of `option()` fixes the FIRST paint, and it is not enough here: this
+   * dropdown's options arrive from the network a round trip later, and Lit **dirty-checks `.value`**
+   * — the binding was already committed with this same string while the list was empty, so on the
+   * re-render that finally adds the options Lit skips it, the browser keeps the selectedness it
+   * computed from an empty list, and the control sits on the first option. Then the change handler
+   * writes back what the box says.
+   *
+   * That is the v0.1.6 bug with a wider window, and it is why this is done in `updated()` — after
+   * the children are in the DOM — instead of trusting the binding. Only when they actually differ,
+   * so it can never fight a person mid-choice.
+   */
+  private pinEventSelect(): void {
+    const select = this.renderRoot.querySelector(
+      'select[data-field="trigger-event"]',
+    ) as HTMLSelectElement | null;
+    if (!select) return;
+    const chosen = this.trigger.kind === 'event' ? (this.trigger.event ?? '') : '';
+    if (select.value !== chosen) select.value = chosen;
   }
 
   // ── Loading ─────────────────────────────────────────────────────────────────────────────────
@@ -689,6 +727,18 @@ export class ErpFlowsEditor extends LitElement {
       // own by showing everything as «waiting for your permission».
       this.grants = [];
     }
+  }
+
+  /**
+   * The events this hub can fire, asked when the trigger panel first opens and not on mount.
+   *
+   * Not on mount because most of this screen is steps, and this is a third admin-only round trip
+   * on the first paint. Not per open because the answer is a property of the HUB, not of the panel.
+   */
+  private async ensureEventCatalog(): Promise<void> {
+    if (this.catalogAsked) return;
+    this.catalogAsked = true;
+    this.eventCatalog = await loadEventCatalog(this.client);
   }
 
   private async loadShape(): Promise<void> {
@@ -1005,20 +1055,63 @@ export class ErpFlowsEditor extends LitElement {
     `;
   }
 
+  /**
+   * Why the dropdown is not the dropdown — said on screen, never papered over.
+   *
+   * Each of these is a different thing for the owner to do: wait, update the hub, grant a
+   * permission, install a module, or type the name in the box below. Rendering the module's own
+   * hand-written list here instead would be flows#8 again in disguise.
+   */
+  private renderCatalogState() {
+    const catalog = this.eventCatalog;
+    if (catalog.status === 'ready') return nothing;
+    if (catalog.status === 'loading') {
+      return html`<span class="hint" data-catalog="loading">${this.t('ui.eventCatalogLoading')}</span>`;
+    }
+    const message =
+      catalog.status === 'unsupported'
+        ? this.t('ui.eventCatalogUnsupported')
+        : catalog.status === 'empty'
+          ? this.t('ui.eventCatalogEmpty')
+          : catalog.code === CAPABILITY_DENIED
+            ? this.t('ui.eventCatalogDenied')
+            : this.t('ui.eventCatalogFailed', { code: catalog.code });
+    return html`<ok-inline-feedback
+      tone="warning"
+      icon="alert-circle-outline"
+      data-catalog=${catalog.status}
+      >${message}</ok-inline-feedback
+    >`;
+  }
+
   private renderEventChoice(trigger: Trigger) {
     const chosen = trigger.event ?? '';
+    const catalog = this.eventCatalog;
+    const options = catalog.status === 'ready' ? catalog.options : [];
+    const listed = options.some((o) => o.event === chosen);
     return html`
       <div class="field">
         <label for="trigger-event">${this.t('ui.eventPick')}</label>
         <select
           id="trigger-event"
+          data-field="trigger-event"
           .value=${chosen}
           @change=${(e: Event) => this.setTrigger({ event: (e.target as HTMLSelectElement).value })}
         >
           <option value="">—</option>
-          ${TRIGGER_CATALOG.map((entry) => option(entry.event, this.t(entry.labelKey), chosen))}
-          ${chosen && !catalogEntry(chosen) ? option(chosen, chosen, chosen) : nothing}
+          ${options.map((entry) =>
+            option(entry.event, entry.labelKey ? this.t(entry.labelKey) : entry.event, chosen),
+          )}
+          <!--
+            The saved event, kept on offer even when the catalogue has not arrived, or arrived
+            without it (the module that emitted it was uninstalled). Dropping it would leave the
+            control on «—» and the next change handler would save that emptiness over a working
+            trigger — the exact shape of the bug fixed in v0.1.6, only now with a network round trip
+            widening the window.
+          -->
+          ${chosen && !listed ? option(chosen, this.eventLabel(chosen), chosen) : nothing}
         </select>
+        ${this.renderCatalogState()}
         <span class="hint">
           ${!chosen
             ? this.t('ui.eventOtherHint')
