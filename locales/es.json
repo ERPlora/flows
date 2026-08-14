@@ -332,6 +332,42 @@
       "blankAmountHint": "En céntimos: 10000 son 100,00 €. El hub guarda el dinero en céntimos, así que poner aquí 100 sería un euro.",
       "noteContent": "Visita grande. Merece una atención especial la próxima vez."
     },
+    "newStaff": {
+      "name": "Entra alguien nuevo en el equipo",
+      "summary": "Se da de alta a una persona nueva y las tareas de ponerla en marcha te esperan en el mismo minuto.",
+      "plain": "Cuando se da de alta a alguien en el equipo → te queda la tarea de prepararle todo: llaves, accesos, uniforme, el primer turno.",
+      "blankList": "Qué hay que hacer con alguien que entra",
+      "blankListHint": "Lo que siempre se te olvida. Escríbelo como una lista en el texto de la tarea: llaves, código de la caja, cuadrante, quién le enseña la casa.",
+      "taskTitle": "Preparar a la persona que acaba de entrar",
+      "taskDescription": "Llaves y código de la alarma · acceso a la caja · cuadrante de la primera semana · quién le enseña la casa el primer día."
+    },
+    "whatsapp": {
+      "name": "Que no se quede ningún WhatsApp sin contestar",
+      "summary": "Entra un mensaje y contestarlo aparece en la lista de alguien al momento, antes de que se lo trague el día.",
+      "plain": "Cuando llega un mensaje por WhatsApp → queda la tarea urgente de leerlo y contestar.",
+      "blankWho": "En la lista de quién cae",
+      "blankWhoHint": "Una persona, no «alguien». Una tarea que ven todos es una tarea que todos dan por hecho que ha cogido el otro.",
+      "taskTitle": "Contestar el mensaje de WhatsApp",
+      "taskDescription": "Léelo en la bandeja y contesta. Si acaba en una reserva o en un pedido, mételo como siempre."
+    },
+    "cashClose": {
+      "name": "Al cerrar la caja, alguien repasa el día",
+      "summary": "Se cierra la sesión y el repaso cae en una lista con la tienda todavía ahí.",
+      "plain": "Cuando se cierra una sesión de caja → queda la tarea de repasar el arqueo y los papeles del día.",
+      "blankWho": "En la lista de quién cae",
+      "blankWhoHint": "Quien haga el arqueo. Si eres tú, déjalo como está.",
+      "taskTitle": "Repasar el cierre de caja",
+      "taskDescription": "Arqueo contra la sesión · lo que no haya cuadrado · que las facturas del día hayan salido."
+    },
+    "weekReview": {
+      "name": "El viernes por la tarde, mirar la semana",
+      "summary": "Un recordatorio semanal para sentarte con los números, la tarde que tú elijas.",
+      "plain": "Todos los viernes a las 18:00 → te queda la tarea de repasar la semana: qué se ha vendido, qué no, qué hay que pedir.",
+      "blankWhen": "El día y la hora",
+      "blankWhenHint": "Viernes a las 18:00 para empezar. Ponlo cuando estés cerrando, no en mitad del servicio.",
+      "taskTitle": "Repasar la semana",
+      "taskDescription": "Qué se ha vendido y qué no · qué hay que volver a pedir · lo que sigue sin cobrarse · la agenda de la semana que viene."
+    },
     "morning": {
       "name": "Cada mañana, repasar la agenda de mañana",
       "summary": "Una tarea esperándote a primera hora, para que ninguna cita se quede sin confirmar.",

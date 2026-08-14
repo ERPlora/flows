@@ -5070,6 +5070,138 @@ var TEMPLATES = [
       ]
     })
   },
+  /**
+   * **R0 #7 — somebody joins the team → the checklist gets written** (flows#18).
+   *
+   * No field mapping, on purpose. `staff.member.created` is emitted by a declarative command and
+   * this catalogue has not seen its payload against a real hub, so the task says what to do rather
+   * than promising a name it might print as a row of hex. Same rule as `no-show-followup`.
+   */
+  {
+    id: "new-staff-checklist",
+    sector: "any",
+    icon: "person-add-outline",
+    nameKey: "tpl.newStaff.name",
+    summaryKey: "tpl.newStaff.summary",
+    plainKey: "tpl.newStaff.plain",
+    blanks: [{ labelKey: "tpl.newStaff.blankList", hintKey: "tpl.newStaff.blankListHint" }],
+    witnesses: [
+      { event: "staff.member.created", module: "staff" },
+      { event: "tasks.task.created", module: "tasks" }
+    ],
+    grantReasons: { "tasks.tasks.create": "tpl.grant.tasksCreate" },
+    build: (t3) => ({
+      schema_version: SCHEMA_VERSION2,
+      triggers: [{ kind: "event", event: "staff.member.created" }],
+      steps: [
+        run("s1", "tasks.tasks.create", {
+          title: t3("tpl.newStaff.taskTitle"),
+          description: t3("tpl.newStaff.taskDescription"),
+          priority: "high"
+        })
+      ]
+    })
+  },
+  /**
+   * **R0 #8 — somebody writes on WhatsApp → it does not sit there unanswered.**
+   *
+   * What this deliberately does NOT do is reply on its own. A reply costs money every time it is
+   * sent, it goes to a person who did not agree to be written to by a machine, and getting it
+   * wrong is the one mistake on this whole screen the owner cannot take back. So the automation
+   * puts it in front of a human, fast, and the `notify` step is theirs to add if they want one —
+   * which is the same line the guide draws about what the assistant will and will not propose.
+   */
+  {
+    id: "whatsapp-answer",
+    sector: "any",
+    icon: "chatbubble-ellipses-outline",
+    nameKey: "tpl.whatsapp.name",
+    summaryKey: "tpl.whatsapp.summary",
+    plainKey: "tpl.whatsapp.plain",
+    blanks: [{ labelKey: "tpl.whatsapp.blankWho", hintKey: "tpl.whatsapp.blankWhoHint" }],
+    witnesses: [
+      { event: "whatsapp_inbox.message.received", module: "whatsapp_inbox" },
+      { event: "tasks.task.created", module: "tasks" }
+    ],
+    grantReasons: { "tasks.tasks.create": "tpl.grant.tasksCreate" },
+    build: (t3) => ({
+      schema_version: SCHEMA_VERSION2,
+      triggers: [{ kind: "event", event: "whatsapp_inbox.message.received" }],
+      steps: [
+        run("s1", "tasks.tasks.create", {
+          title: t3("tpl.whatsapp.taskTitle"),
+          description: t3("tpl.whatsapp.taskDescription"),
+          priority: "urgent"
+        })
+      ]
+    })
+  },
+  /**
+   * **R0 #12 — the till closes → somebody looks at the day before going home.**
+   *
+   * The version flows#18 asked for waits for the fiscal documents of that session to finish and
+   * then sends a summary. The kernel cannot do the waiting: a flow is a straight line with no step
+   * that parks until a correlated second event arrives, and `delay` counts from now rather than
+   * until something happens. What is left, and what this is, is the part that works: the moment the
+   * till closes, the check lands on somebody's list while the shop is still standing there.
+   */
+  {
+    id: "cash-close-review",
+    sector: "any",
+    icon: "file-tray-full-outline",
+    nameKey: "tpl.cashClose.name",
+    summaryKey: "tpl.cashClose.summary",
+    plainKey: "tpl.cashClose.plain",
+    blanks: [{ labelKey: "tpl.cashClose.blankWho", hintKey: "tpl.cashClose.blankWhoHint" }],
+    witnesses: [
+      { event: "cash_register.session_closed", module: "cash_register" },
+      { event: "tasks.task.created", module: "tasks" }
+    ],
+    grantReasons: { "tasks.tasks.create": "tpl.grant.tasksCreate" },
+    build: (t3) => ({
+      schema_version: SCHEMA_VERSION2,
+      triggers: [{ kind: "event", event: "cash_register.session_closed" }],
+      steps: [
+        run("s1", "tasks.tasks.create", {
+          title: t3("tpl.cashClose.taskTitle"),
+          description: t3("tpl.cashClose.taskDescription"),
+          priority: "high"
+        })
+      ]
+    })
+  },
+  /**
+   * **R0 #5 — Friday evening → the week gets looked at.**
+   *
+   * flows#18 asked for the week's takings IN the message. The engine has no read step: v1 runs
+   * commands, guards and waits, and there is no `query` step and no `query` grant, so nothing in a
+   * flow can fetch a number to put in a sentence. Sending «here are your sales:» followed by
+   * nothing would be worse than not sending it. So this books the review instead, on the evening
+   * of the day the owner picks, and the figures are one tap away where they already live.
+   */
+  {
+    id: "friday-week-review",
+    sector: "any",
+    icon: "stats-chart-outline",
+    nameKey: "tpl.weekReview.name",
+    summaryKey: "tpl.weekReview.summary",
+    plainKey: "tpl.weekReview.plain",
+    blanks: [{ labelKey: "tpl.weekReview.blankWhen", hintKey: "tpl.weekReview.blankWhenHint" }],
+    witnesses: [{ event: "tasks.task.created", module: "tasks" }],
+    grantReasons: { "tasks.tasks.create": "tpl.grant.tasksCreate" },
+    build: (t3) => ({
+      schema_version: SCHEMA_VERSION2,
+      // 18:00 on day 5 — Friday. Five-field cron, drawn as a clock by the editor: nobody types it.
+      triggers: [{ kind: "cron", cron: "0 18 * * 5" }],
+      steps: [
+        run("s1", "tasks.tasks.create", {
+          title: t3("tpl.weekReview.taskTitle"),
+          description: t3("tpl.weekReview.taskDescription"),
+          priority: "medium"
+        })
+      ]
+    })
+  },
   // ── Hair and beauty ─────────────────────────────────────────────────────────────────────────
   {
     id: "morning-agenda-check",
@@ -6595,6 +6727,42 @@ var es_default = {
       blankAmountHint: "En c\xE9ntimos: 10000 son 100,00 \u20AC. El hub guarda el dinero en c\xE9ntimos, as\xED que poner aqu\xED 100 ser\xEDa un euro.",
       noteContent: "Visita grande. Merece una atenci\xF3n especial la pr\xF3xima vez."
     },
+    newStaff: {
+      name: "Entra alguien nuevo en el equipo",
+      summary: "Se da de alta a una persona nueva y las tareas de ponerla en marcha te esperan en el mismo minuto.",
+      plain: "Cuando se da de alta a alguien en el equipo \u2192 te queda la tarea de prepararle todo: llaves, accesos, uniforme, el primer turno.",
+      blankList: "Qu\xE9 hay que hacer con alguien que entra",
+      blankListHint: "Lo que siempre se te olvida. Escr\xEDbelo como una lista en el texto de la tarea: llaves, c\xF3digo de la caja, cuadrante, qui\xE9n le ense\xF1a la casa.",
+      taskTitle: "Preparar a la persona que acaba de entrar",
+      taskDescription: "Llaves y c\xF3digo de la alarma \xB7 acceso a la caja \xB7 cuadrante de la primera semana \xB7 qui\xE9n le ense\xF1a la casa el primer d\xEDa."
+    },
+    whatsapp: {
+      name: "Que no se quede ning\xFAn WhatsApp sin contestar",
+      summary: "Entra un mensaje y contestarlo aparece en la lista de alguien al momento, antes de que se lo trague el d\xEDa.",
+      plain: "Cuando llega un mensaje por WhatsApp \u2192 queda la tarea urgente de leerlo y contestar.",
+      blankWho: "En la lista de qui\xE9n cae",
+      blankWhoHint: "Una persona, no \xABalguien\xBB. Una tarea que ven todos es una tarea que todos dan por hecho que ha cogido el otro.",
+      taskTitle: "Contestar el mensaje de WhatsApp",
+      taskDescription: "L\xE9elo en la bandeja y contesta. Si acaba en una reserva o en un pedido, m\xE9telo como siempre."
+    },
+    cashClose: {
+      name: "Al cerrar la caja, alguien repasa el d\xEDa",
+      summary: "Se cierra la sesi\xF3n y el repaso cae en una lista con la tienda todav\xEDa ah\xED.",
+      plain: "Cuando se cierra una sesi\xF3n de caja \u2192 queda la tarea de repasar el arqueo y los papeles del d\xEDa.",
+      blankWho: "En la lista de qui\xE9n cae",
+      blankWhoHint: "Quien haga el arqueo. Si eres t\xFA, d\xE9jalo como est\xE1.",
+      taskTitle: "Repasar el cierre de caja",
+      taskDescription: "Arqueo contra la sesi\xF3n \xB7 lo que no haya cuadrado \xB7 que las facturas del d\xEDa hayan salido."
+    },
+    weekReview: {
+      name: "El viernes por la tarde, mirar la semana",
+      summary: "Un recordatorio semanal para sentarte con los n\xFAmeros, la tarde que t\xFA elijas.",
+      plain: "Todos los viernes a las 18:00 \u2192 te queda la tarea de repasar la semana: qu\xE9 se ha vendido, qu\xE9 no, qu\xE9 hay que pedir.",
+      blankWhen: "El d\xEDa y la hora",
+      blankWhenHint: "Viernes a las 18:00 para empezar. Ponlo cuando est\xE9s cerrando, no en mitad del servicio.",
+      taskTitle: "Repasar la semana",
+      taskDescription: "Qu\xE9 se ha vendido y qu\xE9 no \xB7 qu\xE9 hay que volver a pedir \xB7 lo que sigue sin cobrarse \xB7 la agenda de la semana que viene."
+    },
     morning: {
       name: "Cada ma\xF1ana, repasar la agenda de ma\xF1ana",
       summary: "Una tarea esper\xE1ndote a primera hora, para que ninguna cita se quede sin confirmar.",
@@ -7018,6 +7186,42 @@ var en_default = {
       blankAmount: "The amount that makes a sale a big one",
       blankAmountHint: "In cents: 10000 is 100,00 \u20AC. The hub keeps money in cents, so writing 100 here would mean one euro.",
       noteContent: "Big visit. Worth a personal welcome next time."
+    },
+    newStaff: {
+      name: "Somebody joins the team",
+      summary: "A new person is added to your staff and the setting-up jobs are waiting for you the same minute.",
+      plain: "When somebody new is added to the team \u2192 leave you the task of setting them up: keys, access, uniform, the first shift.",
+      blankList: "What has to be done for a new starter",
+      blankListHint: "Whatever you always forget. Write it as one list in the task text \u2014 keys, till code, rota, who shows them around.",
+      taskTitle: "Set up the new team member",
+      taskDescription: "Keys and alarm code \xB7 access to the till \xB7 rota for the first week \xB7 who walks them round on day one."
+    },
+    whatsapp: {
+      name: "Nobody's WhatsApp goes unanswered",
+      summary: "A message comes in and answering it lands on somebody's list straight away, before the day swallows it.",
+      plain: "When a message arrives on WhatsApp \u2192 leave the urgent task of reading it and answering.",
+      blankWho: "Whose list it lands on",
+      blankWhoHint: "One person, not \xABsomebody\xBB. A task everybody can see is a task everybody assumes the other one took.",
+      taskTitle: "Answer the WhatsApp message",
+      taskDescription: "Read it in the inbox and answer. If it turns into a booking or an order, put it through as usual."
+    },
+    cashClose: {
+      name: "When the till closes, somebody checks the day",
+      summary: "The session is closed and the check lands on a list while the shop is still standing there.",
+      plain: "When a till session is closed \u2192 leave the task of checking the count and the day's paperwork.",
+      blankWho: "Whose list it lands on",
+      blankWhoHint: "Whoever cashes up. If that is you, leave it as it is.",
+      taskTitle: "Check the till closing",
+      taskDescription: "Count against the session \xB7 anything that did not add up \xB7 the day's invoices went out."
+    },
+    weekReview: {
+      name: "Friday evening, look at the week",
+      summary: "A weekly reminder to sit down with the numbers, on the evening you choose.",
+      plain: "Every Friday at 18:00 \u2192 leave you the task of going through the week: what sold, what did not, what to order.",
+      blankWhen: "The day and the time",
+      blankWhenHint: "Friday at 18:00 to start with. Put it when you are closing, not in the middle of service.",
+      taskTitle: "Go through the week",
+      taskDescription: "What sold and what did not \xB7 what to reorder \xB7 anything still unpaid \xB7 next week's diary."
     },
     morning: {
       name: "Every morning, go through tomorrow's diary",
