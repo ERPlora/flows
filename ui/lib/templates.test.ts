@@ -203,3 +203,63 @@ describe('a template becomes a flow', () => {
     }
   });
 });
+
+/**
+ * **The seven daily automations flows#18 measured as missing.**
+ *
+ * The R0 pass found 0 of 12 everyday intentions reachable without syntax. Four of the seven it
+ * asked for are here; the other three are named below with the kernel gap that stops them, because
+ * a card that cannot work is worse than no card — it costs the owner the walk to find out.
+ */
+describe('the everyday automations of flows#18', () => {
+  const byId = (id: string) => TEMPLATES.find((tpl) => tpl.id === id);
+
+  it.each([
+    ['new-staff-checklist', 'staff.member.created', 'R0 #7 — somebody joins → the checklist'],
+    ['whatsapp-answer', 'whatsapp_inbox.message.received', 'R0 #8 — a message arrives → answer it'],
+    ['cash-close-review', 'cash_register.session_closed', 'R0 #12 — the till closes → check the day'],
+  ])('%s starts on %s', (id, event) => {
+    const template = byId(id);
+    expect(template, id).toBeTruthy();
+    const doc = buildTemplate(template!, t);
+    expect(doc.triggers[0]).toEqual({ kind: 'event', event });
+  });
+
+  it('friday-week-review starts on the clock, on a Friday', () => {
+    const doc = buildTemplate(byId('friday-week-review')!, t);
+    // Five-field cron, day 5 = Friday. The editor draws it as a clock; nobody types this.
+    expect(doc.triggers[0]).toMatchObject({ kind: 'cron' });
+    expect(String((doc.triggers[0] as { cron?: string }).cron).split(' ')[4]).toBe('5');
+  });
+
+  /**
+   * The rule that keeps a card from being a promise nobody can keep: a step may only map a field
+   * this catalogue has SEEN in a real payload. `no-show-followup` is the precedent — it puts no
+   * name in its title because that event carries only an id.
+   *
+   * The four added here map none at all, so their text cannot go stale behind a payload change.
+   */
+  it.each(['new-staff-checklist', 'whatsapp-answer', 'cash-close-review', 'friday-week-review'])(
+    '%s maps no payload field it has not seen',
+    (id) => {
+      const doc = buildTemplate(byId(id)!, t);
+      expect(JSON.stringify(doc)).not.toContain('input.');
+    },
+  );
+
+  it('names the module behind every event it waits for, so «install X» can be said', () => {
+    for (const id of ['new-staff-checklist', 'whatsapp-answer', 'cash-close-review', 'friday-week-review']) {
+      const template = byId(id)!;
+      expect(template.witnesses.length, id).toBeGreaterThan(0);
+      for (const witness of template.witnesses) expect(witness.module, id).toBeTruthy();
+    }
+  });
+
+  it('asks for its permissions by name, before the flow exists', () => {
+    for (const id of ['new-staff-checklist', 'whatsapp-answer', 'cash-close-review', 'friday-week-review']) {
+      const grants = templateGrants(byId(id)!, t);
+      expect(grants.length, id).toBeGreaterThan(0);
+      for (const grant of grants) expect(byId(id)!.grantReasons[grant.value], grant.value).toBeTruthy();
+    }
+  });
+});

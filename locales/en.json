@@ -332,6 +332,42 @@
       "blankAmountHint": "In cents: 10000 is 100,00 €. The hub keeps money in cents, so writing 100 here would mean one euro.",
       "noteContent": "Big visit. Worth a personal welcome next time."
     },
+    "newStaff": {
+      "name": "Somebody joins the team",
+      "summary": "A new person is added to your staff and the setting-up jobs are waiting for you the same minute.",
+      "plain": "When somebody new is added to the team → leave you the task of setting them up: keys, access, uniform, the first shift.",
+      "blankList": "What has to be done for a new starter",
+      "blankListHint": "Whatever you always forget. Write it as one list in the task text — keys, till code, rota, who shows them around.",
+      "taskTitle": "Set up the new team member",
+      "taskDescription": "Keys and alarm code · access to the till · rota for the first week · who walks them round on day one."
+    },
+    "whatsapp": {
+      "name": "Nobody's WhatsApp goes unanswered",
+      "summary": "A message comes in and answering it lands on somebody's list straight away, before the day swallows it.",
+      "plain": "When a message arrives on WhatsApp → leave the urgent task of reading it and answering.",
+      "blankWho": "Whose list it lands on",
+      "blankWhoHint": "One person, not «somebody». A task everybody can see is a task everybody assumes the other one took.",
+      "taskTitle": "Answer the WhatsApp message",
+      "taskDescription": "Read it in the inbox and answer. If it turns into a booking or an order, put it through as usual."
+    },
+    "cashClose": {
+      "name": "When the till closes, somebody checks the day",
+      "summary": "The session is closed and the check lands on a list while the shop is still standing there.",
+      "plain": "When a till session is closed → leave the task of checking the count and the day's paperwork.",
+      "blankWho": "Whose list it lands on",
+      "blankWhoHint": "Whoever cashes up. If that is you, leave it as it is.",
+      "taskTitle": "Check the till closing",
+      "taskDescription": "Count against the session · anything that did not add up · the day's invoices went out."
+    },
+    "weekReview": {
+      "name": "Friday evening, look at the week",
+      "summary": "A weekly reminder to sit down with the numbers, on the evening you choose.",
+      "plain": "Every Friday at 18:00 → leave you the task of going through the week: what sold, what did not, what to order.",
+      "blankWhen": "The day and the time",
+      "blankWhenHint": "Friday at 18:00 to start with. Put it when you are closing, not in the middle of service.",
+      "taskTitle": "Go through the week",
+      "taskDescription": "What sold and what did not · what to reorder · anything still unpaid · next week's diary."
+    },
     "morning": {
       "name": "Every morning, go through tomorrow's diary",
       "summary": "A task waiting for you first thing, so nobody's appointment goes unconfirmed.",

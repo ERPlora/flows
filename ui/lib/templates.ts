@@ -153,6 +153,139 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     }),
   },
 
+  /**
+   * **R0 #7 — somebody joins the team → the checklist gets written** (flows#18).
+   *
+   * No field mapping, on purpose. `staff.member.created` is emitted by a declarative command and
+   * this catalogue has not seen its payload against a real hub, so the task says what to do rather
+   * than promising a name it might print as a row of hex. Same rule as `no-show-followup`.
+   */
+  {
+    id: 'new-staff-checklist',
+    sector: 'any',
+    icon: 'person-add-outline',
+    nameKey: 'tpl.newStaff.name',
+    summaryKey: 'tpl.newStaff.summary',
+    plainKey: 'tpl.newStaff.plain',
+    blanks: [{ labelKey: 'tpl.newStaff.blankList', hintKey: 'tpl.newStaff.blankListHint' }],
+    witnesses: [
+      { event: 'staff.member.created', module: 'staff' },
+      { event: 'tasks.task.created', module: 'tasks' },
+    ],
+    grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
+    build: (t) => ({
+      schema_version: SCHEMA_VERSION,
+      triggers: [{ kind: 'event', event: 'staff.member.created' }],
+      steps: [
+        run('s1', 'tasks.tasks.create', {
+          title: t('tpl.newStaff.taskTitle'),
+          description: t('tpl.newStaff.taskDescription'),
+          priority: 'high',
+        }),
+      ],
+    }),
+  },
+  /**
+   * **R0 #8 — somebody writes on WhatsApp → it does not sit there unanswered.**
+   *
+   * What this deliberately does NOT do is reply on its own. A reply costs money every time it is
+   * sent, it goes to a person who did not agree to be written to by a machine, and getting it
+   * wrong is the one mistake on this whole screen the owner cannot take back. So the automation
+   * puts it in front of a human, fast, and the `notify` step is theirs to add if they want one —
+   * which is the same line the guide draws about what the assistant will and will not propose.
+   */
+  {
+    id: 'whatsapp-answer',
+    sector: 'any',
+    icon: 'chatbubble-ellipses-outline',
+    nameKey: 'tpl.whatsapp.name',
+    summaryKey: 'tpl.whatsapp.summary',
+    plainKey: 'tpl.whatsapp.plain',
+    blanks: [{ labelKey: 'tpl.whatsapp.blankWho', hintKey: 'tpl.whatsapp.blankWhoHint' }],
+    witnesses: [
+      { event: 'whatsapp_inbox.message.received', module: 'whatsapp_inbox' },
+      { event: 'tasks.task.created', module: 'tasks' },
+    ],
+    grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
+    build: (t) => ({
+      schema_version: SCHEMA_VERSION,
+      triggers: [{ kind: 'event', event: 'whatsapp_inbox.message.received' }],
+      steps: [
+        run('s1', 'tasks.tasks.create', {
+          title: t('tpl.whatsapp.taskTitle'),
+          description: t('tpl.whatsapp.taskDescription'),
+          priority: 'urgent',
+        }),
+      ],
+    }),
+  },
+  /**
+   * **R0 #12 — the till closes → somebody looks at the day before going home.**
+   *
+   * The version flows#18 asked for waits for the fiscal documents of that session to finish and
+   * then sends a summary. The kernel cannot do the waiting: a flow is a straight line with no step
+   * that parks until a correlated second event arrives, and `delay` counts from now rather than
+   * until something happens. What is left, and what this is, is the part that works: the moment the
+   * till closes, the check lands on somebody's list while the shop is still standing there.
+   */
+  {
+    id: 'cash-close-review',
+    sector: 'any',
+    icon: 'file-tray-full-outline',
+    nameKey: 'tpl.cashClose.name',
+    summaryKey: 'tpl.cashClose.summary',
+    plainKey: 'tpl.cashClose.plain',
+    blanks: [{ labelKey: 'tpl.cashClose.blankWho', hintKey: 'tpl.cashClose.blankWhoHint' }],
+    witnesses: [
+      { event: 'cash_register.session_closed', module: 'cash_register' },
+      { event: 'tasks.task.created', module: 'tasks' },
+    ],
+    grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
+    build: (t) => ({
+      schema_version: SCHEMA_VERSION,
+      triggers: [{ kind: 'event', event: 'cash_register.session_closed' }],
+      steps: [
+        run('s1', 'tasks.tasks.create', {
+          title: t('tpl.cashClose.taskTitle'),
+          description: t('tpl.cashClose.taskDescription'),
+          priority: 'high',
+        }),
+      ],
+    }),
+  },
+  /**
+   * **R0 #5 — Friday evening → the week gets looked at.**
+   *
+   * flows#18 asked for the week's takings IN the message. The engine has no read step: v1 runs
+   * commands, guards and waits, and there is no `query` step and no `query` grant, so nothing in a
+   * flow can fetch a number to put in a sentence. Sending «here are your sales:» followed by
+   * nothing would be worse than not sending it. So this books the review instead, on the evening
+   * of the day the owner picks, and the figures are one tap away where they already live.
+   */
+  {
+    id: 'friday-week-review',
+    sector: 'any',
+    icon: 'stats-chart-outline',
+    nameKey: 'tpl.weekReview.name',
+    summaryKey: 'tpl.weekReview.summary',
+    plainKey: 'tpl.weekReview.plain',
+    blanks: [{ labelKey: 'tpl.weekReview.blankWhen', hintKey: 'tpl.weekReview.blankWhenHint' }],
+    witnesses: [{ event: 'tasks.task.created', module: 'tasks' }],
+    grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
+    build: (t) => ({
+      schema_version: SCHEMA_VERSION,
+      // 18:00 on day 5 — Friday. Five-field cron, drawn as a clock by the editor: nobody types it.
+      triggers: [{ kind: 'cron', cron: '0 18 * * 5' }],
+      steps: [
+        run('s1', 'tasks.tasks.create', {
+          title: t('tpl.weekReview.taskTitle'),
+          description: t('tpl.weekReview.taskDescription'),
+          priority: 'medium',
+        }),
+      ],
+    }),
+  },
+
   // ── Hair and beauty ─────────────────────────────────────────────────────────────────────────
   {
     id: 'morning-agenda-check',
