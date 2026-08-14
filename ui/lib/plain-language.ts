@@ -160,7 +160,7 @@ export function describeStep(step: Step, t: Translator): string {
       // of these two sentences means a model writes to the business unattended and the other does
       // not. `manual` is the kernel's default, so no policy reads as «it asks».
       const key = step.policy === 'auto' ? 'ui.stepAiAuto' : 'ui.stepAiManual';
-      return t(key, { prompt: shorten(prompt) });
+      return t(key, { prompt: shorten(inWords(prompt)) });
     }
     case 'notify': {
       const field = step.to?.field;
@@ -186,6 +186,19 @@ function hostOf(url: string): string {
   } catch {
     return '';
   }
+}
+
+/**
+ * `«…de {{input.customer.name}}»` → `«…de Customer › Name»`.
+ *
+ * The pills inside the editor never show a brace; the CARD did, and the card is the one line most
+ * people ever read. Raw syntax on screen is the documented failure this module is written against
+ * (Make: *«staring at raw data structures without much context»*).
+ */
+function inWords(text: string): string {
+  return text.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_all, path: string) =>
+    humaniseField(String(path).replace(/^(input|event|steps|secret)\./, '')),
+  );
 }
 
 /** A prompt on a card, cut at a word so the card stays a card. */

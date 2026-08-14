@@ -48,8 +48,9 @@ function keysUsed(): Set<string> {
  * see these, so they are written down — which is also the only place that records they exist.
  */
 const COMPOSED_KEYS = [
-  // `ui.tab${Editor|Permissions|History}`
+  // `ui.tab${Editor|Test|Permissions|History}`
   'ui.tabEditor',
+  'ui.tabTest',
   'ui.tabPermissions',
   'ui.tabHistory',
   // `ui.op${Eq|Neq|…}` — one per frozen operator

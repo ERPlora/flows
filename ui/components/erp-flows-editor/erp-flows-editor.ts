@@ -25,6 +25,7 @@ import {
   readDoc,
   removeStep,
   httpPatternFor,
+  grantsForStep,
   valueToParts,
   isSpineKind,
 } from '../../lib/flow-doc';
@@ -50,6 +51,8 @@ import {
 } from '../../lib/plain-language';
 import type { RunRow, RunStepRow, Translator } from '../../lib/plain-language';
 import { TRIGGER_CATALOG, catalogEntry } from '../../lib/trigger-catalog';
+import { inputFromShape, simulate } from '../../lib/simulate';
+import type { ConditionResult } from '../../lib/simulate';
 import { errorCode } from '../../lib/hub-flows';
 import type { EventShape, Flow, ModuleClient, SecretInfo } from '../../lib/hub-flows';
 import type { DraftGap } from '../../lib/ai-draft';
@@ -85,6 +88,23 @@ function guardRows(when: Condition | undefined): GuardRow[] {
 function clamp(value: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+/**
+ * One `<option>`, carrying its own selected state.
+ *
+ * **Not cosmetic.** Lit applies `.value` to a `<select>` BEFORE the template's `<option>` children
+ * exist, so the property is discarded and the control falls back to the first option. Found in a
+ * real browser: a `POST` step opened showing `GET`, and a `whatsapp` step opened showing `email` —
+ * and because the change handler writes what the box says, the next edit saved the wrong verb and
+ * the wrong billed channel back into a working automation.
+ *
+ * `?selected` puts the truth on the child, where it survives the first paint. The `.value` binding
+ * stays on the select as well: it is what keeps the control right on RE-render, once the children
+ * do exist.
+ */
+function option(value: string, label: string, current: string) {
+  return html`<option value=${value} ?selected=${value === current}>${label}</option>`;
 }
 
 function rowsToWhen(rows: GuardRow[]): Condition {
@@ -140,6 +160,11 @@ export class ErpFlowsEditor extends LitElement {
       align-items: center;
       gap: 0.5rem;
       flex-wrap: wrap;
+      /* Both bars refuse to shrink. They are flex children of a full-height column whose body
+         takes the rest, so without this the tab strip gets squeezed to 18px of its 44 the moment
+         the header wraps to two lines — which is what a 390px screen does, and what adding the
+         «Probar» button made happen sooner. */
+      flex: 0 0 auto;
       padding: 0.6rem 0.75rem;
       border-bottom: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
     }
@@ -362,11 +387,17 @@ export class ErpFlowsEditor extends LitElement {
     .value-row {
       display: flex;
       align-items: flex-end;
+      /* Wraps on a phone: without it the secret picker and the box's own «insert a field» button
+         end up on the same line and overlap, which is what a 390px screen showed. */
+      flex-wrap: wrap;
       gap: 0.4rem;
       min-width: 0;
     }
     .value-row erp-flows-value {
-      flex: 1 1 auto;
+      /* A 12rem basis, not auto: with auto the box shrinks to its longest unbreakable word while
+         the select keeps its own width, and the address ends up three characters wide next to a
+         full-size dropdown. */
+      flex: 1 1 12rem;
       min-width: 0;
     }
     .value-row select {
@@ -374,10 +405,85 @@ export class ErpFlowsEditor extends LitElement {
       font-size: 0.8rem;
       padding: 0 0.5rem;
       min-height: 2.4rem;
-      max-width: 9rem;
+      max-width: 100%;
       border: 1px dashed var(--ok-border, #d7d5cc);
       border-radius: var(--ok-radius-pill, 999px);
       background: transparent;
+      color: var(--ok-muted, #6b6a63);
+    }
+    /* The method sits BESIDE the address only when there is room for both. Below that it stacks —
+       and it has to be a class, because an inline grid-template-columns would win over the media
+       query at every width and crush the address on a phone. */
+    .method-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.4rem;
+      align-items: end;
+    }
+    @media (min-width: 560px) {
+      .method-row {
+        grid-template-columns: auto 1fr;
+      }
+    }
+    /* ── The preview ──────────────────────────────────────────────────────────────────────── */
+    .preview {
+      max-width: 44rem;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .pstep {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-left: 3px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-sm, 10px);
+      background: var(--ok-surface, #fff);
+      padding: 0.6rem 0.7rem;
+    }
+    .pstep[data-outcome='would-run'] {
+      border-left-color: var(--ok-success, #2dd36f);
+    }
+    /* A guard that stops the run is the flow WORKING, so it is not painted as an error. */
+    .pstep[data-outcome='stops-here'],
+    .pstep[data-outcome='trigger-blocked'] {
+      border-left-color: var(--ok-warning, #ffc409);
+    }
+    .pstep[data-outcome='not-reached'] {
+      opacity: 0.6;
+    }
+    .pvalue {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      font-size: 0.88rem;
+      padding: 0.15rem 0;
+    }
+    .pkey {
+      color: var(--ok-muted, #6b6a63);
+      min-width: 6rem;
+    }
+    .pval {
+      overflow-wrap: anywhere;
+    }
+    .pvalue[data-blank='true'] {
+      background: var(--ok-danger-soft, rgba(235, 68, 90, 0.08));
+      border-radius: var(--ok-radius-sm, 10px);
+      padding: 0.15rem 0.35rem;
+    }
+    .bad {
+      color: var(--ok-danger, var(--ion-color-danger, #eb445a));
+      font-size: 0.85rem;
+    }
+    .verdict {
+      font-size: 0.85rem;
+    }
+    .clauses {
+      margin: 0.1rem 0 0;
+      padding-left: 1rem;
+      font-size: 0.85rem;
       color: var(--ok-muted, #6b6a63);
     }
     .secrets {
@@ -408,6 +514,7 @@ export class ErpFlowsEditor extends LitElement {
     .tabs {
       display: flex;
       gap: 0.25rem;
+      flex: 0 0 auto;
       padding: 0 0.75rem;
       border-bottom: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
       overflow-x: auto;
@@ -511,7 +618,7 @@ export class ErpFlowsEditor extends LitElement {
    * Which tab is showing. A **property**, not internal state: a flow created from a template opens
    * on `permissions`, because until it holds a grant it does nothing at all and says nothing.
    */
-  @property({ attribute: false }) tab: 'editor' | 'permissions' | 'history' = 'editor';
+  @property({ attribute: false }) tab: 'editor' | 'test' | 'permissions' | 'history' = 'editor';
 
   @state() private openStep: string | null = null;
 
@@ -846,14 +953,15 @@ export class ErpFlowsEditor extends LitElement {
         <label for="trigger-kind">${this.t('ui.whenThisHappens')}</label>
         <select
           id="trigger-kind"
+          data-field="trigger-kind"
           .value=${trigger.kind}
           @change=${(e: Event) =>
             this.setTrigger({ kind: (e.target as HTMLSelectElement).value as Trigger['kind'] })}
         >
-          <option value="event">${this.t('ui.triggerKindEvent')}</option>
-          <option value="cron">${this.t('ui.triggerKindCron')}</option>
-          <option value="at">${this.t('ui.triggerKindAt')}</option>
-          <option value="manual">${this.t('ui.triggerKindManual')}</option>
+          ${option('event', this.t('ui.triggerKindEvent'), trigger.kind)}
+          ${option('cron', this.t('ui.triggerKindCron'), trigger.kind)}
+          ${option('at', this.t('ui.triggerKindAt'), trigger.kind)}
+          ${option('manual', this.t('ui.triggerKindManual'), trigger.kind)}
         </select>
       </div>
       ${trigger.kind === 'event' ? this.renderEventChoice(trigger) : nothing}
@@ -899,12 +1007,8 @@ export class ErpFlowsEditor extends LitElement {
           @change=${(e: Event) => this.setTrigger({ event: (e.target as HTMLSelectElement).value })}
         >
           <option value="">—</option>
-          ${TRIGGER_CATALOG.map(
-            (entry) => html`<option value=${entry.event}>${this.t(entry.labelKey)}</option>`,
-          )}
-          ${chosen && !catalogEntry(chosen)
-            ? html`<option value=${chosen}>${chosen}</option>`
-            : nothing}
+          ${TRIGGER_CATALOG.map((entry) => option(entry.event, this.t(entry.labelKey), chosen))}
+          ${chosen && !catalogEntry(chosen) ? option(chosen, chosen, chosen) : nothing}
         </select>
         <span class="hint">
           ${!chosen
@@ -1091,7 +1195,7 @@ export class ErpFlowsEditor extends LitElement {
       this.setDoc(patchStep(this.document, index, { headers: Object.fromEntries(entries) }));
     const pattern = httpPatternFor(String(step.url ?? ''));
     return html`
-      <div class="param-row" style="grid-template-columns:auto 1fr">
+      <div class="method-row">
         <div class="field">
           <label for="m-${step.id}">${this.t('ui.httpMethod')}</label>
           <select
@@ -1103,7 +1207,7 @@ export class ErpFlowsEditor extends LitElement {
                 patchStep(this.document, index, { method: (e.target as HTMLSelectElement).value }),
               )}
           >
-            ${HTTP_METHODS.map((m) => html`<option value=${m}>${m}</option>`)}
+            ${HTTP_METHODS.map((m) => option(m, m, String(step.method ?? 'GET')))}
           </select>
         </div>
         ${this.renderValue({
@@ -1312,8 +1416,8 @@ export class ErpFlowsEditor extends LitElement {
               }),
             )}
         >
-          <option value="manual">${this.t('ui.aiPolicyManual')}</option>
-          <option value="auto">${this.t('ui.aiPolicyAuto')}</option>
+          ${option('manual', this.t('ui.aiPolicyManual'), String(step.policy ?? 'manual'))}
+          ${option('auto', this.t('ui.aiPolicyAuto'), String(step.policy ?? 'manual'))}
         </select>
       </div>
       ${auto
@@ -1414,8 +1518,8 @@ export class ErpFlowsEditor extends LitElement {
           <!-- Two options, and sms is not one of them: it has no transport anywhere and is
                refused by name at save AND at grant time. A third option here would be a step that
                can never be delivered, picked from a list that looked complete. -->
-          ${NOTIFY_CHANNELS.map(
-            (c) => html`<option value=${c}>${this.t(`ui.notifyChannel_${c}`)}</option>`,
+          ${NOTIFY_CHANNELS.map((c) =>
+            option(c, this.t(`ui.notifyChannel_${c}`), String(step.channel ?? 'email')),
           )}
         </select>
       </div>
@@ -1505,9 +1609,9 @@ export class ErpFlowsEditor extends LitElement {
               }),
             )}
         >
-          <option value="60">${this.t('ui.unitMinutes')}</option>
-          <option value="3600">${this.t('ui.unitHours')}</option>
-          <option value="86400">${this.t('ui.unitDays')}</option>
+          ${option('60', this.t('ui.unitMinutes'), String(unit))}
+          ${option('3600', this.t('ui.unitHours'), String(unit))}
+          ${option('86400', this.t('ui.unitDays'), String(unit))}
         </select>
       </div>
     </div>`;
@@ -1545,6 +1649,7 @@ export class ErpFlowsEditor extends LitElement {
           <div class="field">
             <label>${this.t('ui.operator')}</label>
             <select
+              data-field="operator"
               .value=${row.op}
               @change=${(e: Event) =>
                 update(
@@ -1553,11 +1658,8 @@ export class ErpFlowsEditor extends LitElement {
                   ),
                 )}
             >
-              ${OPERATORS.map(
-                (op) =>
-                  html`<option value=${op}>
-                    ${this.t(`ui.op${op.charAt(0).toUpperCase()}${op.slice(1)}`)}
-                  </option>`,
+              ${OPERATORS.map((op) =>
+                option(op, this.t(`ui.op${op.charAt(0).toUpperCase()}${op.slice(1)}`), row.op),
               )}
             </select>
           </div>
@@ -1729,6 +1831,125 @@ export class ErpFlowsEditor extends LitElement {
     </div>`;
   }
 
+  /**
+   * **«Probar»: what this flow would do with the owner's own data — and it does none of it.**
+   *
+   * The two things flows#2 originally asked for were changes to the KERNEL, and the kernel is
+   * frozen (ADR-0283). Checked against the code, not assumed: `POST …/flows/{id}/run` executes for
+   * real (a «probar» that charged a test sale is worse than no button at all) and there is no
+   * dry-run parameter anywhere in the runtime or the server. Nor is there any endpoint that
+   * returns a real event payload — ADR-0312 refuses that on purpose, because handing a marketplace
+   * module the last N payloads of any event is exporting the customer book with an editor on top.
+   *
+   * So this screen asks the hub for NOTHING beyond the event shape the picker already loads, and
+   * runs the walk in {@link simulate}. Every sentence on it is about what WOULD happen.
+   */
+  private renderPreview() {
+    const built = inputFromShape(this.shape);
+    const run = simulate(this.document, built.input);
+    const missing = missingGrants(this.document, this.grants);
+    const byId = new Map(this.document.steps.map((s) => [s.id, s]));
+
+    return html`<div class="preview">
+      <!-- First thing on the screen, and it stays there while it is read. Every other automation
+           tool's «test» button runs the automation; an owner has every reason to assume this one
+           does too, and the assumption is only expensive in one direction. -->
+      <ok-inline-feedback tone="info" icon="eye-outline"
+        >${this.t('ui.testNothingHappened')}</ok-inline-feedback
+      >
+      ${!built.hasRealData
+        ? html`<ok-inline-feedback tone="warning" icon="help-circle-outline"
+            >${this.t('ui.testNoRealData')}</ok-inline-feedback
+          >`
+        : html`<span class="hint"
+            >${this.t('ui.testUsingReal', {
+              event: this.eventLabel(this.trigger.event),
+              count: this.shape?.samples ?? 0,
+            })}</span
+          >`}
+      ${run.blanks
+        ? html`<ok-inline-feedback tone="warning" icon="alert-circle-outline"
+            >${this.t(
+              run.blanks === 1 ? 'ui.testBlanksFoundOne' : 'ui.testBlanksFound',
+              { count: run.blanks },
+            )}</ok-inline-feedback
+          >`
+        : nothing}
+      ${!run.triggerMatched
+        ? html`<div class="pstep" data-outcome="trigger-blocked">
+            <span class="title">${this.t('ui.testTriggerBlocked')}</span>
+            ${this.renderFailedClauses(run.triggerCondition)}
+          </div>`
+        : nothing}
+      ${run.steps.map((step) => {
+        const spec = byId.get(step.id);
+        // The permission this step needs and does not hold. It is the likeliest real failure and
+        // the cheapest one to catch here: without it the flow dies at `flow.grant_denied` and
+        // nothing on any screen connects that to the step that caused it.
+        const refused =
+          step.outcome === 'would-run' && spec
+            ? missing.filter((g) => grantsForStep(spec).some((need) => need === `${g.kind} ${g.value}`))
+            : [];
+        return html`<div
+          class="pstep"
+          data-node-outcome=${step.id}
+          data-outcome=${step.outcome}
+        >
+          <span class="title">${spec ? describeStep(spec, this.t) : step.kind}</span>
+          ${step.outcome === 'stops-here'
+            ? html`<span class="verdict">${this.t('ui.testStoppedIsWorking')}</span>`
+            : nothing}
+          ${step.outcome === 'not-reached'
+            ? html`<span class="muted">${this.t('ui.testNotReached')}</span>`
+            : nothing}
+          ${step.condition?.uncertain
+            ? html`<span class="verdict">${this.t('ui.testUncertain')}</span>`
+            : nothing}
+          ${step.outcome === 'stops-here' ? this.renderFailedClauses(step.condition) : nothing}
+          ${step.values.map(
+            (value) => html`<div class="pvalue" data-blank=${value.blank ? 'true' : 'false'}>
+              <span class="pkey">${value.label}</span>
+              <!-- The rendered line comes FIRST, even with a hole in it. «Gracias, Marta Ruiz. Te
+                   esperamos en ␣» is what makes the fault obvious at a glance; replacing the whole
+                   value with the words «would arrive empty» hides WHICH half went missing, which
+                   is the only part the owner can act on. -->
+              ${value.text ? html`<span class="pval">${value.text}</span>` : nothing}
+              ${value.blank
+                ? html`<span class="bad">${this.t('ui.testBlank')}</span>`
+                : value.redacted
+                  ? html`<span class="muted">${this.t('ui.testHidden')}</span>`
+                  : value.unknown
+                    ? html`<span class="muted">${this.t('ui.testUnknown')}</span>`
+                    : nothing}
+            </div>`,
+          )}
+          ${refused.length
+            ? html`<span class="bad"
+                >${this.t('ui.testWouldBeRefused', {
+                  what: refused.map((g) => g.value).join(', '),
+                })}</span
+              >`
+            : nothing}
+        </div>`;
+      })}
+    </div>`;
+  }
+
+  private renderFailedClauses(condition: ConditionResult | undefined) {
+    if (!condition?.failed.length) return nothing;
+    return html`<ul class="clauses">
+      ${condition.failed.map(
+        (clause) => html`<li>
+          ${this.t('ui.testClauseFailed', {
+            field: this.fieldLabel(clause.path),
+            op: this.t(`ui.op${clause.op.charAt(0).toUpperCase()}${clause.op.slice(1)}`),
+            expected: String(clause.expected),
+          })}
+        </li>`,
+      )}
+    </ul>`;
+  }
+
   private async toggleRun(runId: string): Promise<void> {
     if (this.runSteps[runId] || !this.client) return;
     try {
@@ -1818,13 +2039,25 @@ export class ErpFlowsEditor extends LitElement {
             this.enabled = !!(e.target as HTMLInputElement).checked;
           }}
         ></ion-toggle>
+        <!-- «Probar» sits with the switch on purpose: it is the thing to press BEFORE turning an
+             automation on, and a button on another tab is one nobody presses first. -->
+        <ion-button
+          size="small"
+          fill="outline"
+          data-act="test"
+          @click=${() => {
+            this.tab = 'test';
+          }}
+        >
+          ${this.t('ui.testRun')}
+        </ion-button>
         <ion-button size="small" ?disabled=${this.saving} @click=${() => void this.save()}>
           ${this.saving ? this.t('ui.saving') : this.t('ui.save')}
         </ion-button>
       </div>
 
       <div class="tabs" role="tablist">
-        ${(['editor', 'permissions', 'history'] as const).map(
+        ${(['editor', 'test', 'permissions', 'history'] as const).map(
           (tab) => html`<button
             type="button"
             role="tab"
@@ -1852,9 +2085,11 @@ export class ErpFlowsEditor extends LitElement {
         ${this.renderDraftBanner()}
         ${this.tab === 'editor'
           ? this.renderSpine()
-          : this.tab === 'permissions'
-            ? this.renderPermissions()
-            : this.renderHistory()}
+          : this.tab === 'test'
+            ? this.renderPreview()
+            : this.tab === 'permissions'
+              ? this.renderPermissions()
+              : this.renderHistory()}
       </div>
 
       <erp-flows-field-picker

@@ -152,6 +152,20 @@ describe('what a step does, said once on the card', () => {
     expect(describeStep({ id: 's1', kind: 'ai', prompt: 'Do it' }, t)).toBe('ui.stepAiManual(prompt=Do it)');
   });
 
+  it('NEVER shows braces on the card, not even inside a prompt', () => {
+    // Found in a browser: the card read «Resume la venta de {{input.customer.name}}». Raw syntax on
+    // screen is the documented failure this module was written against (Make: «staring at raw data
+    // structures without much context»), and the pill inside the editor already avoids it — the one
+    // line most people ever read was the only place still leaking it.
+    const said = describeStep(
+      { id: 's1', kind: 'ai', prompt: 'Summarise the sale of {{input.customer.name}} in one line' },
+      t,
+    );
+    expect(said).not.toContain('{{');
+    expect(said).not.toContain('input.');
+    expect(said).toContain('Customer › Name');
+  });
+
   it('shortens a long prompt on the card instead of letting it become the card', () => {
     const long = 'a'.repeat(200);
     const said = describeStep({ id: 's1', kind: 'ai', prompt: long, policy: 'auto' }, t);

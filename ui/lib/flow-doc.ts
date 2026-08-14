@@ -391,6 +391,18 @@ export function requiredGrants(doc: FlowDoc): Grant[] {
 }
 
 /**
+ * The grants ONE step needs, as `"<kind> <value>"` keys.
+ *
+ * Same derivation as {@link requiredGrants}, per step, so the preview can point at the step that
+ * would be refused rather than at a list somewhere else on another tab.
+ */
+export function grantsForStep(step: Step): string[] {
+  return requiredGrants({ schema_version: SCHEMA_VERSION, triggers: [], steps: [step] }).map(
+    (g) => `${g.kind} ${g.value}`,
+  );
+}
+
+/**
  * The `http` grant pattern that covers a URL, **written the way the hub will compare it**.
  *
  * `check_http_pattern` refuses a pattern with no concrete host, with no path, or written in any
