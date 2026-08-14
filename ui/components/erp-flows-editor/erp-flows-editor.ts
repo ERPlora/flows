@@ -59,6 +59,16 @@ import { CAPABILITY_DENIED, errorCode } from '../../lib/hub-flows';
 import type { EventShape, Flow, ModuleClient, SecretInfo } from '../../lib/hub-flows';
 import type { DraftGap } from '../../lib/ai-draft';
 
+/**
+ * The editor's four panels, in the order they are drawn — and the order the arrow keys walk.
+ *
+ * One list rather than two (one for the strip, one for the `tab` union) so a fifth panel cannot
+ * arrive with no key to reach it.
+ */
+const TABS = ['editor', 'test', 'permissions', 'history'] as const;
+
+type Tab = (typeof TABS)[number];
+
 /** How a `when`/`filter` object is edited: a flat list of rows, rebuilt into the nested object. */
 interface GuardRow {
   path: string;
@@ -620,7 +630,7 @@ export class ErpFlowsEditor extends LitElement {
    * Which tab is showing. A **property**, not internal state: a flow created from a template opens
    * on `permissions`, because until it holds a grant it does nothing at all and says nothing.
    */
-  @property({ attribute: false }) tab: 'editor' | 'test' | 'permissions' | 'history' = 'editor';
+  @property({ attribute: false }) tab: Tab = 'editor';
 
   @state() private openStep: string | null = null;
 
@@ -680,6 +690,35 @@ export class ErpFlowsEditor extends LitElement {
       void this.loadGrants();
       void this.loadShape();
     }
+  }
+
+  /**
+   * The arrow keys along the tab strip (WAI-ARIA's tabs pattern).
+   *
+   * The strip is ONE stop for the tab key — the selected tab holds `tabindex="0"` and the rest
+   * `-1` — so without this the other three panels are simply unreachable from a keyboard. Which is
+   * the same defect as a dead button, arriving through a different door: the history is five key
+   * presses away, or none at all.
+   *
+   * It wraps, because the pattern's own answer to «what is to the left of the first one» is «the
+   * last one», and a strip that stops dead at both ends teaches people to reach for the mouse.
+   */
+  private onTabKey(e: KeyboardEvent): void {
+    const step: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1 };
+    let next: Tab | undefined;
+    if (e.key in step) {
+      const at = TABS.indexOf(this.tab);
+      next = TABS[(at + step[e.key] + TABS.length) % TABS.length];
+    } else if (e.key === 'Home') next = TABS[0];
+    else if (e.key === 'End') next = TABS[TABS.length - 1];
+    if (!next) return;
+    e.preventDefault();
+    this.tab = next;
+    // Selection follows focus, so focus has to follow selection back — otherwise the next arrow
+    // press is delivered to a tab that is no longer the one on screen.
+    void this.updateComplete.then(() => {
+      (this.renderRoot.querySelector(`#tab-${this.tab}`) as HTMLElement | null)?.focus();
+    });
   }
 
   updated(changed: Map<string, unknown>): void {
@@ -1157,6 +1196,7 @@ export class ErpFlowsEditor extends LitElement {
             type="button"
             class="open"
             style="padding:.2rem .3rem"
+            aria-expanded=${open ? 'true' : 'false'}
             @click=${() => {
               this.openStep = open ? null : step.id;
             }}
@@ -1177,6 +1217,7 @@ export class ErpFlowsEditor extends LitElement {
             type="button"
             class="open"
             style="padding:.2rem .3rem"
+            aria-expanded=${open ? 'true' : 'false'}
             @click=${() => {
               this.openStep = open ? null : step.id;
             }}
@@ -2158,12 +2199,15 @@ export class ErpFlowsEditor extends LitElement {
         </ion-button>
       </div>
 
-      <div class="tabs" role="tablist">
-        ${(['editor', 'test', 'permissions', 'history'] as const).map(
+      <div class="tabs" role="tablist" @keydown=${(e: KeyboardEvent) => this.onTabKey(e)}>
+        ${TABS.map(
           (tab) => html`<button
             type="button"
             role="tab"
+            id=${`tab-${tab}`}
+            aria-controls="tabpanel"
             aria-selected=${this.tab === tab ? 'true' : 'false'}
+            tabindex=${this.tab === tab ? '0' : '-1'}
             @click=${() => {
               this.tab = tab;
             }}
@@ -2173,7 +2217,7 @@ export class ErpFlowsEditor extends LitElement {
         )}
       </div>
 
-      <div class="body">
+      <div class="body" role="tabpanel" id="tabpanel" aria-labelledby=${`tab-${this.tab}`}>
         ${this.error
           ? html`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
               >${this.error}</ok-inline-feedback
