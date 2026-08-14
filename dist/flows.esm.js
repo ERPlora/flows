@@ -3040,6 +3040,59 @@ function simulate(doc, input) {
   };
 }
 
+// modules/flows/ui/lib/run-trouble.ts
+var TABLE = {
+  "flow.grant_denied": "permission",
+  "flow.grant_kind_not_available": "permission",
+  "flow.unknown_grant_kind": "permission",
+  "flow.invalid_notify_grant": "permission",
+  "flow.invalid_recipient_grant": "permission",
+  "flow.internal_command": "permission",
+  "flow.secret_not_found": "secret",
+  "flow.secret_not_available": "secret",
+  "flow.secret_unreadable": "secret",
+  "flow.secrets_key_missing": "secret",
+  "flow.invalid_secret_name": "secret",
+  "flow.recipient_not_found": "recipient",
+  "flow.recipient_ambiguous": "recipient",
+  "flow.recipient_invalid": "recipient",
+  "flow.http_url_invalid": "reach",
+  "flow.invalid_http_pattern": "reach",
+  "flow.invalid_cron": "setup",
+  "flow.invalid_at": "setup",
+  "flow.invalid_definition": "setup",
+  "flow.unknown_operator": "setup",
+  "flow.unknown_schema_version": "setup",
+  "flow.step_kind_not_available": "setup",
+  "flow.flow_deleted": "gone",
+  "flow.definition_gone": "gone",
+  "flow.not_found": "gone",
+  "flow.io_step_gone": "gone",
+  "flow.step_output_lost": "gone",
+  "flow.agent_step_not_in_flight": "gone",
+  "flow.approval_expired": "approval",
+  "flow.approval_not_found": "approval",
+  "flow.approval_already_decided": "approval"
+};
+var KERNEL_ERRORS = Object.keys(TABLE);
+function classify(lastError) {
+  const technical = (lastError ?? "").trim();
+  if (!technical) return { kind: "none", messageKey: "", actionKey: "", technical: "" };
+  const code = KERNEL_ERRORS.slice().sort((a3, b3) => b3.length - a3.length).find((candidate) => technical.includes(candidate));
+  if (!code) return { kind: "unknown", messageKey: "", actionKey: "", technical };
+  const kind = TABLE[code];
+  const suffix = kind.charAt(0).toUpperCase() + kind.slice(1);
+  return {
+    kind,
+    messageKey: `ui.trouble${suffix}`,
+    actionKey: `ui.troubleDo${suffix}`,
+    technical
+  };
+}
+function needsAttention(run2) {
+  return run2.status === "failed";
+}
+
 // modules/flows/ui/lib/hub-flows.ts
 var CAPABILITY_DENIED = "capability_denied";
 function hasFlows(candidate) {
@@ -3058,6 +3111,12 @@ function errorCode(e4) {
 
 // modules/flows/ui/components/erp-flows-editor/erp-flows-editor.ts
 var TABS = ["editor", "test", "permissions", "history"];
+function stepSeconds(step) {
+  const from = Date.parse(String(step.started_at ?? ""));
+  const to = Date.parse(String(step.finished_at ?? ""));
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return void 0;
+  return Math.round((to - from) / 1e3);
+}
 function guardRows(when) {
   const rows = [];
   for (const [path, ops] of Object.entries(when ?? {})) {
@@ -3534,6 +3593,53 @@ var ErpFlowsEditor = class extends i3 {
       border-radius: var(--ok-radius-sm, 10px);
       background: var(--ok-surface, #fff);
       padding: 0.6rem 0.7rem;
+    }
+    /* What went wrong, and what to do — the two lines that matter, at full size. The kernel's own
+       wording is folded away underneath: it is for support, not for the person reading this. */
+    .trouble {
+      margin-top: 0.4rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      font-size: 0.9rem;
+    }
+    .trouble .why {
+      font-weight: 600;
+    }
+    .trouble .do {
+      color: var(--ok-muted, #6b6a63);
+    }
+    .trouble details {
+      margin-top: 0.2rem;
+    }
+    .trouble summary {
+      cursor: pointer;
+      font-size: 0.82rem;
+      color: var(--ok-muted, #6b6a63);
+      min-height: 1.75rem;
+    }
+    .trouble code {
+      display: block;
+      margin-top: 0.25rem;
+      font-size: 0.8rem;
+      overflow-wrap: anywhere;
+      color: var(--ok-muted, #6b6a63);
+    }
+    h4.section {
+      margin: 0 0 0.15rem;
+      font-size: 0.78rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    [data-attention] {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      padding: 0.6rem;
+      border: 1px solid var(--ok-danger, var(--ion-color-danger, #c0392b));
+      border-radius: var(--ok-radius, 14px);
+      margin-bottom: 0.5rem;
     }
     .run ul {
       margin: 0.5rem 0 0;
@@ -4807,36 +4913,104 @@ var ErpFlowsEditor = class extends i3 {
       minute: "2-digit"
     });
   }
+  /**
+   * What went wrong, said in the owner's words, with the next thing to do — and the kernel's own
+   * sentence folded away underneath.
+   *
+   * The order is the whole point of flows#20: `step s2 failed: flow.grant_denied` is accurate and
+   * useless to the person reading it hours later. A code as the headline is what makes somebody
+   * phone support about a problem they could have fixed in two taps.
+   */
+  renderTrouble(run2) {
+    const trouble = classify(run2.last_error);
+    if (trouble.kind === "none") return A;
+    return b2`<div class="trouble" data-trouble=${trouble.kind}>
+      <!-- An unclassified error is a refusal from the module whose command ran («no hay stock
+           suficiente»). That sentence is the actionable one, so it stays as the headline rather
+           than being replaced by a generic story about a problem we do not understand. -->
+      <span class="why"
+        >${trouble.messageKey ? this.t(trouble.messageKey) : this.t("ui.ranFailed", { reason: trouble.technical })}</span
+      >
+      ${trouble.actionKey ? b2`<span class="do">${this.t(trouble.actionKey)}</span>` : A}
+      ${trouble.messageKey ? b2`<details>
+            <summary>${this.t("ui.troubleTechnical")}</summary>
+            <code>${trouble.technical}</code>
+          </details>` : A}
+    </div>`;
+  }
+  renderRun(run2) {
+    const outcome = runOutcome(run2, this.t);
+    const steps = this.runSteps[String(run2.id)];
+    const byId = new Map(this.document.steps.map((s4) => [s4.id, s4]));
+    return b2`<div class="run" data-run=${String(run2.id ?? "")}>
+      <div class="row" style="padding:0;gap:.5rem">
+        <ok-status-pill tone=${outcome.tone} label=${outcome.label}></ok-status-pill>
+        <span class="grow muted">${this.when(run2.started_at ?? run2.created_at)}</span>
+        <!-- The reference, one tap away. It is the only thread that ties what the owner saw to
+             what a log holds, and reading a uuid down a telephone is not a support channel. -->
+        <button
+          type="button"
+          class="icon-btn"
+          data-act="copy-run"
+          aria-label=${this.t("ui.runCopyId")}
+          title=${this.t("ui.runCopyId")}
+          @click=${() => void this.copyRunId(String(run2.id ?? ""))}
+        >
+          ⧉
+        </button>
+        <button
+          type="button"
+          class="icon-btn"
+          data-act="open-run"
+          aria-expanded=${steps ? "true" : "false"}
+          @click=${() => void this.toggleRun(String(run2.id))}
+        >
+          ▾
+        </button>
+      </div>
+      ${this.renderTrouble(run2)}
+      ${steps ? b2`<ul>
+            ${steps.map(
+      (s4) => b2`<li>
+                ${describeRunStep(s4, this.t, byId.get(String(s4.step_id)))}
+                ${stepSeconds(s4) !== void 0 ? b2`<span class="muted"> · ${this.t("ui.runTook", { seconds: stepSeconds(s4) })}</span>` : A}
+              </li>`
+    )}
+          </ul>` : A}
+    </div>`;
+  }
+  /**
+   * The history, with **what is asking for somebody at the top**.
+   *
+   * A failure four rows down a list ordered by time is a failure nobody sees: the runs that worked
+   * are the majority and they push it off the screen. Splitting the list is the cheapest version of
+   * the tray flows#20 asks for that this module can actually build — the kernel's dead-letter has
+   * no method on the flows surface at all (no retry, no discard, nothing to call), so a tray with
+   * buttons would be a drawing of one.
+   */
   renderHistory() {
     if (!this.runs.length) {
       return b2`<div class="list"><span class="muted">${this.t("ui.historyEmpty")}</span></div>`;
     }
-    const byId = new Map(this.document.steps.map((s4) => [s4.id, s4]));
+    const broken = this.runs.filter(needsAttention);
+    const rest = this.runs.filter((run2) => !needsAttention(run2));
     return b2`<div class="list">
-      ${this.runs.map((run2) => {
-      const outcome = runOutcome(run2, this.t);
-      const steps = this.runSteps[String(run2.id)];
-      return b2`<div class="run">
-          <div class="row" style="padding:0;gap:.5rem">
-            <ok-status-pill tone=${outcome.tone} label=${outcome.label}></ok-status-pill>
-            <span class="grow muted">${this.when(run2.started_at ?? run2.created_at)}</span>
-            <button type="button" class="icon-btn" @click=${() => void this.toggleRun(String(run2.id))}>
-              ▾
-            </button>
-          </div>
-          <!-- The reason goes on the ROW, not behind the chevron. «Se paró por un error» with the
-               error one click away is the shape of a screen that makes somebody phone support. -->
-          ${run2.status === "failed" && run2.last_error ? b2`<div class="muted" style="font-size:.85rem">
-                ${this.t("ui.ranFailed", { reason: run2.last_error })}
-              </div>` : A}
-          ${steps ? b2`<ul>
-                ${steps.map(
-        (s4) => b2`<li>${describeRunStep(s4, this.t, byId.get(String(s4.step_id)))}</li>`
-      )}
-              </ul>` : A}
-        </div>`;
-    })}
+      ${broken.length ? b2`<div data-attention>
+            <h4 class="section">${this.t("ui.attentionTitle")}</h4>
+            <span class="muted">${this.t("ui.attentionCount", { count: broken.length })}</span>
+            ${broken.map((run2) => this.renderRun(run2))}
+          </div>` : A}
+      ${rest.map((run2) => this.renderRun(run2))}
     </div>`;
+  }
+  /** Puts the run's reference on the clipboard. A refusal costs the copy, never the screen. */
+  async copyRunId(id) {
+    if (!id) return;
+    try {
+      await navigator.clipboard?.writeText(id);
+      this.notice = this.t("ui.runCopied");
+    } catch {
+    }
   }
   render() {
     return b2`
@@ -6703,7 +6877,28 @@ var es_default = {
     testUncertain: "Esto no se puede comprobar aqu\xED: mira algo que el hub oculta porque podr\xEDa ser de una persona. Puede salir de las dos formas.",
     testClauseFailed: "{field} no es {op} {expected}",
     testWouldBeRefused: "Se lo rechazar\xEDan: todav\xEDa no le has permitido {what}.",
-    testBlanksFoundOne: "1 cosa saldr\xEDa vac\xEDa. Ah\xED es donde est\xE1 el fallo casi siempre."
+    testBlanksFoundOne: "1 cosa saldr\xEDa vac\xEDa. Ah\xED es donde est\xE1 el fallo casi siempre.",
+    attentionTitle: "Necesita a alguien",
+    attentionNone: "No ha fallado nada.",
+    attentionCount: "{count} ejecuciones se pararon por un problema",
+    troublePermission: "Ha intentado hacer algo que no le has autorizado, as\xED que ha parado.",
+    troubleDoPermission: "Abre Permisos y conc\xE9dele lo que necesita. Hasta que lo hagas, esto pasar\xE1 cada vez.",
+    troubleSecret: "Necesita una contrase\xF1a o una clave que no ha podido leer.",
+    troubleDoSecret: "Abre el paso que sale fuera y comprueba que el secreto que usa sigue ah\xED.",
+    troubleRecipient: "No ha podido averiguar a qui\xE9n mandarle el mensaje.",
+    troubleDoRecipient: "Abre el paso del mensaje y mira a qui\xE9n va \u2014 la lista que consulta puede estar vac\xEDa ahora.",
+    troubleReach: "La direcci\xF3n a la que ha intentado llamar no es una de las que tiene permitidas.",
+    troubleDoReach: "Abre el paso que llama al otro servicio y comprueba la direcci\xF3n y el permiso que la acompa\xF1a.",
+    troubleSetup: "Hay algo en c\xF3mo est\xE1 escrita la automatizaci\xF3n que este hub no sabe leer.",
+    troubleDoSetup: "\xC1brela y vuelve a guardarla: el editor te ense\xF1ar\xE1 qu\xE9 es lo que no encaja.",
+    troubleGone: "Algo que necesitaba ya no est\xE1.",
+    troubleDoGone: "\xC1brela y repasa los pasos. Si se edit\xF3 con una ejecuci\xF3n en marcha, esa ejecuci\xF3n ya no se puede terminar.",
+    troubleApproval: "Nadie contest\xF3 a tiempo, as\xED que lo dej\xF3 estar.",
+    troubleDoApproval: "Vuelve a lanzarla si sigue haciendo falta, y dale m\xE1s margen a quien tiene que aprobarla.",
+    troubleTechnical: "El texto t\xE9cnico, para soporte",
+    runCopyId: "Copiar la referencia",
+    runCopied: "Copiada. P\xE9gala si nos preguntas por esta ejecuci\xF3n.",
+    runTook: "tard\xF3 {seconds}s"
   },
   tpl: {
     author: "Automatizaciones",
@@ -7163,7 +7358,28 @@ var en_default = {
     testUncertain: "This cannot be checked here: it looks at something the hub hides because it could be about a person. It may go either way.",
     testClauseFailed: "{field} is not {op} {expected}",
     testWouldBeRefused: "It would be refused: you have not allowed {what} yet.",
-    testBlanksFoundOne: "1 thing would come out empty. That is almost always the mistake."
+    testBlanksFoundOne: "1 thing would come out empty. That is almost always the mistake.",
+    attentionTitle: "Needs somebody",
+    attentionNone: "Nothing has gone wrong.",
+    attentionCount: "{count} runs stopped on a problem",
+    troublePermission: "It tried to do something you have not allowed it to do, so it stopped.",
+    troubleDoPermission: "Open Permissions and allow what it needs. Until you do, this will happen every time.",
+    troubleSecret: "It needs a password or a key it could not read.",
+    troubleDoSecret: "Open the step that reaches outside and check the secret it uses is still there.",
+    troubleRecipient: "It could not work out who to send the message to.",
+    troubleDoRecipient: "Open the message step and check who it goes to \u2014 the list it reads may be empty now.",
+    troubleReach: "The address it tried to reach is not one it is allowed to reach.",
+    troubleDoReach: "Open the step that calls the other service and check the address, and the permission that goes with it.",
+    troubleSetup: "There is something this hub cannot read in how the automation is written.",
+    troubleDoSetup: "Open it and save it again \u2014 the editor will show what does not fit.",
+    troubleGone: "Something it needed is no longer there.",
+    troubleDoGone: "Open it and check the steps. If it was edited while a run was in flight, this run cannot be finished.",
+    troubleApproval: "Nobody answered in time, so it let go.",
+    troubleDoApproval: "Run it again if it still needs doing, and give whoever approves it more room next time.",
+    troubleTechnical: "The technical wording, for support",
+    runCopyId: "Copy the reference",
+    runCopied: "Copied. Paste it if you ask us about this run.",
+    runTook: "took {seconds}s"
   },
   tpl: {
     author: "Automations",
