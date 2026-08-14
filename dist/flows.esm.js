@@ -1851,7 +1851,7 @@ __decorateClass4([
 ], OkStatusPill.prototype, "size");
 define("ok-status-pill", OkStatusPill);
 
-// modules/.wt-flows-ib/ui/components/erp-flows-value/erp-flows-value.ts
+// modules/.wt-flows-4/ui/components/erp-flows-value/erp-flows-value.ts
 var ErpFlowsValue = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2060,7 +2060,7 @@ __decorateClass([
 ], ErpFlowsValue.prototype, "name", 2);
 define("erp-flows-value", ErpFlowsValue);
 
-// modules/.wt-flows-ib/ui/lib/plain-language.ts
+// modules/.wt-flows-4/ui/lib/plain-language.ts
 var MINUTE = 60;
 var HOUR = 3600;
 var DAY = 86400;
@@ -2209,7 +2209,7 @@ function describeSample(field, t3) {
   return field.truncated ? `${text}\u2026` : text;
 }
 
-// modules/.wt-flows-ib/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
+// modules/.wt-flows-4/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
 var ErpFlowsFieldPicker = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2453,7 +2453,7 @@ __decorateClass([
 ], ErpFlowsFieldPicker.prototype, "t", 2);
 define("erp-flows-field-picker", ErpFlowsFieldPicker);
 
-// modules/.wt-flows-ib/ui/lib/flow-doc.ts
+// modules/.wt-flows-4/ui/lib/flow-doc.ts
 var SCHEMA_VERSION = 1;
 var PATH_ROOTS = ["input", "steps", "event", "secret"];
 var OPERATORS = [
@@ -2668,7 +2668,7 @@ function mergeGrants(live, add, revoke) {
   return out;
 }
 
-// modules/.wt-flows-ib/ui/lib/trigger-catalog.ts
+// modules/.wt-flows-4/ui/lib/trigger-catalog.ts
 var TRIGGER_CATALOG = [
   { event: "sale.completed", labelKey: "ui.evSaleCompleted", module: "sales" },
   { event: "sale.voided", labelKey: "ui.evSaleVoided", module: "sales" },
@@ -2735,7 +2735,7 @@ function catalogEntry(event) {
   return TRIGGER_CATALOG.find((e4) => e4.event === event);
 }
 
-// modules/.wt-flows-ib/ui/lib/simulate.ts
+// modules/.wt-flows-4/ui/lib/simulate.ts
 var REDACTED = "\0redacted\0";
 var REDACTED_MARK = "\u2022\u2022\u2022\u2022";
 var UNKNOWN = "\0unknown\0";
@@ -3012,7 +3012,7 @@ function simulate(doc, input) {
   };
 }
 
-// modules/.wt-flows-ib/ui/lib/hub-flows.ts
+// modules/.wt-flows-4/ui/lib/hub-flows.ts
 var CAPABILITY_DENIED = "capability_denied";
 function hasFlows(candidate) {
   const c4 = candidate;
@@ -3028,7 +3028,7 @@ function errorCode(e4) {
   return typeof code === "string" ? code : "";
 }
 
-// modules/.wt-flows-ib/ui/components/erp-flows-editor/erp-flows-editor.ts
+// modules/.wt-flows-4/ui/components/erp-flows-editor/erp-flows-editor.ts
 function guardRows(when) {
   const rows = [];
   for (const [path, ops] of Object.entries(when ?? {})) {
@@ -4860,7 +4860,7 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "pickerRoot", 2);
 define("erp-flows-editor", ErpFlowsEditor);
 
-// modules/.wt-flows-ib/ui/lib/templates.ts
+// modules/.wt-flows-4/ui/lib/templates.ts
 var SECTORS = ["any", "beauty", "food"];
 var SCHEMA_VERSION2 = 1;
 function run(id, command, params) {
@@ -5026,7 +5026,7 @@ function missingModules(template, known) {
   return out;
 }
 
-// modules/.wt-flows-ib/ui/components/erp-flows-gallery/erp-flows-gallery.ts
+// modules/.wt-flows-4/ui/components/erp-flows-gallery/erp-flows-gallery.ts
 var ErpFlowsGallery = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5379,7 +5379,7 @@ __decorateClass([
 ], ErpFlowsGallery.prototype, "error", 2);
 define("erp-flows-gallery", ErpFlowsGallery);
 
-// modules/.wt-flows-ib/ui/components/erp-flows-guide/erp-flows-guide.ts
+// modules/.wt-flows-4/ui/components/erp-flows-guide/erp-flows-guide.ts
 var ErpFlowsGuide = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5641,7 +5641,7 @@ __decorateClass([
 ], ErpFlowsGuide.prototype, "t", 2);
 define("erp-flows-guide", ErpFlowsGuide);
 
-// modules/.wt-flows-ib/ui/components/erp-flows-approvals/erp-flows-approvals.ts
+// modules/.wt-flows-4/ui/components/erp-flows-approvals/erp-flows-approvals.ts
 var ErpFlowsApprovals = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5856,7 +5856,7 @@ __decorateClass([
 ], ErpFlowsApprovals.prototype, "busy", 2);
 define("erp-flows-approvals", ErpFlowsApprovals);
 
-// modules/.wt-flows-ib/ui/lib/ai-draft.ts
+// modules/.wt-flows-4/ui/lib/ai-draft.ts
 var DRAFT_STEP_KINDS = ["command", "condition", "delay"];
 function readNotes(raw) {
   const value = typeof raw === "string" ? safeParse(raw) : raw;
@@ -6050,7 +6050,7 @@ function draftGaps(doc, known) {
   return out;
 }
 
-// modules/.wt-flows-ib/locales/es.json
+// modules/.wt-flows-4/locales/es.json
 var es_default = {
   name: "Automatizaciones",
   navigation: {
@@ -6439,7 +6439,7 @@ var es_default = {
   }
 };
 
-// modules/.wt-flows-ib/locales/en.json
+// modules/.wt-flows-4/locales/en.json
 var en_default = {
   name: "Automations",
   navigation: {
@@ -6828,7 +6828,7 @@ var en_default = {
   }
 };
 
-// modules/.wt-flows-ib/ui/components/erp-flows-app/erp-flows-app.ts
+// modules/.wt-flows-4/ui/components/erp-flows-app/erp-flows-app.ts
 var CATALOG = { es: es_default, en: en_default };
 var ErpFlowsApp = class extends i3 {
   constructor() {
