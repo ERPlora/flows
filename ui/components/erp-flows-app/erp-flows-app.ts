@@ -9,6 +9,15 @@ import '../erp-flows-gallery/erp-flows-gallery';
 import '../erp-flows-guide/erp-flows-guide';
 import '../erp-flows-approvals/erp-flows-approvals';
 import { readDoc, SCHEMA_VERSION } from '../../lib/flow-doc';
+import {
+  EMPTY_VIEW,
+  applyView,
+  copyName,
+  duplicateOf,
+  isFiltering,
+  secretRefs,
+} from '../../lib/flow-list';
+import type { ListView, SortBy, StateFilter, TriggerFilter } from '../../lib/flow-list';
 import { describeTrigger } from '../../lib/plain-language';
 import { catalogEntry } from '../../lib/trigger-catalog';
 import { CAPABILITY_DENIED, errorCode, resolveClient } from '../../lib/hub-flows';
@@ -154,6 +163,114 @@ export class ErpFlowsApp extends LitElement {
     .icon-btn:hover {
       background: var(--ok-hover, rgba(0, 0, 0, 0.06));
     }
+    /* The console (flows#19). One column that wraps: the search box takes the width it can get and
+       the three narrow selects sit under it on a phone rather than being squeezed into a strip
+       nobody can read. */
+    .toolbar {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .toolbar .search {
+      width: 100%;
+      box-sizing: border-box;
+      font: inherit;
+      color: inherit;
+      background: var(--ok-surface, var(--ion-card-background, #fff));
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-sm, 10px);
+      padding: 0 0.7rem;
+      /* A finger on the counter tablet, not a mouse. */
+      min-height: 2.75rem;
+    }
+    .toolbar .filters {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .toolbar select {
+      font: inherit;
+      font-size: 0.9rem;
+      color: inherit;
+      background: var(--ok-surface, var(--ion-card-background, #fff));
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-pill, 999px);
+      padding: 0 0.6rem;
+      min-height: 2.5rem;
+    }
+    .toolbar .filters .hint {
+      margin-left: auto;
+    }
+    .selection {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0.4rem 0.6rem;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius, 14px);
+      background: var(--ok-surface-muted, rgba(0, 0, 0, 0.03));
+    }
+    .selection .grow {
+      flex: 1 1 auto;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .flow {
+      flex-wrap: wrap;
+    }
+    .flow > input.pick {
+      flex: 0 0 auto;
+      margin: 0 0 0 0.6rem;
+      width: 1.15rem;
+      height: 1.15rem;
+    }
+    /* Full width so it pushes the row apart instead of squeezing in beside the switch — this is a
+       question, and a question that has to be hunted for is one people answer without reading. */
+    .flow > .confirm {
+      flex: 1 0 100%;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0.5rem 0.75rem;
+      border-top: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
+      background: var(--ok-surface-muted, rgba(0, 0, 0, 0.03));
+    }
+    /* The question takes its OWN line, at every width. Sharing the line with the two buttons
+       pushed «Yes, delete it» off the right edge of the card at 390px — the one control that must
+       be read before it is pressed, half off screen. */
+    .flow > .confirm .grow {
+      flex: 1 1 100%;
+      font-size: 0.9rem;
+    }
+    .flow > .confirm button {
+      font: inherit;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border-radius: var(--ok-radius-pill, 999px);
+      padding: 0 1rem;
+      min-height: 2.5rem;
+    }
+    .flow > .confirm button.danger {
+      border: 1px solid transparent;
+      background: var(--ok-danger, var(--ion-color-danger, #c0392b));
+      color: var(--ok-danger-contrast, var(--ion-color-danger-contrast, #fff));
+      font-weight: 600;
+    }
+    .flow > .confirm button.quiet {
+      border: 1px solid var(--ok-border, #d7d5cc);
+      background: transparent;
+      color: inherit;
+    }
+    .empty-filter {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      padding: 0.75rem 0;
+    }
     .gate {
       max-width: 34rem;
       margin: 2rem auto;
@@ -206,6 +323,18 @@ export class ErpFlowsApp extends LitElement {
 
   /** What the assistant proposed and nobody has answered yet (flows#4). */
   @state() private tray: TrayItem[] = [];
+
+  /** How the list is narrowed and ordered right now (flows#19). */
+  @state() private view: ListView = EMPTY_VIEW;
+
+  /** The rows chosen for a bulk action. Ids, not flows: the list underneath keeps reloading. */
+  @state() private chosen: string[] = [];
+
+  /** The row whose × was pressed once. Deleting is the only thing here that cannot be undone. */
+  @state() private confirmDelete = '';
+
+  /** What just happened, in the owner's words — a copy made, and what it did NOT bring with it. */
+  @state() private notice = '';
 
   /** The proposal currently open in the editor, so saving it can be recorded against it. */
   @state() private reviewing: TrayItem | null = null;
@@ -473,12 +602,238 @@ export class ErpFlowsApp extends LitElement {
 
   private async remove(flow: Flow): Promise<void> {
     if (!this.client) return;
+    this.confirmDelete = '';
     try {
       await this.client.flows.remove(flow.id);
       this.flows = this.flows.filter((f) => f.id !== flow.id);
+      this.chosen = this.chosen.filter((id) => id !== flow.id);
     } catch (e) {
       this.error = (e as Error)?.message || this.t('ui.errGeneric');
     }
+  }
+
+  // ── The list as a console (flows#19) ────────────────────────────────────────────────────────
+
+  /** The rows on screen right now. Everything else on this screen is derived from this. */
+  private get shown(): Flow[] {
+    return applyView(this.flows, this.view);
+  }
+
+  private narrow(patch: Partial<ListView>): void {
+    this.view = { ...this.view, ...patch };
+    // A selection whose rows have just been hidden is an action nobody can check before taking
+    // it: «pause the 2 chosen» with neither of them on screen. So narrowing lets them go.
+    const visible = new Set(this.shown.map((f) => f.id));
+    this.chosen = this.chosen.filter((id) => visible.has(id));
+    this.confirmDelete = '';
+  }
+
+  /**
+   * A copy of one automation: **paused, and holding nothing the original earned**.
+   *
+   * The permissions are the point. A copy that arrived with the original's grants would be a way
+   * to get an automation authorised without anybody authorising it — so it comes with none, and
+   * the screen SAYS so rather than leaving the owner to notice. If the document reaches outside
+   * using a secret, that is named too: a credential the copy points at is a decision, and the
+   * value itself is not readable by anyone, this screen included.
+   */
+  private async duplicate(flow: Flow): Promise<void> {
+    if (!this.client) return;
+    this.notice = '';
+    this.confirmDelete = '';
+    try {
+      const name = copyName(flow.name ?? '', this.flows.map((f) => f.name ?? ''), this.t);
+      await this.client.flows.create(duplicateOf(flow, name));
+      const secrets = secretRefs(readDoc(flow.definition));
+      this.notice = secrets.length
+        ? `${this.t('ui.copyMade')} ${this.t('ui.copySecrets', { names: secrets.join(', ') })}`
+        : this.t('ui.copyMade');
+      await this.reload();
+    } catch (e) {
+      this.error = (e as Error)?.message || this.t('ui.errGeneric');
+    }
+  }
+
+  /**
+   * Turn several on, or pause several. **Never delete, and never run.**
+   *
+   * Those two are the reason this is a whitelist of exactly two verbs and not a generic «apply to
+   * selection»: deleting is unrecoverable and running has effects on the business, and both are
+   * decisions taken a row at a time, looking at the row.
+   */
+  private async bulk(enabled: boolean): Promise<void> {
+    const targets = this.flows.filter((f) => this.chosen.includes(f.id));
+    // Let go FIRST: a second press on a bar that is still there would repeat the whole thing.
+    this.chosen = [];
+    for (const flow of targets) await this.setEnabled(flow, enabled);
+  }
+
+  private renderToolbar() {
+    const total = this.flows.length;
+    const shown = this.shown.length;
+    return html`<div class="toolbar">
+      <input
+        class="search"
+        type="search"
+        data-act="search"
+        .value=${this.view.q}
+        placeholder=${this.t('ui.listSearch')}
+        aria-label=${this.t('ui.listSearch')}
+        @input=${(e: Event) => this.narrow({ q: (e.target as HTMLInputElement).value })}
+      />
+      <div class="filters">
+        <select
+          data-act="filter-state"
+          aria-label=${this.t('ui.filterState')}
+          .value=${this.view.state}
+          @change=${(e: Event) =>
+            this.narrow({ state: (e.target as HTMLSelectElement).value as StateFilter })}
+        >
+          <option value="all">${this.t('ui.stateAll')}</option>
+          <option value="active">${this.t('ui.stateActive')}</option>
+          <option value="paused">${this.t('ui.statePaused')}</option>
+        </select>
+        <select
+          data-act="filter-trigger"
+          aria-label=${this.t('ui.filterTrigger')}
+          .value=${this.view.trigger}
+          @change=${(e: Event) =>
+            this.narrow({ trigger: (e.target as HTMLSelectElement).value as TriggerFilter })}
+        >
+          <option value="all">${this.t('ui.triggerAny')}</option>
+          <option value="event">${this.t('ui.filterEvent')}</option>
+          <option value="cron">${this.t('ui.filterCron')}</option>
+          <option value="at">${this.t('ui.filterAt')}</option>
+          <option value="manual">${this.t('ui.filterManual')}</option>
+        </select>
+        <select
+          data-act="sort"
+          aria-label=${this.t('ui.sortBy')}
+          .value=${this.view.sort}
+          @change=${(e: Event) =>
+            this.narrow({ sort: (e.target as HTMLSelectElement).value as SortBy })}
+        >
+          <option value="updated">${this.t('ui.sortUpdated')}</option>
+          <option value="name">${this.t('ui.sortName')}</option>
+        </select>
+        <!-- «3 of 20» rather than «3»: a short list with a filter on it looks exactly like a hub
+             with three automations, and that is how somebody concludes theirs have gone. -->
+        <span class="hint" data-count>${this.t('ui.listCount', { shown, total })}</span>
+      </div>
+    </div>`;
+  }
+
+  private renderSelection() {
+    if (!this.chosen.length) return nothing;
+    return html`<div class="selection" data-selection>
+      <span class="grow">${this.t('ui.selectedCount', { count: this.chosen.length })}</span>
+      <ion-button size="small" fill="outline" data-act="bulk-enable" @click=${() => void this.bulk(true)}>
+        ${this.t('ui.bulkEnable')}
+      </ion-button>
+      <ion-button size="small" fill="outline" data-act="bulk-pause" @click=${() => void this.bulk(false)}>
+        ${this.t('ui.bulkPause')}
+      </ion-button>
+      <button
+        type="button"
+        class="icon-btn"
+        data-act="selection-clear"
+        aria-label=${this.t('ui.selectionClear')}
+        @click=${() => {
+          this.chosen = [];
+        }}
+      >
+        ×
+      </button>
+    </div>`;
+  }
+
+  private renderRow(flow: Flow) {
+    const confirming = this.confirmDelete === flow.id;
+    return html`<div class="flow" data-flow=${flow.id}>
+      <input
+        type="checkbox"
+        class="pick"
+        data-act="select"
+        aria-label=${this.t('ui.selectOne', { name: flow.name || this.t('ui.unnamed') })}
+        .checked=${this.chosen.includes(flow.id)}
+        @change=${(e: Event) => {
+          const on = (e.target as HTMLInputElement).checked;
+          this.chosen = on
+            ? [...this.chosen, flow.id]
+            : this.chosen.filter((id) => id !== flow.id);
+        }}
+      />
+      <button
+        type="button"
+        class="open"
+        @click=${() => {
+          this.editing = flow;
+          this.isNew = false;
+        }}
+      >
+        <span class="name">${flow.name || this.t('ui.unnamed')}</span>
+        <span class="when">${this.startsWhen(flow)}</span>
+      </button>
+      <span class="side">
+        <ok-status-pill
+          tone=${flow.enabled ? 'success' : 'neutral'}
+          label=${flow.enabled ? this.t('ui.active') : this.t('ui.paused')}
+        ></ok-status-pill>
+        <ion-toggle
+          .checked=${flow.enabled}
+          @ionChange=${(e: Event) =>
+            void this.setEnabled(flow, !!(e.target as HTMLInputElement).checked)}
+        ></ion-toggle>
+        <button
+          type="button"
+          class="icon-btn"
+          data-act="duplicate"
+          aria-label=${this.t('ui.duplicate')}
+          title=${this.t('ui.duplicate')}
+          @click=${() => void this.duplicate(flow)}
+        >
+          ⧉
+        </button>
+        <button
+          type="button"
+          class="icon-btn"
+          data-act="delete"
+          aria-label=${this.t('ui.delete')}
+          @click=${() => {
+            this.confirmDelete = confirming ? '' : flow.id;
+          }}
+        >
+          ×
+        </button>
+      </span>
+      <!-- Asking is the whole point: an automation is the only thing on this screen whose loss
+           cannot be undone, and its × sits a fingertip from the switch on a counter tablet. -->
+      ${confirming
+        ? html`<div class="confirm">
+            <span class="grow"
+              >${this.t('ui.deleteConfirm', { name: flow.name || this.t('ui.unnamed') })}</span
+            >
+            <!-- Plain buttons and not ion-buttons, for one reason that is worth writing down:
+                 Ionic honours the fill only in md mode, so in ios the same markup renders the
+                 destructive action as pale text next to an outlined «leave it» — the button you
+                 must read before pressing, looking like the disabled one. These carry their own
+                 colour out of the OutfitKit tokens and look the same in both modes. -->
+            <button type="button" class="danger" data-act="delete-yes" @click=${() => void this.remove(flow)}>
+              ${this.t('ui.deleteYes')}
+            </button>
+            <button
+              type="button"
+              class="quiet"
+              data-act="delete-no"
+              @click=${() => {
+                this.confirmDelete = '';
+              }}
+            >
+              ${this.t('ui.deleteNo')}
+            </button>
+          </div>`
+        : nothing}
+    </div>`;
   }
 
   /** «Cuando se reserva una cita» — never the raw event name. */
@@ -527,42 +882,28 @@ export class ErpFlowsApp extends LitElement {
    */
   private renderList() {
     if (!this.flows.length) return nothing;
+    const rows = this.shown;
     return html`<div class="list">
       <h3 class="section">${this.t('ui.tplYours')}</h3>
-      ${this.flows.map(
-        (flow) => html`<div class="flow" data-flow=${flow.id}>
-          <button
-            type="button"
-            class="open"
-            @click=${() => {
-              this.editing = flow;
-              this.isNew = false;
-            }}
-          >
-            <span class="name">${flow.name || this.t('ui.unnamed')}</span>
-            <span class="when">${this.startsWhen(flow)}</span>
-          </button>
-          <span class="side">
-            <ok-status-pill
-              tone=${flow.enabled ? 'success' : 'neutral'}
-              label=${flow.enabled ? this.t('ui.active') : this.t('ui.paused')}
-            ></ok-status-pill>
-            <ion-toggle
-              .checked=${flow.enabled}
-              @ionChange=${(e: Event) =>
-                void this.setEnabled(flow, !!(e.target as HTMLInputElement).checked)}
-            ></ion-toggle>
-            <button
-              type="button"
-              class="icon-btn"
-              aria-label=${this.t('ui.delete')}
-              @click=${() => void this.remove(flow)}
+      ${this.renderToolbar()} ${this.renderSelection()}
+      ${this.notice
+        ? html`<ok-inline-feedback tone="success" icon="copy-outline" data-notice
+            >${this.notice}</ok-inline-feedback
+          >`
+        : nothing}
+      ${rows.length
+        ? rows.map((flow) => this.renderRow(flow))
+        : html`<div class="empty-filter">
+            <span class="hint">${this.t('ui.listNoMatch')}</span>
+            <ion-button
+              size="small"
+              fill="outline"
+              data-act="clear-filters"
+              @click=${() => this.narrow({ q: '', state: 'all', trigger: 'all' })}
             >
-              ×
-            </button>
-          </span>
-        </div>`,
-      )}
+              ${this.t('ui.listClear')}
+            </ion-button>
+          </div>`}
     </div>`;
   }
 
