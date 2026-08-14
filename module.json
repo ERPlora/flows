@@ -5,16 +5,24 @@
   "version": "0.1.3",
   "description": "Automate repetitive work without writing code: appointment reminders, low-stock alerts and messages to customers that go out on their own.",
   "agent": {
-    "description": "Visual editor for the hub automations (flows): create, edit, enable and pause automations that react to an event, a schedule or a manual trigger; grant them what they may do; and read their run history in plain language. It does not run the automations — the hub's own kernel does.",
+    "description": "Automations (flows) for this hub — «when X happens, do Y». Two things live here. (1) The visual editor the owner uses: create, edit, enable and pause automations that react to an event, a schedule or a manual trigger; grant them what they may do; read their run history in plain language. (2) `flows.drafts.propose`, which is how YOU answer somebody who wants something to happen on its own — you write the automation as a DRAFT and it waits in Automations for them to check and turn on. Reach for it whenever a request is about something recurring, automatic, or «remind me / warn me / send it every time…». The module does not RUN automations; the hub's own kernel does.",
     "keywords": [
       "automation",
+      "automate",
       "flow",
       "workflow",
       "trigger",
       "when this happens",
+      "every time",
+      "on its own",
+      "automatically",
       "schedule",
       "reminder",
-      "rule"
+      "rule",
+      "remind me",
+      "warn me",
+      "notify me when",
+      "draft an automation"
     ]
   },
   "depends_on": [],
@@ -31,6 +39,47 @@
   },
   "capabilities": {
     "manage_flows": {}
+  },
+  "migrations": {
+    "postgres": [
+      "migrations/postgres/001_drafts.sql"
+    ]
+  },
+  "queries": {
+    "flows.drafts.list": {
+      "permission": "flows.view_flow",
+      "sql": "queries/drafts_list.sql"
+    }
+  },
+  "commands": {
+    "flows.drafts.propose": {
+      "permission": "flows.manage_flow",
+      "transaction": true,
+      "sql": [
+        "commands/draft_propose.sql"
+      ],
+      "schema": "schemas/draft_propose.json",
+      "emit": [
+        "flows.draft.proposed"
+      ],
+      "ai": {
+        "description": "Propose a DRAFT automation for this business — «when X happens, do Y». The draft does NOT run: it lands in Automations for the owner to check, fill in and turn on, and it holds no permissions until they grant them. Use it whenever the owner describes something they want to happen on its own. Say afterwards that it is waiting for them in Automations, and repeat anything you were unsure about."
+      }
+    },
+    "flows.drafts.resolve": {
+      "permission": "flows.manage_flow",
+      "transaction": true,
+      "sql": [
+        "commands/draft_resolve.sql"
+      ],
+      "schema": "schemas/draft_resolve.json",
+      "min_affected_rows": 1
+    }
+  },
+  "events": {
+    "emits": [
+      "flows.draft.proposed"
+    ]
   },
   "navigation": [
     {

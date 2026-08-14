@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flows.drafts.resolve payload",
+  "description": "A person answered a proposal: it became an automation, or it was discarded. There is no `outcome` that makes a draft run — accepting one is `POST /api/hub/flows` from the editor, paused and ungranted, and this only records that it happened.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "outcome", "flow_id"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "outcome": { "enum": ["used", "dismissed"] },
+    "flow_id": {
+      "type": "string",
+      "description": "The automation it turned into, when the outcome is `used`; the empty string when it was discarded. Required so the column never has to accept a NULL the caller did not mean."
+    }
+  }
+}

@@ -132,6 +132,20 @@ export interface EventsApi {
 export interface ModuleClient {
   flows: FlowsApi;
   events: EventsApi;
+  /**
+   * The ordinary dispatcher, which this module now also uses — for its OWN surface, not the
+   * kernel's (flows#4). The assistant cannot reach `/api/hub/flows`: those routes demand an
+   * owner/admin session at a keyboard and refuse a machine token, which is exactly what an
+   * assistant turn holds. So what the assistant writes is a row in this module's
+   * `flows_flowdraft` table, through `flows.drafts.propose`, and this screen reads it back the
+   * same way any module reads its own data.
+   *
+   * That indirection is the FEATURE, not a workaround: a draft is not a flow, so there is no
+   * shape of bug — here, in a later editor, in a blueprint — that turns what a model wrote into
+   * something that runs. Optional because `erplora dev`'s preview client is not a full one.
+   */
+  query?<T = unknown>(name: string, params?: Record<string, unknown>): Promise<T>;
+  command?<T = unknown>(name: string, payload?: Record<string, unknown>): Promise<T>;
   locale?: string;
   t?(catalog: Record<string, unknown>, key: string, params?: Record<string, unknown>): string;
   formatMoney?(amount: unknown): string;

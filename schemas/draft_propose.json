@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flows.drafts.propose payload",
+  "description": "A DRAFT automation for the owner to review. It is not an automation yet: it does not run, it holds no permissions, and it never will until a person opens it, fills the gaps and turns it on. Write the skeleton you are sure about and put everything you had to guess in `notes` — a guess the owner can see is useful, a guess hidden inside a parameter is not. This mirrors `hub/schemas/flow.schema.json`, the contract the hub enforces on save; the hub is the authority and it refuses anything that does not match.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "definition",
+    "notes"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "What the owner will read in their list of automations, in THEIR language and in their words — «Avisar cuando no venga alguien a su cita», not «no_show handler»."
+    },
+    "notes": {
+      "type": "array",
+      "description": "What you could NOT work out, one short sentence each, in the owner's language: an amount you invented, a name you were not sure of, something they asked for that this format cannot express. Send an empty list only when there is genuinely nothing to check.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "maxItems": 8
+    },
+    "definition": {
+      "type": "object",
+      "description": "The automation document. It is LINEAR: the steps run in order, and a condition that does not pass ENDS the run — there is no branch, no loop and no «else».",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "steps"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1,
+          "description": "Always 1."
+        },
+        "triggers": {
+          "type": "array",
+          "maxItems": 1,
+          "description": "What starts it. Exactly one, or none to mean «only by hand».",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "event",
+                  "cron",
+                  "at",
+                  "manual"
+                ],
+                "description": "`event`: something happened in the business. `cron`: on a clock. `at`: once, at an instant. `manual`: only when somebody presses run."
+              },
+              "event": {
+                "type": "string",
+                "description": "Only with `kind: event` — the name of the thing that happens, exactly as the module that owns it emits it. Use one you know this hub really has; if you are not sure of the name, say so in `notes` rather than inventing one. Common ones: `sale.completed`, `customer.created`, `appointments.appointment.created`, `appointments.appointment.no_show`, `appointments.appointment.cancelled`, `online_booking.booking.created`, `reservations.reservation.created`, `inventory.stock_changed`, `tables.session.closed`, `cash_register.session_closed`, `whatsapp_inbox.message.received`."
+              },
+              "filter": {
+                "type": "object",
+                "description": "Only with `kind: event` — narrow which occurrences start it, same shape as a condition's `when` but with `event.<field>` paths.",
+                "additionalProperties": {
+                  "$ref": "#/$defs/comparison"
+                }
+              },
+              "cron": {
+                "type": "string",
+                "description": "Only with `kind: cron` — five fields `min hour dom mon dow`, read in the shop's own timezone. `0 9 * * *` is every day at 09:00."
+              },
+              "at": {
+                "type": "string",
+                "description": "Only with `kind: at` — an RFC-3339 instant WITH its offset, e.g. `2026-09-01T09:00:00+02:00`."
+              }
+            }
+          }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "description": "What it does, IN ORDER. Keep it short: most useful automations are one trigger and one action.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,23}$",
+                "description": "How later steps refer to this one (`steps.<id>.<field>`). Unique within the automation."
+              },
+              "kind": {
+                "enum": [
+                  "command",
+                  "condition",
+                  "delay"
+                ],
+                "description": "Only these three. The hub also runs `http`, `ai` and `notify` steps and the owner can add them by hand, but you may not propose one: an `http` calls a URL nobody chose, a `notify` costs money for every message sent, and an `ai` is another billed call. If what they asked for needs one, propose the closest thing you CAN express and say what is missing in `notes`."
+              },
+              "command": {
+                "type": "string",
+                "description": "Only with `kind: command` — the action to run, by its full name (`tasks.tasks.create`, `customers.notes.add`). Use one of the tools you were given for this hub: a name that does not exist here is refused when the owner saves."
+              },
+              "params": {
+                "type": "object",
+                "description": "Only with `kind: command` — what the action receives. A value is either something you write literally, a PATH that copies a field of the run (`input.customer_id` — this keeps its type), or a sentence with `{{input.name}}` placeholders inside it (this is always text). `input` is what the trigger carried.",
+                "additionalProperties": true
+              },
+              "when": {
+                "type": "object",
+                "description": "Only with `kind: condition` — a guard. Every comparison must hold or the run STOPS HERE, quietly and successfully. Money is in cents: 100,00 € is 10000.",
+                "additionalProperties": {
+                  "$ref": "#/$defs/comparison"
+                }
+              },
+              "seconds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2592000,
+                "description": "Only with `kind: delay` — how long to wait FROM NOW. There is no way to wait until a date carried in the payload; if that is what they asked for, say so in `notes`."
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One field, compared. `{\"input.total\": {\"gte\": 10000}}`. A field that is not there never matches, except with `exists: false`.",
+      "properties": {
+        "eq": {},
+        "neq": {},
+        "in": {
+          "type": "array"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "contains": {},
+        "gt": {},
+        "gte": {},
+        "lt": {},
+        "lte": {}
+      }
+    }
+  }
+}
