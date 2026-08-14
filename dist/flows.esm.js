@@ -3615,7 +3615,7 @@ var ErpFlowsEditor = class extends i3 {
     if (!this.flow?.id || !this.client) return;
     try {
       const page = await this.client.flows.runs(this.flow.id, { limit: 20 });
-      this.runs = page?.data ?? [];
+      this.runs = Array.isArray(page) ? page : page?.data ?? [];
     } catch (e4) {
       this.error = e4?.message ?? this.t("ui.errGeneric");
     }

@@ -755,8 +755,17 @@ export class ErpFlowsEditor extends LitElement {
   private async loadRuns(): Promise<void> {
     if (!this.flow?.id || !this.client) return;
     try {
-      const page = await this.client.flows.runs(this.flow.id, { limit: 20 });
-      this.runs = (page?.data ?? []) as RunRow[];
+      // Both shapes, and that is not defensiveness for its own sake: the runtime answers the
+      // envelope `{ok, data, next_cursor}` and the SDK's transport ends in `unwrap(env)`, so what
+      // arrives here TODAY is the bare array — even though the method is typed `RunPage`. Reading
+      // only `page.data` made every history on every hub say «todavía no se ha ejecutado», which
+      // reads exactly like a flow that never fired (found on a real hub, 2026-08-14). Accepting
+      // both means the day the SDK stops unwrapping, the history does not empty itself again.
+      const page = (await this.client.flows.runs(this.flow.id, { limit: 20 })) as
+        | RunRow[]
+        | { data?: RunRow[] }
+        | null;
+      this.runs = Array.isArray(page) ? page : ((page?.data ?? []) as RunRow[]);
     } catch (e) {
       this.error = (e as Error)?.message ?? this.t('ui.errGeneric');
     }
