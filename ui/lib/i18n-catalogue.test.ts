@@ -121,3 +121,59 @@ describe('the module catalogue covers every string the screens ask for', () => {
     expect([...inEs].filter((k) => !inEn.has(k)).sort(), 'in Spanish, missing in English').toEqual([]);
   });
 });
+
+/**
+ * **The same key twice in one catalogue** — the failure the guard above cannot see.
+ *
+ * `JSON.parse` keeps the LAST of two identical keys and says nothing, so a new string that
+ * happens to reuse a name already in the file does not collide loudly: it is simply dropped, and
+ * the screen that asked for it silently renders the OTHER one's sentence. Every check in this
+ * file runs on the parsed object, where the duplicate no longer exists — so this one reads the
+ * text.
+ *
+ * It caught the real thing: a filter dropdown's `ui.triggerEvent` («Something happening») landing
+ * on top of the trigger SENTENCE `plain-language.ts` already owned («When {event}»), leaving the
+ * dropdown offering «When {event}» as an option.
+ */
+describe('neither catalogue declares the same key twice', () => {
+  const files = {
+    'en.json': join(__dirname, '../../locales/en.json'),
+    'es.json': join(__dirname, '../../locales/es.json'),
+  };
+
+  /**
+   * Every `"key":` in the file, under its FULL path.
+   *
+   * Indentation is what carries the nesting here (both files are two-space, one key per line), so
+   * the depth of a line is its own address. Reading only the outermost block instead would collapse
+   * `tpl.welcome.name` and `tpl.bigSale.name` into one `tpl.name` and report every template's
+   * `name` as a duplicate of every other's — a guard that cries wolf gets deleted.
+   */
+  function duplicates(text: string): string[] {
+    const seen = new Map<string, number>();
+    const ancestors: string[] = [];
+    for (const line of text.split('\n')) {
+      const entry = /^( *)"([A-Za-z0-9_]+)":\s*(\{)?/.exec(line);
+      if (!entry) continue;
+      const depth = entry[1].length / 2;
+      const path = [...ancestors.slice(0, depth - 1), entry[2]].join('.');
+      seen.set(path, (seen.get(path) ?? 0) + 1);
+      if (entry[3]) ancestors[depth - 1] = entry[2];
+    }
+    return [...seen].filter(([, n]) => n > 1).map(([path]) => path).sort();
+  }
+
+  // The control: a file that DOES repeat a key has to come back named, or this guard is decoration.
+  // And one that merely reuses a name in two DIFFERENT blocks must not, or it is noise.
+  it('finds one when there is one, and only then', () => {
+    expect(duplicates('{\n  "ui": {\n    "a": "1",\n    "a": "2"\n  }\n}')).toEqual(['ui.a']);
+    expect(duplicates('{\n  "ui": {\n    "a": "1",\n    "b": "2"\n  }\n}')).toEqual([]);
+    expect(
+      duplicates('{\n  "tpl": {\n    "one": {\n      "name": "x"\n    },\n    "two": {\n      "name": "y"\n    }\n  }\n}'),
+    ).toEqual([]);
+  });
+
+  it.each(Object.entries(files))('%s', (_name, path) => {
+    expect(duplicates(readFileSync(path, 'utf8'))).toEqual([]);
+  });
+});
