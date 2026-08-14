@@ -53,6 +53,21 @@ describe('the guide answers the five questions pm#134 asked for', () => {
     expect(steps.length).toBeGreaterThanOrEqual(4);
   });
 
+  // «Probar» has existed since flows#2 and it is the step that stops somebody switching on an
+  // automation they have never watched run. A walk that goes «fill it in → allow it → turn it on»
+  // teaches the one habit every comparable product teaches against (Shopify Flow and Power
+  // Automate both put test-before-activate in their own getting-started path).
+  it('has the owner try it before switching it on', async () => {
+    const el = await mount();
+    const steps = [...el.renderRoot.querySelectorAll('[data-section="first"] li')].map(
+      (li) => li.textContent ?? '',
+    );
+    const tried = steps.findIndex((s) => s.includes(t('guide.firstTest')));
+    const turnedOn = steps.findIndex((s) => s.includes(t('guide.firstEnable')));
+    expect(tried, 'the walk never tries it').toBeGreaterThanOrEqual(0);
+    expect(turnedOn).toBeGreaterThan(tried);
+  });
+
   // The place people get stuck, and the reason this section is not last: an automation with no
   // grants does nothing at all, and does it silently.
   it('says where the permissions live and what happens without them', async () => {
@@ -68,15 +83,52 @@ describe('the guide answers the five questions pm#134 asked for', () => {
     expect(section?.textContent).toContain(t('guide.historyGuard'));
   });
 
-  // Honesty is the whole point of section five: the engine is linear ON PURPOSE, and the network,
-  // AI and message steps are not editable yet (flows#3). A guide that implies otherwise sends
-  // somebody hunting for a screen that does not exist.
+  // Honesty is the whole point of section five, and it cuts BOTH ways. The engine is linear on
+  // purpose and it still cannot count backwards from a date — those stay. What does not stay is
+  // the third one.
   it('says out loud what it cannot do yet', async () => {
     const el = await mount();
     const section = el.renderRoot.querySelector('[data-section="limits"]');
     expect(section?.textContent).toContain(t('guide.limitsBranches'));
-    expect(section?.textContent).toContain(t('guide.limitsChannels'));
-    expect(section?.textContent).toContain(t('guide.limitsInside'));
+    expect(section?.textContent).toContain(t('guide.limitsDates'));
+  });
+
+  /**
+   * **A guide that undersells the product is worse than no guide** (flows#16).
+   *
+   * Until flows#3 the message, assistant and http steps ran in the kernel with no screen to set
+   * them up, and the guide said so. flows#3 shipped all three panels — so those two sentences
+   * became the guide telling the owner they cannot do the very thing that takes an automation
+   * outside the building. Nobody goes looking for a screen a manual says is not there.
+   *
+   * The check is on the CATALOGUE and not on the rendered words: a retired claim that survives as
+   * an unused key is one paste away from being back on screen, and the shape guard in
+   * `i18n-catalogue.test.ts` would keep both languages happily in step while it said it.
+   */
+  it('no longer claims the message, assistant and service steps cannot be set up', async () => {
+    const guide = (en as { guide: Record<string, string> }).guide;
+    expect(Object.keys(guide)).not.toContain('limitsChannels');
+    expect(Object.keys(guide)).not.toContain('limitsInside');
+
+    const el = await mount();
+    const shown = text(el).toLowerCase();
+    for (const claim of ['no screen', 'locked', 'indoors']) {
+      expect(shown, claim).not.toContain(claim);
+    }
+  });
+
+  it('tells the owner an automation CAN talk to their customer, and where that is set up', async () => {
+    const el = await mount();
+    expect(text(el)).toContain(t('guide.whatCan'));
+  });
+
+  // What IS still true about those three steps, and the reason it belongs in the limits section:
+  // the assistant writes the nearest task it can instead, so an owner who asked for «send them a
+  // WhatsApp» gets something else and has to add the message step themselves.
+  it('keeps the limit that DID survive: the assistant will not propose one for you', async () => {
+    const el = await mount();
+    const section = el.renderRoot.querySelector('[data-section="limits"]');
+    expect(section?.textContent).toContain(t('guide.limitsAssistant'));
   });
 });
 

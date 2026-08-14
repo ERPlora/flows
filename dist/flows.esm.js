@@ -1851,7 +1851,7 @@ __decorateClass4([
 ], OkStatusPill.prototype, "size");
 define("ok-status-pill", OkStatusPill);
 
-// modules/.wt-flows-8/ui/components/erp-flows-value/erp-flows-value.ts
+// modules/flows/ui/components/erp-flows-value/erp-flows-value.ts
 var ErpFlowsValue = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2060,7 +2060,7 @@ __decorateClass([
 ], ErpFlowsValue.prototype, "name", 2);
 define("erp-flows-value", ErpFlowsValue);
 
-// modules/.wt-flows-8/ui/lib/plain-language.ts
+// modules/flows/ui/lib/plain-language.ts
 var MINUTE = 60;
 var HOUR = 3600;
 var DAY = 86400;
@@ -2209,7 +2209,7 @@ function describeSample(field, t3) {
   return field.truncated ? `${text}\u2026` : text;
 }
 
-// modules/.wt-flows-8/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
+// modules/flows/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
 var ErpFlowsFieldPicker = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2453,7 +2453,7 @@ __decorateClass([
 ], ErpFlowsFieldPicker.prototype, "t", 2);
 define("erp-flows-field-picker", ErpFlowsFieldPicker);
 
-// modules/.wt-flows-8/ui/lib/flow-doc.ts
+// modules/flows/ui/lib/flow-doc.ts
 var SCHEMA_VERSION = 1;
 var PATH_ROOTS = ["input", "steps", "event", "secret"];
 var OPERATORS = [
@@ -2668,7 +2668,7 @@ function mergeGrants(live, add, revoke) {
   return out;
 }
 
-// modules/.wt-flows-8/ui/lib/trigger-catalog.ts
+// modules/flows/ui/lib/trigger-catalog.ts
 var TRIGGER_CATALOG = [
   { event: "sale.completed", labelKey: "ui.evSaleCompleted", module: "sales" },
   { event: "sale.voided", labelKey: "ui.evSaleVoided", module: "sales" },
@@ -2735,7 +2735,7 @@ function catalogEntry(event) {
   return TRIGGER_CATALOG.find((e4) => e4.event === event);
 }
 
-// modules/.wt-flows-8/ui/lib/event-catalog.ts
+// modules/flows/ui/lib/event-catalog.ts
 var BAD_CATALOG = "flows.bad_catalog";
 function toOption(row) {
   const event = typeof row?.name === "string" ? row.name.trim() : "";
@@ -2763,7 +2763,7 @@ async function loadEventCatalog(client) {
   return options.length ? { status: "ready", options } : { status: "empty" };
 }
 
-// modules/.wt-flows-8/ui/lib/simulate.ts
+// modules/flows/ui/lib/simulate.ts
 var REDACTED = "\0redacted\0";
 var REDACTED_MARK = "\u2022\u2022\u2022\u2022";
 var UNKNOWN = "\0unknown\0";
@@ -3040,7 +3040,7 @@ function simulate(doc, input) {
   };
 }
 
-// modules/.wt-flows-8/ui/lib/hub-flows.ts
+// modules/flows/ui/lib/hub-flows.ts
 var CAPABILITY_DENIED = "capability_denied";
 function hasFlows(candidate) {
   const c4 = candidate;
@@ -3056,7 +3056,7 @@ function errorCode(e4) {
   return typeof code === "string" ? code : "";
 }
 
-// modules/.wt-flows-8/ui/components/erp-flows-editor/erp-flows-editor.ts
+// modules/flows/ui/components/erp-flows-editor/erp-flows-editor.ts
 function guardRows(when) {
   const rows = [];
   for (const [path, ops] of Object.entries(when ?? {})) {
@@ -4964,7 +4964,7 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "pickerRoot", 2);
 define("erp-flows-editor", ErpFlowsEditor);
 
-// modules/.wt-flows-8/ui/lib/templates.ts
+// modules/flows/ui/lib/templates.ts
 var SECTORS = ["any", "beauty", "food"];
 var SCHEMA_VERSION2 = 1;
 function run(id, command, params) {
@@ -5130,7 +5130,7 @@ function missingModules(template, known) {
   return out;
 }
 
-// modules/.wt-flows-8/ui/components/erp-flows-gallery/erp-flows-gallery.ts
+// modules/flows/ui/components/erp-flows-gallery/erp-flows-gallery.ts
 var ErpFlowsGallery = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5483,7 +5483,15 @@ __decorateClass([
 ], ErpFlowsGallery.prototype, "error", 2);
 define("erp-flows-gallery", ErpFlowsGallery);
 
-// modules/.wt-flows-8/ui/components/erp-flows-guide/erp-flows-guide.ts
+// modules/flows/ui/components/erp-flows-guide/erp-flows-guide.ts
+var FIRST_STEPS = [
+  "guide.firstPick",
+  "guide.firstUse",
+  "guide.firstFill",
+  "guide.firstAllow",
+  "guide.firstTest",
+  "guide.firstEnable"
+];
 var ErpFlowsGuide = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5705,13 +5713,14 @@ var ErpFlowsGuide = class extends i3 {
         <p>${this.t("guide.whatBody")}</p>
         <p class="muted">${this.t("guide.whatExample")}</p>
         ${this.spineShot()}
+        <p>${this.t("guide.whatCan")}</p>
       </section>
 
       <section data-section="first">
         ${this.heading("first")}
         <p>${this.t("guide.firstBody")}</p>
         <ol>
-          ${[1, 2, 3, 4, 5].map((n5) => b2`<li>${this.t(`guide.first${n5}`)}</li>`)}
+          ${FIRST_STEPS.map((key2) => b2`<li>${this.t(key2)}</li>`)}
         </ol>
       </section>
 
@@ -5730,12 +5739,15 @@ var ErpFlowsGuide = class extends i3 {
         <p>${this.t("guide.historyGuard")}</p>
       </section>
 
+      <!-- Two engine limits and one the assistant imposes on itself. What is NOT here any more is
+           «there is no screen for the message, assistant and http steps»: flows#3 built all three,
+           and a guide that keeps saying otherwise is the product talking somebody out of the
+           feature that takes their automation outside the building (flows#16). -->
       <section data-section="limits">
         ${this.heading("limits")}
         <p>${this.t("guide.limitsBranches")}</p>
-        <p>${this.t("guide.limitsChannels")}</p>
         <p>${this.t("guide.limitsDates")}</p>
-        <p class="muted">${this.t("guide.limitsInside")}</p>
+        <p class="muted">${this.t("guide.limitsAssistant")}</p>
       </section>
     </div>`;
   }
@@ -5745,7 +5757,7 @@ __decorateClass([
 ], ErpFlowsGuide.prototype, "t", 2);
 define("erp-flows-guide", ErpFlowsGuide);
 
-// modules/.wt-flows-8/ui/components/erp-flows-approvals/erp-flows-approvals.ts
+// modules/flows/ui/components/erp-flows-approvals/erp-flows-approvals.ts
 var ErpFlowsApprovals = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5960,7 +5972,7 @@ __decorateClass([
 ], ErpFlowsApprovals.prototype, "busy", 2);
 define("erp-flows-approvals", ErpFlowsApprovals);
 
-// modules/.wt-flows-8/ui/lib/ai-draft.ts
+// modules/flows/ui/lib/ai-draft.ts
 var DRAFT_STEP_KINDS = ["command", "condition", "delay"];
 function readNotes(raw) {
   const value = typeof raw === "string" ? safeParse(raw) : raw;
@@ -6154,7 +6166,7 @@ function draftGaps(doc, known) {
   return out;
 }
 
-// modules/.wt-flows-8/locales/es.json
+// modules/flows/locales/es.json
 var es_default = {
   name: "Automatizaciones",
   navigation: {
@@ -6489,13 +6501,15 @@ var es_default = {
     whatTitle: "Qu\xE9 es una automatizaci\xF3n",
     whatBody: "Es una regla que dejas escrita: cuando pasa algo en tu negocio, el hub hace algo al respecto \u2014 solo, siempre, sin que nadie tenga que acordarse.",
     whatExample: "En una peluquer\xEDa: en cuanto se marca que alguien no ha venido, aparece en tu lista la tarea de llamarle y ofrecerle otra hora. Nadie tiene que darse cuenta. Ya est\xE1 ah\xED.",
+    whatCan: "Y no es solo para tu equipo: una automatizaci\xF3n puede mandarle un mensaje a tu cliente, pedirle al asistente que escriba algo o llamar a otro servicio que uses. Esos pasos se configuran en el propio paso, dentro de la automatizaci\xF3n, igual que todos los dem\xE1s.",
     firstTitle: "Tu primera automatizaci\xF3n, paso a paso",
     firstBody: "Lo m\xE1s r\xE1pido es empezar por una de las que ya vienen hechas en la primera pantalla.",
-    first1: "En la pantalla de Automatizaciones, elige una de la galer\xEDa. Lee la frase de debajo: eso es exactamente lo que va a hacer.",
-    first2: "Pulsa \xABUsar esta\xBB. Pasa a ser tuya, y se crea apagada.",
-    first3: "Rellena lo que te pide decidir: un importe, una hora, cu\xE1nto esperar. Siempre llega con una propuesta razonable puesta.",
-    first4: "Ve a Permisos y conc\xE9dele lo que necesita. Hasta que lo hagas, no hace absolutamente nada.",
-    first5: "Enci\xE9ndela con el interruptor de arriba. A partir de ese momento est\xE1 vigilando, de d\xEDa y de noche.",
+    firstPick: "En la pantalla de Automatizaciones, elige una de la galer\xEDa. Lee la frase de debajo: eso es exactamente lo que va a hacer.",
+    firstUse: "Pulsa \xABUsar esta\xBB. Pasa a ser tuya, y se crea apagada.",
+    firstFill: "Rellena lo que te pide decidir: un importe, una hora, cu\xE1nto esperar. Siempre llega con una propuesta razonable puesta.",
+    firstAllow: "Ve a Permisos y conc\xE9dele lo que necesita. Hasta que lo hagas, no hace absolutamente nada.",
+    firstTest: "Pulsa \xABProbar\xBB. Recorre la automatizaci\xF3n con algo que ha pasado de verdad en tu negocio y te ense\xF1a lo que HAR\xCDA, sin mandar nada, sin cobrar nada y sin apuntar nada.",
+    firstEnable: "Ahora s\xED, enci\xE9ndela con el interruptor de arriba. A partir de ese momento est\xE1 vigilando, de d\xEDa y de noche.",
     permissionsTitle: "Los permisos: por qu\xE9 hay que decir que s\xED",
     permissionsBody: "Una automatizaci\xF3n trabaja cuando no est\xE1s mirando, as\xED que nunca toma prestados tus permisos. Solo puede hacer las cosas concretas que le hayas concedido, una a una \u2014 eso es lo que impide que haga m\xE1s de lo que quisiste.",
     permissionsWhere: "Se conceden dentro de la propia automatizaci\xF3n: \xE1brela y ve a la pesta\xF1a Permisos. Ah\xED est\xE1 todo lo que necesita, con un bot\xF3n que lo concede de golpe.",
@@ -6505,9 +6519,8 @@ var es_default = {
     historyGuard: "\xABNo se cumpli\xF3 la condici\xF3n, as\xED que par\xF3 aqu\xED\xBB no es un fallo. Es la automatizaci\xF3n funcionando: le dijiste que siguiera solo en ciertos casos, y este no era uno de ellos.",
     limitsTitle: "Lo que todav\xEDa no puede hacer",
     limitsBranches: "No hay bifurcaciones. Una automatizaci\xF3n es una sola l\xEDnea de pasos de arriba abajo, y es a prop\xF3sito: si una condici\xF3n no se cumple, para ah\xED \u2014 no coge un segundo camino. Dos desenlaces distintos son dos automatizaciones.",
-    limitsChannels: "Todav\xEDa no puede escribirle a tu cliente. Los pasos que mandan un mensaje, preguntan al asistente o llaman a otro servicio ya funcionan dentro del hub, pero a\xFAn no hay pantalla para configurarlos: si una automatizaci\xF3n ya trae uno, lo ver\xE1s bloqueado.",
-    limitsDates: "Tampoco sabe contar hacia atr\xE1s desde una fecha: \xABel d\xEDa antes de la cita\xBB es algo que a\xFAn no puede calcular. S\xED puede esperar un rato desde que pas\xF3 algo, que no es lo mismo.",
-    limitsInside: "As\xED que de momento una automatizaci\xF3n trabaja de puertas adentro: te deja a ti y a tu equipo la nota, la tarea o el apunte, y quien habla con la gente es una persona.",
+    limitsDates: "No sabe contar hacia atr\xE1s desde una fecha: \xABel d\xEDa antes de la cita\xBB es algo que a\xFAn no puede calcular. S\xED puede esperar un rato desde que pas\xF3 algo, que no es lo mismo.",
+    limitsAssistant: "Y el paso del mensaje no te lo escribe el asistente. P\xEDdele \xABav\xEDsale por mensaje\xBB y te dejar\xE1 lo m\xE1s parecido que tiene permitido proponer \u2014la tarea en tu lista\u2014 y te lo dir\xE1 en sus notas. Mandar un mensaje cuesta dinero cada vez, as\xED que ese paso lo pones t\xFA y lo enciendes t\xFA.",
     shotGuard: "el ticket pasa de 100,00 \u20AC",
     shotAction: "Escribir una nota en la ficha del cliente",
     shotGrant: "Escribir una nota en la ficha del cliente",
@@ -6548,7 +6561,7 @@ var es_default = {
   }
 };
 
-// modules/.wt-flows-8/locales/en.json
+// modules/flows/locales/en.json
 var en_default = {
   name: "Automations",
   navigation: {
@@ -6883,13 +6896,15 @@ var en_default = {
     whatTitle: "What an automation is",
     whatBody: "It is a rule you leave written down: when something happens in your business, the hub does something about it \u2014 on its own, every time, without anybody having to remember.",
     whatExample: "In a salon: the moment somebody is marked as not having turned up, a job appears on your list telling you to ring them and offer another time. Nobody has to notice. It is already there.",
+    whatCan: "It is not only for your own team either: an automation can send your customer a message, ask the assistant to write something, or call another service you use. Those steps are set up on the step itself, inside the automation, like every other one.",
     firstTitle: "Your first automation, step by step",
     firstBody: "The quickest way in is one of the ready-made ones on the first screen.",
-    first1: "On the Automations screen, pick one from the gallery. Read the sentence underneath: that is exactly what it will do.",
-    first2: "Press \xABUse this one\xBB. It becomes yours, and it is created switched off.",
-    first3: "Fill in what it asked you to decide \u2014 an amount, a time, how long to wait. It always arrives with a sensible guess in place.",
-    first4: "Go to Permissions and allow what it needs. Until you do, it does nothing at all.",
-    first5: "Turn it on with the switch at the top. From that moment it is watching, day and night.",
+    firstPick: "On the Automations screen, pick one from the gallery. Read the sentence underneath: that is exactly what it will do.",
+    firstUse: "Press \xABUse this one\xBB. It becomes yours, and it is created switched off.",
+    firstFill: "Fill in what it asked you to decide \u2014 an amount, a time, how long to wait. It always arrives with a sensible guess in place.",
+    firstAllow: "Go to Permissions and allow what it needs. Until you do, it does nothing at all.",
+    firstTest: "Press \xABTry it\xBB. It walks the automation against something that really happened in your business and shows you what it WOULD do \u2014 without sending, charging or writing anything down.",
+    firstEnable: "Now turn it on with the switch at the top. From that moment it is watching, day and night.",
     permissionsTitle: "Permissions: why you have to say yes",
     permissionsBody: "An automation works while you are not looking, so it never borrows your own permissions. It can only do the exact things you allowed it, one by one \u2014 that is what stops it from ever doing more than you meant.",
     permissionsWhere: "You allow them inside the automation itself: open it and go to the Permissions tab. Everything it needs is listed there, with one button that allows the lot.",
@@ -6899,9 +6914,8 @@ var en_default = {
     historyGuard: "\xABThe condition was not met, so it stopped here\xBB is not a fault. That is the automation working: you told it to carry on only in certain cases, and this was not one of them.",
     limitsTitle: "What it cannot do yet",
     limitsBranches: "There are no forks. An automation is one line of steps from top to bottom, and that is on purpose: if a condition is not met it stops there \u2014 it does not take a second route. Two different outcomes means two automations.",
-    limitsChannels: "It cannot write to your customer yet. The steps that send a message, ask the assistant or reach another service already work inside the hub, but there is no screen to set them up, so you will find them locked if an automation already has one.",
-    limitsDates: "It cannot count backwards from a date either: \xABthe day before the appointment\xBB is not something it can work out yet. It can wait a while after something happened, which is not the same thing.",
-    limitsInside: "So for now an automation works indoors: it leaves the note, the job or the record for you and your team, and a person does the talking.",
+    limitsDates: "It cannot count backwards from a date: \xABthe day before the appointment\xBB is not something it can work out yet. It can wait a while after something happened, which is not the same thing.",
+    limitsAssistant: "And the assistant will not write the message step for you. Ask it for \xABtell them by message\xBB and it leaves the closest thing it is allowed to propose \u2014 the job on your list \u2014 and says so in its own notes. Sending a message costs money every time, so that one is yours to add and yours to turn on.",
     shotGuard: "the ticket comes to more than 100,00 \u20AC",
     shotAction: "Write a note in the customer's card",
     shotGrant: "Write a note in the customer's card",
@@ -6942,7 +6956,7 @@ var en_default = {
   }
 };
 
-// modules/.wt-flows-8/ui/components/erp-flows-app/erp-flows-app.ts
+// modules/flows/ui/components/erp-flows-app/erp-flows-app.ts
 var CATALOG = { es: es_default, en: en_default };
 var ErpFlowsApp = class extends i3 {
   constructor() {
