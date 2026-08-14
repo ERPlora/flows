@@ -10,17 +10,9 @@
 
 ## Fuera de esta entrega (v1)
 
-- **«Probar» antes de activar** contra la última venta/cita real. Probablemente la función de más
-  valor del editor (Brackenbury et al., CHI 2019: la gente **no** predice bien el comportamiento
-  de un flujo con un fallo, ni leyéndolo). Necesita `POST …/run` con un input sintetizado y una
-  vista de «qué habría pasado» que no escriba nada; no cabía aquí.
 - **Borrador generado por IA.** El asistente ya conoce las tools de este hub concreto; genera
   **borrador**, nunca flujo activo (la evidencia dice que acierta el esqueleto y falla los
   parámetros). Aterrizaría en esta misma lista vertical.
-- **Editar los steps `http`, `ai` y `notify`.** Se **abren en solo lectura** y se guardan intactos.
-  Un `http` necesita además la pantalla de secretos (write-only) y los grants por patrón de URL;
-  un `ai`, la de aprobaciones. Cada una es su propia entrega.
-- **La bandeja de aprobación** (`GET …/approvals`) como pantalla.
 
 ## Lo que la galería NO ofrece, y por qué (flows#1)
 

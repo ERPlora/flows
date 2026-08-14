@@ -43,6 +43,19 @@ export type Operator = (typeof OPERATORS)[number];
 /** A declarative filter: `{path: {op: value}}`, evaluated in AND. */
 export type Condition = Record<string, Partial<Record<Operator, unknown>>>;
 
+/** `notify.to` — a query and one of its columns. There is deliberately no literal form. */
+export interface Recipient {
+  query: string;
+  params?: Record<string, unknown>;
+  field: string;
+}
+
+/** `ai.tools` — what the model may be OFFERED here. Offering is not authorising: each needs a grant. */
+export interface AiTools {
+  queries?: string[];
+  commands?: string[];
+}
+
 export interface Step {
   id: string;
   kind: StepKind;
@@ -54,8 +67,53 @@ export interface Step {
   /** `delay` */
   seconds?: number;
   until?: string;
+  /** `http` */
+  method?: string;
+  url?: string;
+  headers?: Record<string, unknown>;
+  body?: unknown;
+  timeout?: number;
+  /** `ai` */
+  prompt?: string;
+  tools?: AiTools;
+  policy?: 'auto' | 'manual';
+  max_iters?: number;
+  /** `notify` */
+  channel?: 'email' | 'whatsapp';
+  to?: Recipient;
+  template?: string;
+  vars?: Record<string, unknown>;
   [k: string]: unknown;
 }
+
+/**
+ * **The keys the kernel allows, per kind** — mirror of `def.rs:1018-1025`, which is a STRICT
+ * whitelist: an unknown key is refused at SAVE, not ignored. Mirrored rather than discovered,
+ * because the editor has to build a step before it has anywhere to ask.
+ */
+export const STEP_KEYS: Readonly<Record<StepKind, readonly string[]>> = {
+  command: ['id', 'kind', 'command', 'params'],
+  condition: ['id', 'kind', 'when'],
+  delay: ['id', 'kind', 'seconds', 'until'],
+  http: ['id', 'kind', 'method', 'url', 'headers', 'body', 'timeout'],
+  ai: ['id', 'kind', 'prompt', 'tools', 'policy', 'max_iters'],
+  notify: ['id', 'kind', 'channel', 'to', 'template', 'vars'],
+};
+
+/** The methods `def.rs` accepts. `CONNECT`/`TRACE` are absent on purpose: they are tunnels. */
+export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+
+/**
+ * The channels that have a transport. `sms` is in ADR-0012's vocabulary and is refused BY NAME at
+ * save and at grant time — offering it here would be a step the hub cannot ever deliver.
+ */
+export const NOTIFY_CHANNELS = ['email', 'whatsapp'] as const;
+
+/** `max_iters` is refused above the cap rather than clamped: a document that says 50 and runs 10 lies. */
+export const MAX_ITERS_CAP = 10;
+
+/** `timeout` seconds — the run holds its lease the whole time, so this is also what an error costs. */
+export const MAX_TIMEOUT_SECONDS = 30;
 
 export interface Trigger {
   kind: TriggerKind;
@@ -109,9 +167,15 @@ export function readDoc(raw: unknown): FlowDoc {
   };
 }
 
-/** The kinds this editor knows how to draw AND edit. The rest open read-only. */
+/**
+ * The kinds this editor knows how to draw AND edit — **all six of them since flows#3**.
+ *
+ * It stays a function, and the fallback stays read-only, for the same reason it existed: a
+ * document written by a newer editor must still OPEN and be saved back untouched. Rendering a
+ * document without a step and then writing it back is how a working automation gets deleted.
+ */
 export function isSpineKind(kind: string): boolean {
-  return kind === 'command' || kind === 'condition' || kind === 'delay';
+  return Object.prototype.hasOwnProperty.call(STEP_KEYS, kind);
 }
 
 /**
@@ -131,11 +195,29 @@ export function newStepId(doc: FlowDoc): string {
   return `s${Date.now().toString(36)}`;
 }
 
-/** What a step of each kind looks like the moment it is dropped on the spine. */
+/**
+ * What a step of each kind looks like the moment it is dropped on the spine.
+ *
+ * Every blank here carries ONLY keys from {@link STEP_KEYS}: a stray field would make the very
+ * first save fail on a document the owner has not typed a character into yet.
+ */
 function blankStep(id: string, kind: StepKind): Step {
   if (kind === 'condition') return { id, kind, when: {} };
   // An hour: long enough to read as «later», short enough that a first test does not need patience.
   if (kind === 'delay') return { id, kind, seconds: 3600 };
+  // GET, and no URL. The harmless verb is the one to default to — a `POST` sitting in an unfilled
+  // step is a write waiting for somebody to paste an address next to it.
+  if (kind === 'http') return { id, kind, method: 'GET', url: '', headers: {} };
+  // `manual` mirrors the kernel's own default, and it is written out loud rather than left
+  // implicit: the permissive option is the one nobody types and everybody assumes.
+  if (kind === 'ai') {
+    return { id, kind, prompt: '', tools: { queries: [], commands: [] }, policy: 'manual', max_iters: 6 };
+  }
+  // Email, because it is the channel that costs nothing — and NO recipient, because there is no
+  // default person to write to and a guessed one is the mistake this whole grant exists to stop.
+  if (kind === 'notify') {
+    return { id, kind, channel: 'email', to: { query: '', params: {}, field: '' }, vars: {} };
+  }
   return { id, kind, command: '', params: {} };
 }
 
@@ -203,14 +285,32 @@ function scalar(text: string): string | number | boolean {
  */
 export function partsToValue(parts: ValuePart[]): unknown {
   if (parts.length === 0) return '';
-  if (parts.length === 1) {
+  // A secret is ALWAYS written `{{secret.X}}`, even alone. That is the one form flows.md §4
+  // documents and the one every example in the kernel uses. A bare `secret.API_KEY` may well
+  // resolve too — but «may well» is how a header ends up carrying the eighteen literal characters
+  // of a path instead of a credential, and nothing on any screen would say so.
+  if (parts.length === 1 && !parts.some(isSecretPart)) {
     const only = parts[0];
     if (only.kind === 'field') return only.path;
     return scalar(only.text);
   }
-  return parts
-    .map((p) => (p.kind === 'field' ? `{{${p.path}}}` : p.text))
-    .join('');
+  return partsToTemplate(parts);
+}
+
+/** A pill that names a secret rather than a field of the run. */
+function isSecretPart(part: ValuePart): boolean {
+  return part.kind === 'field' && part.path.startsWith('secret.');
+}
+
+/**
+ * The same composition, **always as a template string**.
+ *
+ * `url` is `type: string` in the schema, so the type-preserving rule of {@link partsToValue} is
+ * the wrong rule there: a lone field would be stored as the bare path `input.endpoint`, which the
+ * kernel reads as a literal URL and refuses.
+ */
+export function partsToTemplate(parts: ValuePart[]): string {
+  return parts.map((p) => (p.kind === 'field' ? `{{${p.path}}}` : p.text)).join('');
 }
 
 /** The pills that produced a stored value, so reopening a flow shows what was written, not `{{}}`. */
@@ -246,14 +346,82 @@ export function valueToParts(value: unknown): ValuePart[] {
 export function requiredGrants(doc: FlowDoc): Grant[] {
   const out: Grant[] = [];
   const seen = new Set<string>();
+  const need = (kind: string, value: unknown): void => {
+    const text = typeof value === 'string' ? value.trim() : '';
+    // A half-typed step asks for NOTHING. Deriving `{kind:'command', value:''}` from an empty box
+    // would put a nameless row on the permissions screen that can never be granted.
+    if (!text) return;
+    const k = `${kind} ${text}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ kind, value: text });
+  };
+
   for (const step of doc.steps) {
-    if (step.kind !== 'command') continue;
-    const value = typeof step.command === 'string' ? step.command.trim() : '';
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    out.push({ kind: 'command', value });
+    switch (step.kind) {
+      case 'command':
+        need('command', step.command);
+        break;
+      // The URL is authorised as a PATTERN, not as itself: the grant is compared against the
+      // TEMPLATED url at run time, so what has to be allowed is everything the template can become.
+      case 'http':
+        need('http', httpPatternFor(typeof step.url === 'string' ? step.url : ''));
+        break;
+      // Offering a tool is not authorising it (`assemble_tools` ∩ step ∩ live grants). Each side of
+      // `tools` is a different grant kind because a read and a write are different decisions.
+      case 'ai':
+        for (const query of step.tools?.queries ?? []) need('query', query);
+        for (const command of step.tools?.commands ?? []) need('command', command);
+        break;
+      // TWO grants, never one. The channel is what it costs (Meta bills every WhatsApp, an email is
+      // free); the recipient is who gets written to. Allowing one says nothing about the other.
+      case 'notify': {
+        need('notify', step.channel);
+        const to = step.to;
+        if (to?.query?.trim() && to?.field?.trim()) {
+          need('recipient_query', `${to.query.trim()}#${to.field.trim()}`);
+        }
+        break;
+      }
+      default:
+        break;
+    }
   }
   return out;
+}
+
+/**
+ * The `http` grant pattern that covers a URL, **written the way the hub will compare it**.
+ *
+ * `check_http_pattern` refuses a pattern with no concrete host, with no path, or written in any
+ * form other than its canonical one. A suggestion that gets refused at grant time is worse than no
+ * suggestion at all: the owner reads it on screen as a permission they already gave.
+ *
+ * `''` is a first-class answer — for a URL that is not one yet, and for a templated HOST, where
+ * any pattern would authorise every host the payload can name.
+ */
+export function httpPatternFor(url: string): string {
+  const raw = (url ?? '').trim();
+  if (!raw) return '';
+  // Everything from the first template onwards is whatever the event brought, so the pattern can
+  // only ever cover the static prefix. Cutting at the last `/` before it keeps the pattern on a
+  // path boundary instead of authorising a sibling that merely shares a few characters.
+  const templated = raw.indexOf('{{');
+  const stable = templated < 0 ? raw : raw.slice(0, templated);
+  let parsed: URL;
+  try {
+    parsed = new URL(stable);
+  } catch {
+    return '';
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+  // A templated host is not a host. `https://{{input.host}}/x` parses with a literal `{{` hostname
+  // only in some engines, so the check is on the text, which cannot be fooled either way.
+  if (/[{}]/.test(parsed.host) || !parsed.host) return '';
+  let path = parsed.pathname || '/';
+  // The query string never takes part: the grant is compared against the RESOLVED path.
+  if (templated >= 0 && !path.endsWith('/')) path = path.slice(0, path.lastIndexOf('/') + 1);
+  return `${parsed.origin}${path}*`;
 }
 
 const key = (g: Grant): string => `${g.kind} ${g.value}`;

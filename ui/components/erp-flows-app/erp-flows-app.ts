@@ -7,6 +7,7 @@ import '@erplora/outfitkit/ok-status-pill';
 import '../erp-flows-editor/erp-flows-editor';
 import '../erp-flows-gallery/erp-flows-gallery';
 import '../erp-flows-guide/erp-flows-guide';
+import '../erp-flows-approvals/erp-flows-approvals';
 import { readDoc, SCHEMA_VERSION } from '../../lib/flow-doc';
 import { describeTrigger } from '../../lib/plain-language';
 import { catalogEntry } from '../../lib/trigger-catalog';
@@ -160,6 +161,9 @@ export class ErpFlowsApp extends LitElement {
 
   @state() private guideOpen = false;
 
+  /** Pending approvals. `0` mounts no tray at all — see {@link countApprovals}. */
+  @state() private approvalCount = 0;
+
   @state() private error = '';
 
   @state() private coreVersion = '';
@@ -235,6 +239,29 @@ export class ErpFlowsApp extends LitElement {
       this.gate = 'ready';
     } catch (e) {
       this.setGateFromError(e);
+    }
+    await this.countApprovals();
+  }
+
+  /**
+   * How many proposals are waiting on a person.
+   *
+   * Asked here, and not left to the tray, because the tray is only MOUNTED when the answer is not
+   * zero: an empty box headed «waiting for you» is a permanent fixture on a screen whose job is to
+   * show automations, and a tray behind a tab nobody opens is the same as no tray at all — which
+   * is exactly how a `policy: manual` proposal reaches its 72-hour expiry unseen.
+   */
+  private async countApprovals(): Promise<void> {
+    if (!this.client?.flows.approvals) {
+      this.approvalCount = 0;
+      return;
+    }
+    try {
+      const rows = await this.client.flows.approvals('pending');
+      this.approvalCount = Array.isArray(rows) ? rows.length : 0;
+    } catch {
+      // An older core, or a refusal: it costs the tray, never the screen.
+      this.approvalCount = 0;
     }
   }
 
@@ -421,6 +448,15 @@ export class ErpFlowsApp extends LitElement {
           ? html`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
               >${this.error}</ok-inline-feedback
             >`
+          : nothing}
+        ${this.approvalCount
+          ? html`<erp-flows-approvals
+              .client=${this.client}
+              .t=${this.t}
+              @flows-approvals-count=${(e: CustomEvent<{ count: number }>) => {
+                this.approvalCount = e.detail.count;
+              }}
+            ></erp-flows-approvals>`
           : nothing}
         ${this.renderList()}
         <erp-flows-gallery

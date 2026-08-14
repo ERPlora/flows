@@ -1851,7 +1851,7 @@ __decorateClass4([
 ], OkStatusPill.prototype, "size");
 define("ok-status-pill", OkStatusPill);
 
-// modules/flows/ui/components/erp-flows-value/erp-flows-value.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-value/erp-flows-value.ts
 var ErpFlowsValue = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2060,7 +2060,7 @@ __decorateClass([
 ], ErpFlowsValue.prototype, "name", 2);
 define("erp-flows-value", ErpFlowsValue);
 
-// modules/flows/ui/lib/plain-language.ts
+// modules/.wt-flows-ib/ui/lib/plain-language.ts
 var MINUTE = 60;
 var HOUR = 3600;
 var DAY = 86400;
@@ -2116,9 +2116,43 @@ function describeStep(step, t3) {
     }
     case "delay":
       return describeDelay(Number(step.seconds ?? 0), t3);
+    case "http": {
+      const url = typeof step.url === "string" ? step.url.trim() : "";
+      const method = String(step.method ?? "GET");
+      if (!url) return t3("ui.stepHttpEmpty");
+      const host = hostOf(url);
+      return host ? t3("ui.stepHttp", { method, host }) : t3("ui.stepHttpTemplatedHost", { method });
+    }
+    case "ai": {
+      const prompt = typeof step.prompt === "string" ? step.prompt.trim() : "";
+      if (!prompt) return t3("ui.stepAiEmpty");
+      const key2 = step.policy === "auto" ? "ui.stepAiAuto" : "ui.stepAiManual";
+      return t3(key2, { prompt: shorten(prompt) });
+    }
+    case "notify": {
+      const field = step.to?.field;
+      if (!step.to?.query || !field) return t3("ui.stepNotifyEmpty");
+      const key2 = step.channel === "whatsapp" ? "ui.stepNotifyWhatsapp" : "ui.stepNotifyEmail";
+      return t3(key2, { field: humaniseField(String(field)) });
+    }
     default:
       return t3("ui.stepUnsupported", { kind: step.kind });
   }
+}
+function hostOf(url) {
+  const stable = url.indexOf("{{") < 0 ? url : url.slice(0, url.indexOf("{{"));
+  try {
+    const parsed = new URL(stable);
+    return /[{}]/.test(parsed.host) ? "" : parsed.host;
+  } catch {
+    return "";
+  }
+}
+function shorten(text, max = 70) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}\u2026`;
 }
 function runOutcome(run2, t3) {
   switch (run2.status) {
@@ -2169,7 +2203,7 @@ function describeSample(field, t3) {
   return field.truncated ? `${text}\u2026` : text;
 }
 
-// modules/flows/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
 var ErpFlowsFieldPicker = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2413,7 +2447,7 @@ __decorateClass([
 ], ErpFlowsFieldPicker.prototype, "t", 2);
 define("erp-flows-field-picker", ErpFlowsFieldPicker);
 
-// modules/flows/ui/lib/flow-doc.ts
+// modules/.wt-flows-ib/ui/lib/flow-doc.ts
 var SCHEMA_VERSION = 1;
 var PATH_ROOTS = ["input", "steps", "event", "secret"];
 var OPERATORS = [
@@ -2427,6 +2461,18 @@ var OPERATORS = [
   "lt",
   "lte"
 ];
+var STEP_KEYS = {
+  command: ["id", "kind", "command", "params"],
+  condition: ["id", "kind", "when"],
+  delay: ["id", "kind", "seconds", "until"],
+  http: ["id", "kind", "method", "url", "headers", "body", "timeout"],
+  ai: ["id", "kind", "prompt", "tools", "policy", "max_iters"],
+  notify: ["id", "kind", "channel", "to", "template", "vars"]
+};
+var HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+var NOTIFY_CHANNELS = ["email", "whatsapp"];
+var MAX_ITERS_CAP = 10;
+var MAX_TIMEOUT_SECONDS = 30;
 function emptyDoc() {
   return { schema_version: SCHEMA_VERSION, triggers: [{ kind: "manual" }], steps: [] };
 }
@@ -2442,7 +2488,7 @@ function readDoc(raw) {
   };
 }
 function isSpineKind(kind) {
-  return kind === "command" || kind === "condition" || kind === "delay";
+  return Object.prototype.hasOwnProperty.call(STEP_KEYS, kind);
 }
 function newStepId(doc) {
   const taken = new Set(doc.steps.map((s4) => s4.id));
@@ -2455,6 +2501,13 @@ function newStepId(doc) {
 function blankStep(id, kind) {
   if (kind === "condition") return { id, kind, when: {} };
   if (kind === "delay") return { id, kind, seconds: 3600 };
+  if (kind === "http") return { id, kind, method: "GET", url: "", headers: {} };
+  if (kind === "ai") {
+    return { id, kind, prompt: "", tools: { queries: [], commands: [] }, policy: "manual", max_iters: 6 };
+  }
+  if (kind === "notify") {
+    return { id, kind, channel: "email", to: { query: "", params: {}, field: "" }, vars: {} };
+  }
   return { id, kind, command: "", params: {} };
 }
 function addStep(doc, kind, at) {
@@ -2494,11 +2547,17 @@ function scalar(text) {
 }
 function partsToValue(parts) {
   if (parts.length === 0) return "";
-  if (parts.length === 1) {
+  if (parts.length === 1 && !parts.some(isSecretPart)) {
     const only = parts[0];
     if (only.kind === "field") return only.path;
     return scalar(only.text);
   }
+  return partsToTemplate(parts);
+}
+function isSecretPart(part) {
+  return part.kind === "field" && part.path.startsWith("secret.");
+}
+function partsToTemplate(parts) {
   return parts.map((p3) => p3.kind === "field" ? `{{${p3.path}}}` : p3.text).join("");
 }
 function valueToParts(value) {
@@ -2523,14 +2582,62 @@ function valueToParts(value) {
 function requiredGrants(doc) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
+  const need = (kind, value) => {
+    const text = typeof value === "string" ? value.trim() : "";
+    if (!text) return;
+    const k2 = `${kind} ${text}`;
+    if (seen.has(k2)) return;
+    seen.add(k2);
+    out.push({ kind, value: text });
+  };
   for (const step of doc.steps) {
-    if (step.kind !== "command") continue;
-    const value = typeof step.command === "string" ? step.command.trim() : "";
-    if (!value || seen.has(value)) continue;
-    seen.add(value);
-    out.push({ kind: "command", value });
+    switch (step.kind) {
+      case "command":
+        need("command", step.command);
+        break;
+      // The URL is authorised as a PATTERN, not as itself: the grant is compared against the
+      // TEMPLATED url at run time, so what has to be allowed is everything the template can become.
+      case "http":
+        need("http", httpPatternFor(typeof step.url === "string" ? step.url : ""));
+        break;
+      // Offering a tool is not authorising it (`assemble_tools` ∩ step ∩ live grants). Each side of
+      // `tools` is a different grant kind because a read and a write are different decisions.
+      case "ai":
+        for (const query of step.tools?.queries ?? []) need("query", query);
+        for (const command of step.tools?.commands ?? []) need("command", command);
+        break;
+      // TWO grants, never one. The channel is what it costs (Meta bills every WhatsApp, an email is
+      // free); the recipient is who gets written to. Allowing one says nothing about the other.
+      case "notify": {
+        need("notify", step.channel);
+        const to = step.to;
+        if (to?.query?.trim() && to?.field?.trim()) {
+          need("recipient_query", `${to.query.trim()}#${to.field.trim()}`);
+        }
+        break;
+      }
+      default:
+        break;
+    }
   }
   return out;
+}
+function httpPatternFor(url) {
+  const raw = (url ?? "").trim();
+  if (!raw) return "";
+  const templated = raw.indexOf("{{");
+  const stable = templated < 0 ? raw : raw.slice(0, templated);
+  let parsed;
+  try {
+    parsed = new URL(stable);
+  } catch {
+    return "";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+  if (/[{}]/.test(parsed.host) || !parsed.host) return "";
+  let path = parsed.pathname || "/";
+  if (templated >= 0 && !path.endsWith("/")) path = path.slice(0, path.lastIndexOf("/") + 1);
+  return `${parsed.origin}${path}*`;
 }
 var key = (g3) => `${g3.kind}\0${g3.value}`;
 function missingGrants(doc, live) {
@@ -2550,7 +2657,7 @@ function mergeGrants(live, add, revoke) {
   return out;
 }
 
-// modules/flows/ui/lib/trigger-catalog.ts
+// modules/.wt-flows-ib/ui/lib/trigger-catalog.ts
 var TRIGGER_CATALOG = [
   { event: "sale.completed", labelKey: "ui.evSaleCompleted", module: "sales" },
   { event: "sale.voided", labelKey: "ui.evSaleVoided", module: "sales" },
@@ -2617,7 +2724,7 @@ function catalogEntry(event) {
   return TRIGGER_CATALOG.find((e4) => e4.event === event);
 }
 
-// modules/flows/ui/lib/hub-flows.ts
+// modules/.wt-flows-ib/ui/lib/hub-flows.ts
 var CAPABILITY_DENIED = "capability_denied";
 function hasFlows(candidate) {
   const c4 = candidate;
@@ -2633,7 +2740,7 @@ function errorCode(e4) {
   return typeof code === "string" ? code : "";
 }
 
-// modules/flows/ui/components/erp-flows-editor/erp-flows-editor.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-editor/erp-flows-editor.ts
 function guardRows(when) {
   const rows = [];
   for (const [path, ops] of Object.entries(when ?? {})) {
@@ -2646,6 +2753,10 @@ function guardRows(when) {
     }
   }
   return rows;
+}
+function clamp(value, min, max, fallback) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 function rowsToWhen(rows) {
   const out = {};
@@ -2671,6 +2782,9 @@ var ErpFlowsEditor = class extends i3 {
     this.runs = [];
     this.runSteps = {};
     this.shape = null;
+    this.secrets = [];
+    this.secretName = "";
+    this.secretValue = "";
     this.error = "";
     this.notice = "";
     this.saving = false;
@@ -2911,6 +3025,38 @@ var ErpFlowsEditor = class extends i3 {
         grid-template-columns: 0.7fr 1.6fr auto;
       }
     }
+    /* A composed value and, inside an http step, the secret picker beside it. The select is a
+       sibling and not a child of erp-flows-value on purpose: a control inside another element's
+       shadow root cannot be reached from here, and this one has to drive the box next to it. */
+    .value-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 0.4rem;
+      min-width: 0;
+    }
+    .value-row erp-flows-value {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .value-row select {
+      font: inherit;
+      font-size: 0.8rem;
+      padding: 0 0.5rem;
+      min-height: 2.4rem;
+      max-width: 9rem;
+      border: 1px dashed var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-pill, 999px);
+      background: transparent;
+      color: var(--ok-muted, #6b6a63);
+    }
+    .secrets {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      padding-top: 0.6rem;
+      margin-top: 0.3rem;
+      border-top: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
+    }
     .adders {
       display: flex;
       flex-wrap: wrap;
@@ -3028,6 +3174,46 @@ var ErpFlowsEditor = class extends i3 {
       this.shape = await this.client.events.shape(event);
     } catch {
       this.shape = null;
+    }
+  }
+  /**
+   * The secret names, asked for when an `http` panel opens and not before.
+   *
+   * Not on mount: most flows have no `http` step at all, and this is one more admin-only round
+   * trip on the first paint of a screen that already makes two.
+   */
+  async loadSecrets() {
+    if (!this.client?.flows.secrets) return;
+    try {
+      const list = await this.client.flows.secrets();
+      this.secrets = Array.isArray(list) ? list : [];
+    } catch {
+      this.secrets = [];
+    }
+  }
+  async saveSecret() {
+    const name = this.secretName.trim();
+    const value = this.secretValue;
+    if (!name || !value || !this.client?.flows.putSecret) return;
+    this.error = "";
+    try {
+      await this.client.flows.putSecret(name, value);
+      this.secretValue = "";
+      this.secretName = "";
+      await this.loadSecrets();
+      this.notice = this.t("ui.secretSaved", { name });
+    } catch (e4) {
+      this.secretValue = "";
+      this.error = e4?.message || this.t("ui.errGeneric");
+    }
+  }
+  async deleteSecret(name) {
+    if (!this.client?.flows.deleteSecret) return;
+    try {
+      await this.client.flows.deleteSecret(name);
+      await this.loadSecrets();
+    } catch (e4) {
+      this.error = e4?.message || this.t("ui.errGeneric");
     }
   }
   async loadRuns() {
@@ -3277,7 +3463,6 @@ var ErpFlowsEditor = class extends i3 {
         ${open ? b2`<div class="panel">${this.renderGuardPanel(step, index)}</div>` : A}
       </div>`;
     }
-    const editable = isSpineKind(step.kind);
     return b2`<div class="node" data-node=${step.id}>
       <div class="card">
         <div class="row" style="padding:0">
@@ -3288,6 +3473,7 @@ var ErpFlowsEditor = class extends i3 {
             aria-expanded=${open ? "true" : "false"}
             @click=${() => {
       this.openStep = open ? null : step.id;
+      if (this.openStep === step.id && step.kind === "http") void this.loadSecrets();
     }}
           >
             <!-- No eyebrow here on purpose: «…haz esto» is what the SPINE says once, and repeating
@@ -3298,11 +3484,434 @@ var ErpFlowsEditor = class extends i3 {
           </button>
           ${removeBtn}
         </div>
-        ${open ? b2`<div class="panel">
-              ${editable ? this.renderCommandPanel(step, index) : b2`<span class="hint">${this.t("ui.readOnlyStep")}</span>`}
-            </div>` : A}
+        ${open ? b2`<div class="panel">${this.renderStepPanel(step, index)}</div>` : A}
       </div>
     </div>`;
+  }
+  /** The right form for this kind — or the honest sentence for a kind from a newer editor. */
+  renderStepPanel(step, index) {
+    if (!isSpineKind(step.kind)) return b2`<span class="hint">${this.t("ui.readOnlyStep")}</span>`;
+    if (step.kind === "http") return this.renderHttpPanel(step, index);
+    if (step.kind === "ai") return this.renderAiPanel(step, index);
+    if (step.kind === "notify") return this.renderNotifyPanel(step, index);
+    return this.renderCommandPanel(step, index);
+  }
+  /**
+   * One composed value, wired to the shared field picker — and, inside an `http` step, to the
+   * secrets this hub holds.
+   *
+   * `template` forces `{{…}}` even for a lone field: `url` is a string in the schema, so the
+   * type-preserving rule that is right everywhere else is wrong there.
+   */
+  renderValue(opts) {
+    const write = (parts) => opts.onChange(opts.template ? partsToTemplate(parts) : partsToValue(parts));
+    return b2`<div class="value-row">
+      <erp-flows-value
+        data-field=${opts.field}
+        .label=${opts.label}
+        .parts=${valueToParts(opts.value)}
+        .fieldLabel=${this.fieldLabel}
+        .insertLabel=${this.t("ui.insertField")}
+        .removeLabel=${this.t("ui.removePart")}
+        .canPickFields=${!!this.shape}
+        @flows-value-change=${(e4) => write(e4.detail.parts)}
+        @flows-pick-field=${(e4) => this.openPicker(e4.target, "input")}
+      ></erp-flows-value>
+      <!-- The secret picker lives in THIS shadow root, next to the box, and only inside an http
+           step: a secret path anywhere else is refused at save, so offering it elsewhere would
+           teach a syntax that makes the document unsavable. -->
+      ${opts.secrets && this.secrets.length ? b2`<select
+            data-act="insert-secret"
+            aria-label=${this.t("ui.insertSecret")}
+            .value=${""}
+            @change=${(e4) => {
+      const select = e4.target;
+      const name = select.value;
+      select.value = "";
+      if (!name) return;
+      const box = e4.currentTarget.closest(".value-row")?.querySelector("erp-flows-value");
+      box?.appendField(`secret.${name}`);
+    }}
+          >
+            <option value="">${this.t("ui.insertSecret")}</option>
+            ${this.secrets.map((s4) => b2`<option value=${s4.name}>${s4.name}</option>`)}
+          </select>` : A}
+    </div>`;
+  }
+  /**
+   * **The `http` step**: where an automation leaves the building.
+   *
+   * Everything on this panel is a thing the hub checks and refuses: the method set is closed, the
+   * timeout is capped, the URL is matched against a grant PATTERN after templating, and a secret is
+   * only legal here. Clamping in the form rather than letting the save fail is the difference
+   * between «30 is the most it will wait» and a red box with an error code in it.
+   */
+  renderHttpPanel(step, index) {
+    const headers = Object.entries(step.headers ?? {});
+    const setHeaders = (entries) => this.setDoc(patchStep(this.document, index, { headers: Object.fromEntries(entries) }));
+    const pattern = httpPatternFor(String(step.url ?? ""));
+    return b2`
+      <div class="param-row" style="grid-template-columns:auto 1fr">
+        <div class="field">
+          <label for="m-${step.id}">${this.t("ui.httpMethod")}</label>
+          <select
+            id="m-${step.id}"
+            data-field="method"
+            .value=${String(step.method ?? "GET")}
+            @change=${(e4) => this.setDoc(
+      patchStep(this.document, index, { method: e4.target.value })
+    )}
+          >
+            ${HTTP_METHODS.map((m3) => b2`<option value=${m3}>${m3}</option>`)}
+          </select>
+        </div>
+        ${this.renderValue({
+      field: "url",
+      label: this.t("ui.httpUrl"),
+      value: step.url ?? "",
+      template: true,
+      secrets: true,
+      onChange: (url) => this.setDoc(patchStep(this.document, index, { url }))
+    })}
+      </div>
+      <!-- The grant this step will need, spelled the way the hub compares it. Showing it HERE and
+           not only on the Permissions tab is what connects «I typed an address» to «and this is
+           what I am about to allow». -->
+      <span class="hint"
+        >${pattern ? this.t("ui.httpGrantHint", { pattern }) : this.t("ui.httpGrantUnknown")}</span
+      >
+
+      <span class="eyebrow">${this.t("ui.httpHeaders")}</span>
+      <span class="hint">${this.t("ui.httpHeadersHint")}</span>
+      ${headers.map(
+      ([key2, value], i4) => b2`<div class="param-row">
+          <div class="field">
+            <label>${this.t("ui.paramName")}</label>
+            <input
+              type="text"
+              .value=${key2}
+              @change=${(e4) => setHeaders(
+        headers.map(
+          (h3, j) => j === i4 ? [e4.target.value.trim(), h3[1]] : h3
+        )
+      )}
+            />
+          </div>
+          ${this.renderValue({
+        field: `header-${i4}`,
+        label: this.t("ui.paramValue"),
+        value,
+        secrets: true,
+        onChange: (v2) => setHeaders(headers.map((h3, j) => j === i4 ? [h3[0], v2] : h3))
+      })}
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label=${this.t("ui.removePart", { label: key2 })}
+            @click=${() => setHeaders(headers.filter((_2, j) => j !== i4))}
+          >
+            ×
+          </button>
+        </div>`
+    )}
+      <div class="adders" style="margin-left:0">
+        <button type="button" data-act="add-header" @click=${() => setHeaders([...headers, ["", ""]])}>
+          ${this.t("ui.httpAddHeader")}
+        </button>
+      </div>
+
+      ${this.renderValue({
+      field: "body",
+      label: this.t("ui.httpBody"),
+      value: step.body ?? "",
+      secrets: true,
+      onChange: (body) => this.setDoc(patchStep(this.document, index, { body }))
+    })}
+
+      <div class="field">
+        <label for="t-${step.id}">${this.t("ui.httpTimeout")}</label>
+        <input
+          id="t-${step.id}"
+          data-field="timeout"
+          type="number"
+          min="1"
+          max=${MAX_TIMEOUT_SECONDS}
+          .value=${String(step.timeout ?? 10)}
+          @change=${(e4) => this.setDoc(
+      patchStep(this.document, index, {
+        // Clamped here rather than refused at save: the hub caps this at 30 and the run
+        // holds its lease the whole time, so this number is also what an error costs.
+        timeout: clamp(Number(e4.target.value), 1, MAX_TIMEOUT_SECONDS, 10)
+      })
+    )}
+        />
+        <span class="hint">${this.t("ui.httpTimeoutHint", { max: MAX_TIMEOUT_SECONDS })}</span>
+      </div>
+
+      ${this.renderSecrets()}
+    `;
+  }
+  /**
+   * **The secrets this hub holds** — names in, names out, and no way back.
+   *
+   * There is no endpoint that returns a value and there is no «reveal» button here, because there
+   * would be nothing behind it. The screen says so rather than leaving the owner wondering where
+   * the key they typed went.
+   */
+  renderSecrets() {
+    if (!this.client?.flows.secrets) return A;
+    return b2`<div class="secrets">
+      <span class="eyebrow">${this.t("ui.secretsTitle")}</span>
+      <span class="hint">${this.t("ui.secretsIntro")}</span>
+      ${this.secrets.map(
+      (s4) => b2`<div class="grant">
+          <span class="grow">${s4.name}</span>
+          <button
+            type="button"
+            class="icon-btn"
+            data-act="delete-secret"
+            aria-label=${this.t("ui.secretDelete", { name: s4.name })}
+            @click=${() => void this.deleteSecret(s4.name)}
+          >
+            ×
+          </button>
+        </div>`
+    )}
+      <div class="param-row">
+        <div class="field">
+          <label for="sn-${this.flow?.id ?? "new"}">${this.t("ui.secretName")}</label>
+          <input
+            id="sn-${this.flow?.id ?? "new"}"
+            data-field="secret-name"
+            type="text"
+            .value=${this.secretName}
+            placeholder="STRIPE_KEY"
+            @input=${(e4) => {
+      this.secretName = e4.target.value;
+    }}
+          />
+        </div>
+        <div class="field">
+          <label for="sv-${this.flow?.id ?? "new"}">${this.t("ui.secretValue")}</label>
+          <input
+            id="sv-${this.flow?.id ?? "new"}"
+            data-field="secret-value"
+            type="password"
+            autocomplete="off"
+            .value=${this.secretValue}
+            @input=${(e4) => {
+      this.secretValue = e4.target.value;
+    }}
+          />
+        </div>
+        <button
+          type="button"
+          class="icon-btn"
+          data-act="save-secret"
+          @click=${() => void this.saveSecret()}
+        >
+          ${this.t("ui.save")}
+        </button>
+      </div>
+    </div>`;
+  }
+  /**
+   * **The `ai` step.** One question decides everything on this panel: does a person see the write
+   * before it happens? `manual` is the kernel's default and it is written out loud here, because
+   * the permissive option is the one nobody types and everybody assumes.
+   */
+  renderAiPanel(step, index) {
+    const tools = step.tools ?? {};
+    const queries = tools.queries ?? [];
+    const commands = tools.commands ?? [];
+    const setTools = (next) => this.setDoc(
+      patchStep(this.document, index, {
+        tools: { queries: next.queries ?? queries, commands: next.commands ?? commands }
+      })
+    );
+    const auto = step.policy === "auto";
+    return b2`
+      ${this.renderValue({
+      field: "prompt",
+      label: this.t("ui.aiPrompt"),
+      value: step.prompt ?? "",
+      template: true,
+      onChange: (prompt) => this.setDoc(patchStep(this.document, index, { prompt }))
+    })}
+      <!-- No secret picker on a prompt, and that is not an omission: a secret path here is
+           refused at save, because the prompt is sent to the model. -->
+      <span class="hint">${this.t("ui.aiPromptHint")}</span>
+
+      <span class="eyebrow">${this.t("ui.aiToolsTitle")}</span>
+      <span class="hint">${this.t("ui.aiToolsHint")}</span>
+      ${this.renderToolList(
+      this.t("ui.aiToolsQueries"),
+      queries,
+      "query",
+      (next) => setTools({ queries: next })
+    )}
+      ${this.renderToolList(
+      this.t("ui.aiToolsCommands"),
+      commands,
+      "command",
+      (next) => setTools({ commands: next })
+    )}
+
+      <div class="field">
+        <label for="p-${step.id}">${this.t("ui.aiPolicy")}</label>
+        <select
+          id="p-${step.id}"
+          data-field="policy"
+          .value=${String(step.policy ?? "manual")}
+          @change=${(e4) => this.setDoc(
+      patchStep(this.document, index, {
+        policy: e4.target.value
+      })
+    )}
+        >
+          <option value="manual">${this.t("ui.aiPolicyManual")}</option>
+          <option value="auto">${this.t("ui.aiPolicyAuto")}</option>
+        </select>
+      </div>
+      ${auto ? b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline"
+            >${this.t("ui.aiPolicyAutoWarning")}</ok-inline-feedback
+          >` : b2`<span class="hint">${this.t("ui.aiPolicyManualHint")}</span>`}
+
+      <div class="field">
+        <label for="i-${step.id}">${this.t("ui.aiMaxIters")}</label>
+        <input
+          id="i-${step.id}"
+          data-field="max-iters"
+          type="number"
+          min="1"
+          max=${MAX_ITERS_CAP}
+          .value=${String(step.max_iters ?? 6)}
+          @change=${(e4) => this.setDoc(
+      patchStep(this.document, index, {
+        // The kernel REFUSES above the cap rather than trimming, so a document saying 50
+        // would simply not save. Clamping here keeps the refusal off the owner's screen.
+        max_iters: clamp(Number(e4.target.value), 1, MAX_ITERS_CAP, 6)
+      })
+    )}
+        />
+        <span class="hint">${this.t("ui.aiMaxItersHint", { max: MAX_ITERS_CAP })}</span>
+      </div>
+    `;
+  }
+  renderToolList(label, names, what, update) {
+    return b2`
+      <span class="hint">${label}</span>
+      ${names.map(
+      (name, i4) => b2`<div class="param-row" style="grid-template-columns:1fr auto">
+          <div class="field">
+            <input
+              type="text"
+              .value=${name}
+              @change=${(e4) => update(
+        names.map((n5, j) => j === i4 ? e4.target.value.trim() : n5)
+      )}
+            />
+          </div>
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label=${this.t("ui.removePart", { label: name })}
+            @click=${() => update(names.filter((_2, j) => j !== i4))}
+          >
+            ×
+          </button>
+        </div>`
+    )}
+      <div class="adders" style="margin-left:0">
+        <button type="button" data-act="add-${what}" @click=${() => update([...names, ""])}>
+          ${this.t(what === "query" ? "ui.aiAddQuery" : "ui.aiAddCommand")}
+        </button>
+      </div>
+    `;
+  }
+  /**
+   * **The `notify` step.** The recipient is a query and a column, and there is **no box to type an
+   * address into** — that absence is the whole guarantee. Without it, an author (or a marketplace
+   * template) writes `to: "{{input.email}}"` and the message goes wherever the event payload said.
+   */
+  renderNotifyPanel(step, index) {
+    const to = step.to ?? { query: "", params: {}, field: "" };
+    const vars = step.vars ?? {};
+    const setTo = (patch) => this.setDoc(
+      patchStep(this.document, index, { to: { params: {}, ...to, ...patch } })
+    );
+    const setVar = (key2, value) => this.setDoc(patchStep(this.document, index, { vars: { ...vars, [key2]: value } }));
+    return b2`
+      <div class="field">
+        <label for="ch-${step.id}">${this.t("ui.notifyChannel")}</label>
+        <select
+          id="ch-${step.id}"
+          data-field="channel"
+          .value=${String(step.channel ?? "email")}
+          @change=${(e4) => this.setDoc(
+      patchStep(this.document, index, {
+        channel: e4.target.value
+      })
+    )}
+        >
+          <!-- Two options, and sms is not one of them: it has no transport anywhere and is
+               refused by name at save AND at grant time. A third option here would be a step that
+               can never be delivered, picked from a list that looked complete. -->
+          ${NOTIFY_CHANNELS.map(
+      (c4) => b2`<option value=${c4}>${this.t(`ui.notifyChannel_${c4}`)}</option>`
+    )}
+        </select>
+      </div>
+      ${step.channel === "whatsapp" ? b2`<ok-inline-feedback tone="warning" icon="cash-outline"
+            >${this.t("ui.notifyWhatsappCost")}</ok-inline-feedback
+          >` : A}
+
+      <span class="eyebrow">${this.t("ui.notifyTo")}</span>
+      <span class="hint">${this.t("ui.notifyToHint")}</span>
+      <div class="param-row">
+        <div class="field">
+          <label for="tq-${step.id}">${this.t("ui.notifyToQuery")}</label>
+          <input
+            id="tq-${step.id}"
+            data-field="to-query"
+            type="text"
+            .value=${to.query ?? ""}
+            @change=${(e4) => setTo({ query: e4.target.value.trim() })}
+          />
+        </div>
+        <div class="field">
+          <label for="tf-${step.id}">${this.t("ui.notifyToField")}</label>
+          <input
+            id="tf-${step.id}"
+            data-field="to-field"
+            type="text"
+            .value=${to.field ?? ""}
+            @change=${(e4) => setTo({ field: e4.target.value.trim() })}
+          />
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="tp-${step.id}">${this.t("ui.notifyTemplate")}</label>
+        <input
+          id="tp-${step.id}"
+          data-field="template"
+          type="text"
+          .value=${String(step.template ?? "")}
+          @change=${(e4) => this.setDoc(
+      patchStep(this.document, index, { template: e4.target.value })
+    )}
+        />
+        <span class="hint">${this.t("ui.notifyTemplateHint")}</span>
+      </div>
+
+      ${this.renderValue({
+      field: "var-text",
+      label: this.t("ui.notifyText"),
+      value: vars.text ?? "",
+      onChange: (text) => setVar("text", text)
+    })}
+    `;
   }
   renderDelayPanel(step, index) {
     const seconds = Number(step.seconds ?? 0);
@@ -3486,10 +4095,25 @@ var ErpFlowsEditor = class extends i3 {
           ${this.document.steps.map((step, i4) => this.renderStepNode(step, i4))}
         </ion-reorder-group>
         ${this.document.steps.length === 0 ? b2`<div class="node"><span class="hint">${this.t("ui.noSteps")}</span></div>` : A}
+        <!-- Order is by how often a shop owner reaches for one, not by the kernel's enum. The ai one is
+             last because it is the one that costs money and the one that needs the most reading. -->
         <div class="adders">
-          <button type="button" @click=${() => this.add("command")}>${this.t("ui.addCommand")}</button>
-          <button type="button" @click=${() => this.add("condition")}>${this.t("ui.addGuard")}</button>
-          <button type="button" @click=${() => this.add("delay")}>${this.t("ui.addDelay")}</button>
+          ${[
+      ["command", "ui.addCommand"],
+      ["condition", "ui.addGuard"],
+      ["delay", "ui.addDelay"],
+      ["notify", "ui.addNotify"],
+      ["http", "ui.addHttp"],
+      ["ai", "ui.addAi"]
+    ].map(
+      ([kind, label]) => b2`<button
+              type="button"
+              data-add=${kind}
+              @click=${() => this.add(kind)}
+            >
+              ${this.t(label)}
+            </button>`
+    )}
         </div>
       </div>`;
   }
@@ -3681,6 +4305,15 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "shape", 2);
 __decorateClass([
   r5()
+], ErpFlowsEditor.prototype, "secrets", 2);
+__decorateClass([
+  r5()
+], ErpFlowsEditor.prototype, "secretName", 2);
+__decorateClass([
+  r5()
+], ErpFlowsEditor.prototype, "secretValue", 2);
+__decorateClass([
+  r5()
 ], ErpFlowsEditor.prototype, "error", 2);
 __decorateClass([
   r5()
@@ -3696,7 +4329,7 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "pickerRoot", 2);
 define("erp-flows-editor", ErpFlowsEditor);
 
-// modules/flows/ui/lib/templates.ts
+// modules/.wt-flows-ib/ui/lib/templates.ts
 var SECTORS = ["any", "beauty", "food"];
 var SCHEMA_VERSION2 = 1;
 function run(id, command, params) {
@@ -3862,7 +4495,7 @@ function missingModules(template, known) {
   return out;
 }
 
-// modules/flows/ui/components/erp-flows-gallery/erp-flows-gallery.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-gallery/erp-flows-gallery.ts
 var ErpFlowsGallery = class extends i3 {
   constructor() {
     super(...arguments);
@@ -4215,7 +4848,7 @@ __decorateClass([
 ], ErpFlowsGallery.prototype, "error", 2);
 define("erp-flows-gallery", ErpFlowsGallery);
 
-// modules/flows/ui/components/erp-flows-guide/erp-flows-guide.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-guide/erp-flows-guide.ts
 var ErpFlowsGuide = class extends i3 {
   constructor() {
     super(...arguments);
@@ -4477,7 +5110,222 @@ __decorateClass([
 ], ErpFlowsGuide.prototype, "t", 2);
 define("erp-flows-guide", ErpFlowsGuide);
 
-// modules/flows/locales/es.json
+// modules/.wt-flows-ib/ui/components/erp-flows-approvals/erp-flows-approvals.ts
+var ErpFlowsApprovals = class extends i3 {
+  constructor() {
+    super(...arguments);
+    this.client = null;
+    this.t = (k2) => k2;
+    this.rows = [];
+    this.error = "";
+    this.busy = [];
+  }
+  static {
+    this.styles = i`
+    :host {
+      display: block;
+      font-family: var(--ok-font, var(--ion-font-family, system-ui), sans-serif);
+      color: var(--ok-text, var(--ion-text-color, #1c1b18));
+    }
+    .list {
+      max-width: 44rem;
+      margin: 0 auto 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    h3.section {
+      margin: 0;
+      font-size: 0.78rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--ok-muted, #6b6a63);
+      font-weight: 600;
+    }
+    .card {
+      background: var(--ok-surface, var(--ion-card-background, #fff));
+      border: 1px solid var(--ok-border, var(--ion-border-color, #d7d5cc));
+      border-radius: var(--ok-radius, 14px);
+      padding: 0.7rem 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .what {
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .why {
+      font-size: 0.9rem;
+      overflow-wrap: anywhere;
+    }
+    /* The payload is the thing being judged, so it is readable and it is COMPLETE — but it is a
+       machine's words, so it is set apart and it scrolls inside its own box instead of pushing the
+       two buttons off the bottom of a phone. */
+    pre {
+      margin: 0;
+      padding: 0.5rem 0.6rem;
+      background: var(--ok-surface-muted, rgba(0, 0, 0, 0.04));
+      border-radius: var(--ok-radius-sm, 10px);
+      font-size: 0.82rem;
+      max-height: 12rem;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .meta {
+      font-size: 0.8rem;
+      color: var(--ok-muted, #6b6a63);
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+    .actions button {
+      font: inherit;
+      cursor: pointer;
+      border-radius: var(--ok-radius-pill, 999px);
+      /* A finger on the counter tablet, not a mouse. */
+      min-height: 2.75rem;
+      padding: 0 1rem;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      background: var(--ok-surface, #fff);
+      color: inherit;
+    }
+    .actions button[data-act='approve'] {
+      border-color: var(--ok-primary, #3880ff);
+      color: var(--ok-primary, #3880ff);
+      font-weight: 600;
+    }
+    .muted {
+      color: var(--ok-muted, #6b6a63);
+    }
+  `;
+  }
+  connectedCallback() {
+    super.connectedCallback();
+    void this.load();
+  }
+  /** Public so the shell can refresh the tray after a run without remounting it. */
+  async load() {
+    if (!this.client?.flows.approvals) {
+      this.rows = [];
+      this.announce();
+      return;
+    }
+    try {
+      const rows = await this.client.flows.approvals("pending");
+      this.rows = Array.isArray(rows) ? rows : [];
+      this.error = "";
+    } catch (e4) {
+      this.rows = [];
+      this.error = e4?.message || this.t("ui.errGeneric");
+    }
+    this.announce();
+  }
+  announce() {
+    this.dispatchEvent(
+      new CustomEvent("flows-approvals-count", {
+        detail: { count: this.rows.length },
+        bubbles: true,
+        composed: true
+      })
+    );
+  }
+  async decide(row, verdict) {
+    const call = verdict === "approve" ? this.client?.flows.approve : this.client?.flows.reject;
+    if (!call || this.busy.includes(row.id)) return;
+    this.busy = [...this.busy, row.id];
+    this.error = "";
+    try {
+      await call.call(this.client?.flows, row.id);
+      this.rows = this.rows.filter((r6) => r6.id !== row.id);
+      this.announce();
+    } catch (e4) {
+      this.error = e4?.message || this.t("ui.errGeneric");
+    } finally {
+      this.busy = this.busy.filter((id) => id !== row.id);
+    }
+  }
+  when(iso) {
+    if (!iso) return "";
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return String(iso);
+    return date.toLocaleString(this.client?.locale || "es", {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+  /** The payload, as the thing that is about to be written — never trimmed to fit. */
+  payload(row) {
+    try {
+      return JSON.stringify(row.payload ?? {}, null, 2);
+    } catch {
+      return String(row.payload ?? "");
+    }
+  }
+  render() {
+    return b2`<div class="list">
+      <h3 class="section">${this.t("ui.approvalsTitle")}</h3>
+      ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+            >${this.error}</ok-inline-feedback
+          >` : A}
+      ${!this.rows.length ? b2`<span class="muted">${this.t("ui.approvalsEmpty")}</span>` : b2`<span class="muted">${this.t("ui.approvalsIntro")}</span>`}
+      ${this.rows.map(
+      (row) => b2`<div class="card" data-approval=${row.id}>
+          <span class="what">${this.t("ui.approvalWould", { command: row.command ?? "" })}</span>
+          ${row.reason ? b2`<span class="why">${row.reason}</span>` : A}
+          <pre>${this.payload(row)}</pre>
+          <span class="meta"
+            >${this.t("ui.approvalExpires", { when: this.when(row.expires_at) })}</span
+          >
+          <div class="actions">
+            <button
+              type="button"
+              data-act="approve"
+              ?disabled=${this.busy.includes(row.id)}
+              @click=${() => void this.decide(row, "approve")}
+            >
+              ${this.t("ui.approvalApprove")}
+            </button>
+            <!-- Rejecting asks nothing back: it is the answer that leaves the business exactly as
+                 it was, and a confirmation dialog on the safe choice only trains people to tap
+                 through the one on the other button. -->
+            <button
+              type="button"
+              data-act="reject"
+              ?disabled=${this.busy.includes(row.id)}
+              @click=${() => void this.decide(row, "reject")}
+            >
+              ${this.t("ui.approvalReject")}
+            </button>
+          </div>
+        </div>`
+    )}
+    </div>`;
+  }
+};
+__decorateClass([
+  n4({ attribute: false })
+], ErpFlowsApprovals.prototype, "client", 2);
+__decorateClass([
+  n4({ attribute: false })
+], ErpFlowsApprovals.prototype, "t", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApprovals.prototype, "rows", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApprovals.prototype, "error", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApprovals.prototype, "busy", 2);
+define("erp-flows-approvals", ErpFlowsApprovals);
+
+// modules/.wt-flows-ib/locales/es.json
 var es_default = {
   name: "Automatizaciones",
   navigation: {
@@ -4676,7 +5524,69 @@ var es_default = {
     tplCreatedPaused: "Se crea en pausa. No pasa nada hasta que la enciendas.",
     tplYours: "Tus automatizaciones",
     guideOpen: "\xBFC\xF3mo funciona esto?",
-    guideBack: "Volver a las automatizaciones"
+    guideBack: "Volver a las automatizaciones",
+    addNotify: "Enviar un mensaje",
+    addHttp: "Llamar a otro sistema",
+    addAi: "Ped\xEDrselo al asistente",
+    stepHttp: "Llama a {host} ({method})",
+    stepHttpEmpty: "Elige a qu\xE9 direcci\xF3n llama este paso",
+    stepHttpTemplatedHost: "Llama a la direcci\xF3n que digan los datos ({method})",
+    stepAiManual: "Le pide al asistente: {prompt} \u2014 t\xFA apruebas cualquier cambio",
+    stepAiAuto: "Le pide al asistente: {prompt} \u2014 cambia cosas por su cuenta",
+    stepAiEmpty: "Escribe qu\xE9 quieres que haga el asistente",
+    stepNotifyEmail: "Env\xEDa un email al {field} de la ficha",
+    stepNotifyWhatsapp: "Env\xEDa un WhatsApp al {field} de la ficha",
+    stepNotifyEmpty: "Elige a qui\xE9n va este mensaje",
+    httpMethod: "M\xE9todo",
+    httpUrl: "Direcci\xF3n",
+    httpGrantHint: "Este paso te pedir\xE1 permiso para llamar a {pattern}",
+    httpGrantUnknown: "Rellena la direcci\xF3n y este paso te dir\xE1 qu\xE9 necesita que le permitas.",
+    httpHeaders: "Cabeceras",
+    httpHeadersHint: "Aqu\xED va la clave o el token. Gu\xE1rdalo abajo como secreto y luego ins\xE9rtalo aqu\xED: su valor no se vuelve a mostrar nunca.",
+    httpAddHeader: "A\xF1adir una cabecera",
+    httpBody: "Qu\xE9 enviar",
+    httpTimeout: "Rendirse a los",
+    httpTimeoutHint: "Segundos, {max} como m\xE1ximo. La automatizaci\xF3n se queda esperando todo ese rato, tambi\xE9n cuando acaba en error.",
+    insertSecret: "Insertar un secreto",
+    secretsTitle: "Secretos",
+    secretsIntro: "Aqu\xED viven, cifradas, las claves y contrase\xF1as de otros sistemas. Una vez guardado, un valor no se puede volver a leer: ni t\xFA, ni esta pantalla. Solo puede usarlo un paso que llame a otro sistema.",
+    secretName: "Nombre",
+    secretValue: "Valor",
+    secretSaved: "{name} guardado. Su valor ya no se puede volver a mostrar.",
+    secretDelete: "Borrar {name}",
+    aiPrompt: "Qu\xE9 pedirle",
+    aiPromptHint: "Escr\xEDbelo como se lo dir\xEDas a una persona, e inserta campos de lo que ha pasado. No pongas aqu\xED nunca una clave ni una contrase\xF1a: se le enviar\xEDa al asistente.",
+    aiToolsTitle: "Qu\xE9 puede mirar y qu\xE9 puede hacer",
+    aiToolsHint: "Ofrecerle algo aqu\xED no se lo permite. Cada cosa hay que permit\xEDrsela adem\xE1s en la pesta\xF1a Permisos.",
+    aiToolsQueries: "Puede leer",
+    aiToolsCommands: "Puede proponer",
+    aiAddQuery: "A\xF1adir algo que puede leer",
+    aiAddCommand: "A\xF1adir algo que puede proponer",
+    aiPolicy: "Antes de cambiar nada",
+    aiPolicyManual: "Que me lo pregunte",
+    aiPolicyAuto: "Que lo haga por su cuenta",
+    aiPolicyAutoWarning: "Va a cambiar tus datos sin que nadie lo mire, a cualquier hora. Elige esto solo cuando le hayas visto proponer lo correcto varias veces.",
+    aiPolicyManualHint: "Todo lo que quiera cambiar te espera en \xABPendiente de ti\xBB. No pasa nada hasta que lo digas t\xFA.",
+    aiMaxIters: "Cu\xE1ntas vueltas puede dar",
+    aiMaxItersHint: "{max} como m\xE1ximo. Cada vuelta es una llamada de verdad, y cada llamada cuesta dinero.",
+    notifyChannel: "Por d\xF3nde sale",
+    notifyChannel_email: "Email",
+    notifyChannel_whatsapp: "WhatsApp",
+    notifyWhatsappCost: "Meta cobra cada WhatsApp. Un email no cuesta nada.",
+    notifyTo: "A qui\xE9n le llega",
+    notifyToHint: "La direcci\xF3n se lee de tus propios datos y aqu\xED no se puede escribir a mano. Eso es lo que impide que un mensaje acabe yendo a lo que trajera el evento.",
+    notifyToQuery: "S\xE1cala de",
+    notifyToField: "De qu\xE9 columna",
+    notifyTemplate: "Nombre de la plantilla",
+    notifyTemplateHint: "En WhatsApp, la plantilla que te aprob\xF3 Meta. En email hace de asunto, salvo que escribas uno t\xFA.",
+    notifyText: "El mensaje",
+    approvalsTitle: "Pendiente de ti",
+    approvalsIntro: "El asistente quiere cambiar algo. Todav\xEDa no ha pasado nada.",
+    approvalsEmpty: "No hay nada esper\xE1ndote.",
+    approvalWould: "Quiere ejecutar {command}",
+    approvalExpires: "Si no haces nada, esto caduca el {when} y no se ejecuta.",
+    approvalApprove: "Aprobar",
+    approvalReject: "No"
   },
   tpl: {
     author: "Automatizaciones",
@@ -4756,7 +5666,7 @@ var es_default = {
   }
 };
 
-// modules/flows/locales/en.json
+// modules/.wt-flows-ib/locales/en.json
 var en_default = {
   name: "Automations",
   navigation: {
@@ -4955,7 +5865,69 @@ var en_default = {
     tplCreatedPaused: "It is created paused. Nothing happens until you turn it on.",
     tplYours: "Your automations",
     guideOpen: "How does this work?",
-    guideBack: "Back to the automations"
+    guideBack: "Back to the automations",
+    addNotify: "Send a message",
+    addHttp: "Call another system",
+    addAi: "Ask the assistant",
+    stepHttp: "Calls {host} ({method})",
+    stepHttpEmpty: "Pick the address this step calls",
+    stepHttpTemplatedHost: "Calls whatever address the data says ({method})",
+    stepAiManual: "Asks the assistant: {prompt} \u2014 you approve any change",
+    stepAiAuto: "Asks the assistant: {prompt} \u2014 it changes things on its own",
+    stepAiEmpty: "Write what you want the assistant to do",
+    stepNotifyEmail: "Sends an email to the {field} on file",
+    stepNotifyWhatsapp: "Sends a WhatsApp to the {field} on file",
+    stepNotifyEmpty: "Pick who this message goes to",
+    httpMethod: "Method",
+    httpUrl: "Address",
+    httpGrantHint: "This step will ask you to allow calls to {pattern}",
+    httpGrantUnknown: "Fill in the address and this step will tell you what it needs you to allow.",
+    httpHeaders: "Headers",
+    httpHeadersHint: "Where a key or a token goes. Save it as a secret below, then insert it here \u2014 its value is never shown again.",
+    httpAddHeader: "Add a header",
+    httpBody: "What to send",
+    httpTimeout: "Give up after",
+    httpTimeoutHint: "Seconds, {max} at most. The automation is held up for the whole wait \u2014 including when it ends in an error.",
+    insertSecret: "Insert a secret",
+    secretsTitle: "Secrets",
+    secretsIntro: "Keys and passwords for other systems live here, encrypted. Once saved, a value can never be read back \u2014 not by you, not by this screen. Only a step that calls another system can use one.",
+    secretName: "Name",
+    secretValue: "Value",
+    secretSaved: "{name} saved. Its value cannot be shown again.",
+    secretDelete: "Delete {name}",
+    aiPrompt: "What to ask",
+    aiPromptHint: "Write it as you would to a person, and insert fields from what happened. Never put a key or a password here: it would be sent to the assistant.",
+    aiToolsTitle: "What it may look at and do",
+    aiToolsHint: "Offering something here does not allow it. Each one still has to be allowed on the Permissions tab.",
+    aiToolsQueries: "It may read",
+    aiToolsCommands: "It may propose",
+    aiAddQuery: "Add something it may read",
+    aiAddCommand: "Add something it may propose",
+    aiPolicy: "Before it changes anything",
+    aiPolicyManual: "Ask me first",
+    aiPolicyAuto: "Let it go ahead on its own",
+    aiPolicyAutoWarning: "It will change your data with nobody watching, at any hour. Only choose this once you have seen it propose the right thing several times.",
+    aiPolicyManualHint: "Anything it wants to change waits for you under \u201CWaiting for you\u201D. Nothing happens until you say so.",
+    aiMaxIters: "How many turns it may take",
+    aiMaxItersHint: "{max} at most. Every turn is a real call, and every call costs money.",
+    notifyChannel: "How it goes out",
+    notifyChannel_email: "Email",
+    notifyChannel_whatsapp: "WhatsApp",
+    notifyWhatsappCost: "Meta charges for every WhatsApp. An email costs nothing.",
+    notifyTo: "Who it goes to",
+    notifyToHint: "The address is read from your own data and can never be typed here. That is what stops a message going to whatever arrived with the event.",
+    notifyToQuery: "Read it from",
+    notifyToField: "Which column",
+    notifyTemplate: "Template name",
+    notifyTemplateHint: "On WhatsApp, the template Meta approved for you. On email it becomes the subject, unless you write one yourself.",
+    notifyText: "The message",
+    approvalsTitle: "Waiting for you",
+    approvalsIntro: "The assistant wants to change something. Nothing has happened yet.",
+    approvalsEmpty: "Nothing is waiting for you.",
+    approvalWould: "It wants to run {command}",
+    approvalExpires: "If you do nothing, this expires on {when} and never runs.",
+    approvalApprove: "Approve",
+    approvalReject: "No"
   },
   tpl: {
     author: "Automations",
@@ -5035,7 +6007,7 @@ var en_default = {
   }
 };
 
-// modules/flows/ui/components/erp-flows-app/erp-flows-app.ts
+// modules/.wt-flows-ib/ui/components/erp-flows-app/erp-flows-app.ts
 var CATALOG = { es: es_default, en: en_default };
 var ErpFlowsApp = class extends i3 {
   constructor() {
@@ -5047,6 +6019,7 @@ var ErpFlowsApp = class extends i3 {
     this.isNew = false;
     this.editorTab = "editor";
     this.guideOpen = false;
+    this.approvalCount = 0;
     this.error = "";
     this.coreVersion = "";
     this.onLocaleChange = () => this.requestUpdate();
@@ -5213,6 +6186,27 @@ var ErpFlowsApp = class extends i3 {
       this.gate = "ready";
     } catch (e4) {
       this.setGateFromError(e4);
+    }
+    await this.countApprovals();
+  }
+  /**
+   * How many proposals are waiting on a person.
+   *
+   * Asked here, and not left to the tray, because the tray is only MOUNTED when the answer is not
+   * zero: an empty box headed «waiting for you» is a permanent fixture on a screen whose job is to
+   * show automations, and a tray behind a tab nobody opens is the same as no tray at all — which
+   * is exactly how a `policy: manual` proposal reaches its 72-hour expiry unseen.
+   */
+  async countApprovals() {
+    if (!this.client?.flows.approvals) {
+      this.approvalCount = 0;
+      return;
+    }
+    try {
+      const rows = await this.client.flows.approvals("pending");
+      this.approvalCount = Array.isArray(rows) ? rows.length : 0;
+    } catch {
+      this.approvalCount = 0;
     }
   }
   /**
@@ -5386,6 +6380,13 @@ var ErpFlowsApp = class extends i3 {
         ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
               >${this.error}</ok-inline-feedback
             >` : A}
+        ${this.approvalCount ? b2`<erp-flows-approvals
+              .client=${this.client}
+              .t=${this.t}
+              @flows-approvals-count=${(e4) => {
+      this.approvalCount = e4.detail.count;
+    }}
+            ></erp-flows-approvals>` : A}
         ${this.renderList()}
         <erp-flows-gallery
           .client=${this.client}
@@ -5420,6 +6421,9 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsApp.prototype, "guideOpen", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApp.prototype, "approvalCount", 2);
 __decorateClass([
   r5()
 ], ErpFlowsApp.prototype, "error", 2);

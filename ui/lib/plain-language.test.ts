@@ -118,9 +118,80 @@ describe('what a step does, said once on the card', () => {
     expect(describeStep({ id: 's1', kind: 'command', command: '' }, t)).toBe('ui.stepCommandEmpty');
   });
 
-  it('reads a step it cannot edit without pretending it can', () => {
-    expect(describeStep({ id: 's1', kind: 'http', url: 'https://x/y' }, t)).toBe(
-      'ui.stepUnsupported(kind=http)',
+  it('names the SITE an http step calls, not the whole URL', () => {
+    // The host is the part an owner recognises and the part that decides whether it is safe. A
+    // full URL with a template in the middle is a line of syntax on a card that should read as a
+    // sentence, and the card is the only place most people ever look.
+    expect(
+      describeStep({ id: 's1', kind: 'http', method: 'POST', url: 'https://api.stripe.com/v1/x' }, t),
+    ).toBe('ui.stepHttp(method=POST,host=api.stripe.com)');
+  });
+
+  it('asks for the address instead of announcing a call to nowhere', () => {
+    expect(describeStep({ id: 's1', kind: 'http', method: 'GET', url: '' }, t)).toBe(
+      'ui.stepHttpEmpty',
+    );
+  });
+
+  it('says an http step to a templated host is going wherever the payload says', () => {
+    expect(describeStep({ id: 's1', kind: 'http', method: 'GET', url: '{{input.url}}' }, t)).toBe(
+      'ui.stepHttpTemplatedHost(method=GET)',
+    );
+  });
+
+  it('says whether an ai step ASKS or just does it — the only thing that matters about one', () => {
+    expect(describeStep({ id: 's1', kind: 'ai', prompt: 'Sort out the message', policy: 'manual' }, t)).toBe(
+      'ui.stepAiManual(prompt=Sort out the message)',
+    );
+    expect(describeStep({ id: 's1', kind: 'ai', prompt: 'Sort out the message', policy: 'auto' }, t)).toBe(
+      'ui.stepAiAuto(prompt=Sort out the message)',
+    );
+  });
+
+  it('treats an ai step with no policy as the kernel does: it asks', () => {
+    expect(describeStep({ id: 's1', kind: 'ai', prompt: 'Do it' }, t)).toBe('ui.stepAiManual(prompt=Do it)');
+  });
+
+  it('shortens a long prompt on the card instead of letting it become the card', () => {
+    const long = 'a'.repeat(200);
+    const said = describeStep({ id: 's1', kind: 'ai', prompt: long, policy: 'auto' }, t);
+    expect(said.length).toBeLessThan(120);
+    expect(said).toContain('…');
+  });
+
+  it('asks for the prompt of an ai step that has none', () => {
+    expect(describeStep({ id: 's1', kind: 'ai', prompt: '' }, t)).toBe('ui.stepAiEmpty');
+  });
+
+  it('says which CHANNEL a notify step uses and who it reads the address from', () => {
+    expect(
+      describeStep(
+        {
+          id: 's1',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: { query: 'customers.customer.get', field: 'phone' },
+        },
+        t,
+      ),
+    ).toBe('ui.stepNotifyWhatsapp(field=Phone)');
+    expect(
+      describeStep(
+        { id: 's1', kind: 'notify', channel: 'email', to: { query: 'staff.member.get', field: 'email' } },
+        t,
+      ),
+    ).toBe('ui.stepNotifyEmail(field=Email)');
+  });
+
+  it('asks for the recipient of a notify step that has none', () => {
+    expect(describeStep({ id: 's1', kind: 'notify', channel: 'email' }, t)).toBe('ui.stepNotifyEmpty');
+  });
+
+  it('still refuses to pretend about a step from an editor newer than itself', () => {
+    // The fallback is not dead code: it is what keeps a document written by a future editor
+    // OPENABLE instead of being silently rewritten without the step it could not draw.
+    expect(describeStep({ id: 's1', kind: 'whatever' as never }, t)).toBe(
+      'ui.stepUnsupported(kind=whatever)',
     );
   });
 });

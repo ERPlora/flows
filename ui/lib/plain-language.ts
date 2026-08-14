@@ -141,11 +141,59 @@ export function describeStep(step: Step, t: Translator): string {
     }
     case 'delay':
       return describeDelay(Number(step.seconds ?? 0), t);
+    case 'http': {
+      const url = typeof step.url === 'string' ? step.url.trim() : '';
+      const method = String(step.method ?? 'GET');
+      if (!url) return t('ui.stepHttpEmpty');
+      // The HOST is what an owner recognises and what decides whether the step is safe. The rest of
+      // the URL is syntax, and syntax on a card that should read as a sentence is what makes people
+      // stop reading cards. A templated host says the honest thing instead of printing braces.
+      const host = hostOf(url);
+      return host
+        ? t('ui.stepHttp', { method, host })
+        : t('ui.stepHttpTemplatedHost', { method });
+    }
+    case 'ai': {
+      const prompt = typeof step.prompt === 'string' ? step.prompt.trim() : '';
+      if (!prompt) return t('ui.stepAiEmpty');
+      // Whether it ASKS is the only thing that matters about an `ai` step on a one-line card: one
+      // of these two sentences means a model writes to the business unattended and the other does
+      // not. `manual` is the kernel's default, so no policy reads as «it asks».
+      const key = step.policy === 'auto' ? 'ui.stepAiAuto' : 'ui.stepAiManual';
+      return t(key, { prompt: shorten(prompt) });
+    }
+    case 'notify': {
+      const field = step.to?.field;
+      if (!step.to?.query || !field) return t('ui.stepNotifyEmpty');
+      // The channel goes in the KEY, not in a parameter: «Sends a WhatsApp» and «Sends an email»
+      // are different sentences in Spanish, and one of the two costs money every time it runs.
+      const key = step.channel === 'whatsapp' ? 'ui.stepNotifyWhatsapp' : 'ui.stepNotifyEmail';
+      return t(key, { field: humaniseField(String(field)) });
+    }
     default:
-      // `http`, `ai` and `notify` are real kernel steps this editor does not edit yet. Saying so is
-      // the honest half of opening the document at all.
+      // Not dead code: it is what keeps a document written by a NEWER editor openable, instead of
+      // silently rewritten without the step this one could not draw.
       return t('ui.stepUnsupported', { kind: step.kind });
   }
+}
+
+/** The host of a URL, or `''` when the host itself is a template (or it is not a URL yet). */
+function hostOf(url: string): string {
+  const stable = url.indexOf('{{') < 0 ? url : url.slice(0, url.indexOf('{{'));
+  try {
+    const parsed = new URL(stable);
+    return /[{}]/.test(parsed.host) ? '' : parsed.host;
+  } catch {
+    return '';
+  }
+}
+
+/** A prompt on a card, cut at a word so the card stays a card. */
+function shorten(text: string, max = 70): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
 /** How a run reads at a glance, and in what colour. */

@@ -8,21 +8,37 @@ import '../erp-flows-value/erp-flows-value';
 import '../erp-flows-field-picker/erp-flows-field-picker';
 import type { ErpFlowsValue } from '../erp-flows-value/erp-flows-value';
 import {
+  HTTP_METHODS,
+  MAX_ITERS_CAP,
+  MAX_TIMEOUT_SECONDS,
+  NOTIFY_CHANNELS,
   OPERATORS,
   addStep,
   emptyDoc,
   missingGrants,
   mergeGrants,
   moveStep,
+  partsToTemplate,
   partsToValue,
   patchStep,
   patchTrigger,
   readDoc,
   removeStep,
+  httpPatternFor,
   valueToParts,
   isSpineKind,
 } from '../../lib/flow-doc';
-import type { Condition, FlowDoc, Grant, Operator, Step, StepKind, Trigger } from '../../lib/flow-doc';
+import type {
+  Condition,
+  FlowDoc,
+  Grant,
+  Operator,
+  Recipient,
+  Step,
+  StepKind,
+  Trigger,
+  ValuePart,
+} from '../../lib/flow-doc';
 import {
   dailyCron,
   describeDelay,
@@ -35,7 +51,7 @@ import {
 import type { RunRow, RunStepRow, Translator } from '../../lib/plain-language';
 import { TRIGGER_CATALOG, catalogEntry } from '../../lib/trigger-catalog';
 import { errorCode } from '../../lib/hub-flows';
-import type { EventShape, Flow, ModuleClient } from '../../lib/hub-flows';
+import type { EventShape, Flow, ModuleClient, SecretInfo } from '../../lib/hub-flows';
 
 /** How a `when`/`filter` object is edited: a flat list of rows, rebuilt into the nested object. */
 interface GuardRow {
@@ -56,6 +72,18 @@ function guardRows(when: Condition | undefined): GuardRow[] {
     }
   }
   return rows;
+}
+
+/**
+ * A number the hub will accept, or the default when the box holds nothing usable.
+ *
+ * Clamping in the form rather than letting the save fail is deliberate: the kernel REFUSES a
+ * `max_iters` of 50 and a `timeout` of 90 instead of trimming them, so without this the owner
+ * meets an error code on a field whose real limit nothing on screen ever mentioned.
+ */
+function clamp(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(value)));
 }
 
 function rowsToWhen(rows: GuardRow[]): Condition {
@@ -91,9 +119,10 @@ function rowsToWhen(rows: GuardRow[]): Condition {
  * - **One column survives the reflow.** The assistant panel takes `33vw` at ≥768px. A column
  *   reflows; nodes at absolute (x, y) do not.
  *
- * A step this editor cannot edit yet (`http`, `ai`, `notify`) still OPENS, read-only, and is saved
- * back untouched. Rendering a document without a step and then writing it back is how a working
- * automation gets silently deleted.
+ * All SIX kernel step kinds are editable here since flows#3 — `http`, `ai` and `notify` used to
+ * open read-only, which meant the owner could see the step and not fix it. A kind from an editor
+ * NEWER than this one still opens read-only and is saved back untouched: rendering a document
+ * without a step and then writing it back is how a working automation gets silently deleted.
  */
 export class ErpFlowsEditor extends LitElement {
   static styles = css`
@@ -326,6 +355,38 @@ export class ErpFlowsEditor extends LitElement {
         grid-template-columns: 0.7fr 1.6fr auto;
       }
     }
+    /* A composed value and, inside an http step, the secret picker beside it. The select is a
+       sibling and not a child of erp-flows-value on purpose: a control inside another element's
+       shadow root cannot be reached from here, and this one has to drive the box next to it. */
+    .value-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 0.4rem;
+      min-width: 0;
+    }
+    .value-row erp-flows-value {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .value-row select {
+      font: inherit;
+      font-size: 0.8rem;
+      padding: 0 0.5rem;
+      min-height: 2.4rem;
+      max-width: 9rem;
+      border: 1px dashed var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-pill, 999px);
+      background: transparent;
+      color: var(--ok-muted, #6b6a63);
+    }
+    .secrets {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      padding-top: 0.6rem;
+      margin-top: 0.3rem;
+      border-top: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
+    }
     .adders {
       display: flex;
       flex-wrap: wrap;
@@ -433,6 +494,18 @@ export class ErpFlowsEditor extends LitElement {
 
   @state() private shape: EventShape | null = null;
 
+  /** The secret NAMES this hub holds. Never a value: no endpoint returns one (ADR-0283 §4). */
+  @state() private secrets: SecretInfo[] = [];
+
+  @state() private secretName = '';
+
+  /**
+   * The value being typed for a NEW secret, and the only place one ever lives in this component.
+   * It is wiped the instant the hub has it — a credential still sitting in a box on a counter
+   * tablet is the same leak as one printed on the wall.
+   */
+  @state() private secretValue = '';
+
   @state() private error = '';
 
   @state() private notice = '';
@@ -494,6 +567,52 @@ export class ErpFlowsEditor extends LitElement {
       // `not_found` means this hub has never heard of the event. The picker then says «nothing to
       // pick from», which is true, instead of the editor refusing to open.
       this.shape = null;
+    }
+  }
+
+  /**
+   * The secret names, asked for when an `http` panel opens and not before.
+   *
+   * Not on mount: most flows have no `http` step at all, and this is one more admin-only round
+   * trip on the first paint of a screen that already makes two.
+   */
+  private async loadSecrets(): Promise<void> {
+    if (!this.client?.flows.secrets) return;
+    try {
+      const list = await this.client.flows.secrets();
+      this.secrets = Array.isArray(list) ? list : [];
+    } catch {
+      // A hub that will not list them is not a reason to refuse to edit the step: the owner can
+      // still write the header, and the name they type is checked where it is used.
+      this.secrets = [];
+    }
+  }
+
+  private async saveSecret(): Promise<void> {
+    const name = this.secretName.trim();
+    const value = this.secretValue;
+    if (!name || !value || !this.client?.flows.putSecret) return;
+    this.error = '';
+    try {
+      await this.client.flows.putSecret(name, value);
+      // Wiped BEFORE the reload, so no re-render can put it back on screen.
+      this.secretValue = '';
+      this.secretName = '';
+      await this.loadSecrets();
+      this.notice = this.t('ui.secretSaved', { name });
+    } catch (e) {
+      this.secretValue = '';
+      this.error = (e as Error)?.message || this.t('ui.errGeneric');
+    }
+  }
+
+  private async deleteSecret(name: string): Promise<void> {
+    if (!this.client?.flows.deleteSecret) return;
+    try {
+      await this.client.flows.deleteSecret(name);
+      await this.loadSecrets();
+    } catch (e) {
+      this.error = (e as Error)?.message || this.t('ui.errGeneric');
     }
   }
 
@@ -800,7 +919,6 @@ export class ErpFlowsEditor extends LitElement {
       </div>`;
     }
 
-    const editable = isSpineKind(step.kind);
     return html`<div class="node" data-node=${step.id}>
       <div class="card">
         <div class="row" style="padding:0">
@@ -811,6 +929,8 @@ export class ErpFlowsEditor extends LitElement {
             aria-expanded=${open ? 'true' : 'false'}
             @click=${() => {
               this.openStep = open ? null : step.id;
+              // The secret list is only ever needed here, and only once a panel is actually open.
+              if (this.openStep === step.id && step.kind === 'http') void this.loadSecrets();
             }}
           >
             <!-- No eyebrow here on purpose: «…haz esto» is what the SPINE says once, and repeating
@@ -821,15 +941,470 @@ export class ErpFlowsEditor extends LitElement {
           </button>
           ${removeBtn}
         </div>
-        ${open
-          ? html`<div class="panel">
-              ${editable
-                ? this.renderCommandPanel(step, index)
-                : html`<span class="hint">${this.t('ui.readOnlyStep')}</span>`}
-            </div>`
-          : nothing}
+        ${open ? html`<div class="panel">${this.renderStepPanel(step, index)}</div>` : nothing}
       </div>
     </div>`;
+  }
+
+  /** The right form for this kind — or the honest sentence for a kind from a newer editor. */
+  private renderStepPanel(step: Step, index: number) {
+    if (!isSpineKind(step.kind)) return html`<span class="hint">${this.t('ui.readOnlyStep')}</span>`;
+    if (step.kind === 'http') return this.renderHttpPanel(step, index);
+    if (step.kind === 'ai') return this.renderAiPanel(step, index);
+    if (step.kind === 'notify') return this.renderNotifyPanel(step, index);
+    return this.renderCommandPanel(step, index);
+  }
+
+  /**
+   * One composed value, wired to the shared field picker — and, inside an `http` step, to the
+   * secrets this hub holds.
+   *
+   * `template` forces `{{…}}` even for a lone field: `url` is a string in the schema, so the
+   * type-preserving rule that is right everywhere else is wrong there.
+   */
+  private renderValue(opts: {
+    field: string;
+    label: string;
+    value: unknown;
+    template?: boolean;
+    secrets?: boolean;
+    onChange: (value: unknown) => void;
+  }) {
+    const write = (parts: ValuePart[]): void =>
+      opts.onChange(opts.template ? partsToTemplate(parts) : partsToValue(parts));
+    return html`<div class="value-row">
+      <erp-flows-value
+        data-field=${opts.field}
+        .label=${opts.label}
+        .parts=${valueToParts(opts.value)}
+        .fieldLabel=${this.fieldLabel}
+        .insertLabel=${this.t('ui.insertField')}
+        .removeLabel=${this.t('ui.removePart')}
+        .canPickFields=${!!this.shape}
+        @flows-value-change=${(e: CustomEvent<{ parts: ValuePart[] }>) => write(e.detail.parts)}
+        @flows-pick-field=${(e: Event) => this.openPicker(e.target as ErpFlowsValue, 'input')}
+      ></erp-flows-value>
+      <!-- The secret picker lives in THIS shadow root, next to the box, and only inside an http
+           step: a secret path anywhere else is refused at save, so offering it elsewhere would
+           teach a syntax that makes the document unsavable. -->
+      ${opts.secrets && this.secrets.length
+        ? html`<select
+            data-act="insert-secret"
+            aria-label=${this.t('ui.insertSecret')}
+            .value=${''}
+            @change=${(e: Event) => {
+              const select = e.target as HTMLSelectElement;
+              const name = select.value;
+              select.value = '';
+              if (!name) return;
+              const box = (e.currentTarget as HTMLElement)
+                .closest('.value-row')
+                ?.querySelector('erp-flows-value') as ErpFlowsValue | null;
+              box?.appendField(`secret.${name}`);
+            }}
+          >
+            <option value="">${this.t('ui.insertSecret')}</option>
+            ${this.secrets.map((s) => html`<option value=${s.name}>${s.name}</option>`)}
+          </select>`
+        : nothing}
+    </div>`;
+  }
+
+  /**
+   * **The `http` step**: where an automation leaves the building.
+   *
+   * Everything on this panel is a thing the hub checks and refuses: the method set is closed, the
+   * timeout is capped, the URL is matched against a grant PATTERN after templating, and a secret is
+   * only legal here. Clamping in the form rather than letting the save fail is the difference
+   * between «30 is the most it will wait» and a red box with an error code in it.
+   */
+  private renderHttpPanel(step: Step, index: number) {
+    const headers = Object.entries((step.headers ?? {}) as Record<string, unknown>);
+    const setHeaders = (entries: [string, unknown][]): void =>
+      this.setDoc(patchStep(this.document, index, { headers: Object.fromEntries(entries) }));
+    const pattern = httpPatternFor(String(step.url ?? ''));
+    return html`
+      <div class="param-row" style="grid-template-columns:auto 1fr">
+        <div class="field">
+          <label for="m-${step.id}">${this.t('ui.httpMethod')}</label>
+          <select
+            id="m-${step.id}"
+            data-field="method"
+            .value=${String(step.method ?? 'GET')}
+            @change=${(e: Event) =>
+              this.setDoc(
+                patchStep(this.document, index, { method: (e.target as HTMLSelectElement).value }),
+              )}
+          >
+            ${HTTP_METHODS.map((m) => html`<option value=${m}>${m}</option>`)}
+          </select>
+        </div>
+        ${this.renderValue({
+          field: 'url',
+          label: this.t('ui.httpUrl'),
+          value: step.url ?? '',
+          template: true,
+          secrets: true,
+          onChange: (url) => this.setDoc(patchStep(this.document, index, { url })),
+        })}
+      </div>
+      <!-- The grant this step will need, spelled the way the hub compares it. Showing it HERE and
+           not only on the Permissions tab is what connects «I typed an address» to «and this is
+           what I am about to allow». -->
+      <span class="hint"
+        >${pattern
+          ? this.t('ui.httpGrantHint', { pattern })
+          : this.t('ui.httpGrantUnknown')}</span
+      >
+
+      <span class="eyebrow">${this.t('ui.httpHeaders')}</span>
+      <span class="hint">${this.t('ui.httpHeadersHint')}</span>
+      ${headers.map(
+        ([key, value], i) => html`<div class="param-row">
+          <div class="field">
+            <label>${this.t('ui.paramName')}</label>
+            <input
+              type="text"
+              .value=${key}
+              @change=${(e: Event) =>
+                setHeaders(
+                  headers.map((h, j) =>
+                    j === i ? [(e.target as HTMLInputElement).value.trim(), h[1]] : h,
+                  ),
+                )}
+            />
+          </div>
+          ${this.renderValue({
+            field: `header-${i}`,
+            label: this.t('ui.paramValue'),
+            value,
+            secrets: true,
+            onChange: (v) => setHeaders(headers.map((h, j) => (j === i ? [h[0], v] : h))),
+          })}
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label=${this.t('ui.removePart', { label: key })}
+            @click=${() => setHeaders(headers.filter((_, j) => j !== i))}
+          >
+            ×
+          </button>
+        </div>`,
+      )}
+      <div class="adders" style="margin-left:0">
+        <button type="button" data-act="add-header" @click=${() => setHeaders([...headers, ['', '']])}>
+          ${this.t('ui.httpAddHeader')}
+        </button>
+      </div>
+
+      ${this.renderValue({
+        field: 'body',
+        label: this.t('ui.httpBody'),
+        value: step.body ?? '',
+        secrets: true,
+        onChange: (body) => this.setDoc(patchStep(this.document, index, { body })),
+      })}
+
+      <div class="field">
+        <label for="t-${step.id}">${this.t('ui.httpTimeout')}</label>
+        <input
+          id="t-${step.id}"
+          data-field="timeout"
+          type="number"
+          min="1"
+          max=${MAX_TIMEOUT_SECONDS}
+          .value=${String(step.timeout ?? 10)}
+          @change=${(e: Event) =>
+            this.setDoc(
+              patchStep(this.document, index, {
+                // Clamped here rather than refused at save: the hub caps this at 30 and the run
+                // holds its lease the whole time, so this number is also what an error costs.
+                timeout: clamp(Number((e.target as HTMLInputElement).value), 1, MAX_TIMEOUT_SECONDS, 10),
+              }),
+            )}
+        />
+        <span class="hint">${this.t('ui.httpTimeoutHint', { max: MAX_TIMEOUT_SECONDS })}</span>
+      </div>
+
+      ${this.renderSecrets()}
+    `;
+  }
+
+  /**
+   * **The secrets this hub holds** — names in, names out, and no way back.
+   *
+   * There is no endpoint that returns a value and there is no «reveal» button here, because there
+   * would be nothing behind it. The screen says so rather than leaving the owner wondering where
+   * the key they typed went.
+   */
+  private renderSecrets() {
+    if (!this.client?.flows.secrets) return nothing;
+    return html`<div class="secrets">
+      <span class="eyebrow">${this.t('ui.secretsTitle')}</span>
+      <span class="hint">${this.t('ui.secretsIntro')}</span>
+      ${this.secrets.map(
+        (s) => html`<div class="grant">
+          <span class="grow">${s.name}</span>
+          <button
+            type="button"
+            class="icon-btn"
+            data-act="delete-secret"
+            aria-label=${this.t('ui.secretDelete', { name: s.name })}
+            @click=${() => void this.deleteSecret(s.name)}
+          >
+            ×
+          </button>
+        </div>`,
+      )}
+      <div class="param-row">
+        <div class="field">
+          <label for="sn-${this.flow?.id ?? 'new'}">${this.t('ui.secretName')}</label>
+          <input
+            id="sn-${this.flow?.id ?? 'new'}"
+            data-field="secret-name"
+            type="text"
+            .value=${this.secretName}
+            placeholder="STRIPE_KEY"
+            @input=${(e: Event) => {
+              this.secretName = (e.target as HTMLInputElement).value;
+            }}
+          />
+        </div>
+        <div class="field">
+          <label for="sv-${this.flow?.id ?? 'new'}">${this.t('ui.secretValue')}</label>
+          <input
+            id="sv-${this.flow?.id ?? 'new'}"
+            data-field="secret-value"
+            type="password"
+            autocomplete="off"
+            .value=${this.secretValue}
+            @input=${(e: Event) => {
+              this.secretValue = (e.target as HTMLInputElement).value;
+            }}
+          />
+        </div>
+        <button
+          type="button"
+          class="icon-btn"
+          data-act="save-secret"
+          @click=${() => void this.saveSecret()}
+        >
+          ${this.t('ui.save')}
+        </button>
+      </div>
+    </div>`;
+  }
+
+  /**
+   * **The `ai` step.** One question decides everything on this panel: does a person see the write
+   * before it happens? `manual` is the kernel's default and it is written out loud here, because
+   * the permissive option is the one nobody types and everybody assumes.
+   */
+  private renderAiPanel(step: Step, index: number) {
+    const tools = step.tools ?? {};
+    const queries = tools.queries ?? [];
+    const commands = tools.commands ?? [];
+    const setTools = (next: { queries?: string[]; commands?: string[] }): void =>
+      this.setDoc(
+        patchStep(this.document, index, {
+          tools: { queries: next.queries ?? queries, commands: next.commands ?? commands },
+        }),
+      );
+    const auto = step.policy === 'auto';
+    return html`
+      ${this.renderValue({
+        field: 'prompt',
+        label: this.t('ui.aiPrompt'),
+        value: step.prompt ?? '',
+        template: true,
+        onChange: (prompt) => this.setDoc(patchStep(this.document, index, { prompt })),
+      })}
+      <!-- No secret picker on a prompt, and that is not an omission: a secret path here is
+           refused at save, because the prompt is sent to the model. -->
+      <span class="hint">${this.t('ui.aiPromptHint')}</span>
+
+      <span class="eyebrow">${this.t('ui.aiToolsTitle')}</span>
+      <span class="hint">${this.t('ui.aiToolsHint')}</span>
+      ${this.renderToolList(this.t('ui.aiToolsQueries'), queries, 'query', (next) =>
+        setTools({ queries: next }),
+      )}
+      ${this.renderToolList(this.t('ui.aiToolsCommands'), commands, 'command', (next) =>
+        setTools({ commands: next }),
+      )}
+
+      <div class="field">
+        <label for="p-${step.id}">${this.t('ui.aiPolicy')}</label>
+        <select
+          id="p-${step.id}"
+          data-field="policy"
+          .value=${String(step.policy ?? 'manual')}
+          @change=${(e: Event) =>
+            this.setDoc(
+              patchStep(this.document, index, {
+                policy: (e.target as HTMLSelectElement).value as 'auto' | 'manual',
+              }),
+            )}
+        >
+          <option value="manual">${this.t('ui.aiPolicyManual')}</option>
+          <option value="auto">${this.t('ui.aiPolicyAuto')}</option>
+        </select>
+      </div>
+      ${auto
+        ? html`<ok-inline-feedback tone="warning" icon="alert-circle-outline"
+            >${this.t('ui.aiPolicyAutoWarning')}</ok-inline-feedback
+          >`
+        : html`<span class="hint">${this.t('ui.aiPolicyManualHint')}</span>`}
+
+      <div class="field">
+        <label for="i-${step.id}">${this.t('ui.aiMaxIters')}</label>
+        <input
+          id="i-${step.id}"
+          data-field="max-iters"
+          type="number"
+          min="1"
+          max=${MAX_ITERS_CAP}
+          .value=${String(step.max_iters ?? 6)}
+          @change=${(e: Event) =>
+            this.setDoc(
+              patchStep(this.document, index, {
+                // The kernel REFUSES above the cap rather than trimming, so a document saying 50
+                // would simply not save. Clamping here keeps the refusal off the owner's screen.
+                max_iters: clamp(Number((e.target as HTMLInputElement).value), 1, MAX_ITERS_CAP, 6),
+              }),
+            )}
+        />
+        <span class="hint">${this.t('ui.aiMaxItersHint', { max: MAX_ITERS_CAP })}</span>
+      </div>
+    `;
+  }
+
+  private renderToolList(
+    label: string,
+    names: string[],
+    what: 'query' | 'command',
+    update: (next: string[]) => void,
+  ) {
+    return html`
+      <span class="hint">${label}</span>
+      ${names.map(
+        (name, i) => html`<div class="param-row" style="grid-template-columns:1fr auto">
+          <div class="field">
+            <input
+              type="text"
+              .value=${name}
+              @change=${(e: Event) =>
+                update(
+                  names.map((n, j) => (j === i ? (e.target as HTMLInputElement).value.trim() : n)),
+                )}
+            />
+          </div>
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label=${this.t('ui.removePart', { label: name })}
+            @click=${() => update(names.filter((_, j) => j !== i))}
+          >
+            ×
+          </button>
+        </div>`,
+      )}
+      <div class="adders" style="margin-left:0">
+        <button type="button" data-act="add-${what}" @click=${() => update([...names, ''])}>
+          ${this.t(what === 'query' ? 'ui.aiAddQuery' : 'ui.aiAddCommand')}
+        </button>
+      </div>
+    `;
+  }
+
+  /**
+   * **The `notify` step.** The recipient is a query and a column, and there is **no box to type an
+   * address into** — that absence is the whole guarantee. Without it, an author (or a marketplace
+   * template) writes `to: "{{input.email}}"` and the message goes wherever the event payload said.
+   */
+  private renderNotifyPanel(step: Step, index: number) {
+    const to: Recipient = step.to ?? { query: '', params: {}, field: '' };
+    const vars = (step.vars ?? {}) as Record<string, unknown>;
+    const setTo = (patch: Partial<Recipient>): void =>
+      this.setDoc(
+        patchStep(this.document, index, { to: { params: {}, ...to, ...patch } as Recipient }),
+      );
+    const setVar = (key: string, value: unknown): void =>
+      this.setDoc(patchStep(this.document, index, { vars: { ...vars, [key]: value } }));
+    return html`
+      <div class="field">
+        <label for="ch-${step.id}">${this.t('ui.notifyChannel')}</label>
+        <select
+          id="ch-${step.id}"
+          data-field="channel"
+          .value=${String(step.channel ?? 'email')}
+          @change=${(e: Event) =>
+            this.setDoc(
+              patchStep(this.document, index, {
+                channel: (e.target as HTMLSelectElement).value as 'email' | 'whatsapp',
+              }),
+            )}
+        >
+          <!-- Two options, and sms is not one of them: it has no transport anywhere and is
+               refused by name at save AND at grant time. A third option here would be a step that
+               can never be delivered, picked from a list that looked complete. -->
+          ${NOTIFY_CHANNELS.map(
+            (c) => html`<option value=${c}>${this.t(`ui.notifyChannel_${c}`)}</option>`,
+          )}
+        </select>
+      </div>
+      ${step.channel === 'whatsapp'
+        ? html`<ok-inline-feedback tone="warning" icon="cash-outline"
+            >${this.t('ui.notifyWhatsappCost')}</ok-inline-feedback
+          >`
+        : nothing}
+
+      <span class="eyebrow">${this.t('ui.notifyTo')}</span>
+      <span class="hint">${this.t('ui.notifyToHint')}</span>
+      <div class="param-row">
+        <div class="field">
+          <label for="tq-${step.id}">${this.t('ui.notifyToQuery')}</label>
+          <input
+            id="tq-${step.id}"
+            data-field="to-query"
+            type="text"
+            .value=${to.query ?? ''}
+            @change=${(e: Event) => setTo({ query: (e.target as HTMLInputElement).value.trim() })}
+          />
+        </div>
+        <div class="field">
+          <label for="tf-${step.id}">${this.t('ui.notifyToField')}</label>
+          <input
+            id="tf-${step.id}"
+            data-field="to-field"
+            type="text"
+            .value=${to.field ?? ''}
+            @change=${(e: Event) => setTo({ field: (e.target as HTMLInputElement).value.trim() })}
+          />
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="tp-${step.id}">${this.t('ui.notifyTemplate')}</label>
+        <input
+          id="tp-${step.id}"
+          data-field="template"
+          type="text"
+          .value=${String(step.template ?? '')}
+          @change=${(e: Event) =>
+            this.setDoc(
+              patchStep(this.document, index, { template: (e.target as HTMLInputElement).value }),
+            )}
+        />
+        <span class="hint">${this.t('ui.notifyTemplateHint')}</span>
+      </div>
+
+      ${this.renderValue({
+        field: 'var-text',
+        label: this.t('ui.notifyText'),
+        value: vars.text ?? '',
+        onChange: (text) => setVar('text', text),
+      })}
+    `;
   }
 
   private renderDelayPanel(step: Step, index: number) {
@@ -1032,10 +1607,27 @@ export class ErpFlowsEditor extends LitElement {
         ${this.document.steps.length === 0
           ? html`<div class="node"><span class="hint">${this.t('ui.noSteps')}</span></div>`
           : nothing}
+        <!-- Order is by how often a shop owner reaches for one, not by the kernel's enum. The ai one is
+             last because it is the one that costs money and the one that needs the most reading. -->
         <div class="adders">
-          <button type="button" @click=${() => this.add('command')}>${this.t('ui.addCommand')}</button>
-          <button type="button" @click=${() => this.add('condition')}>${this.t('ui.addGuard')}</button>
-          <button type="button" @click=${() => this.add('delay')}>${this.t('ui.addDelay')}</button>
+          ${(
+            [
+              ['command', 'ui.addCommand'],
+              ['condition', 'ui.addGuard'],
+              ['delay', 'ui.addDelay'],
+              ['notify', 'ui.addNotify'],
+              ['http', 'ui.addHttp'],
+              ['ai', 'ui.addAi'],
+            ] as const
+          ).map(
+            ([kind, label]) => html`<button
+              type="button"
+              data-add=${kind}
+              @click=${() => this.add(kind)}
+            >
+              ${this.t(label)}
+            </button>`,
+          )}
         </div>
       </div>`;
   }
