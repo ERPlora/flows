@@ -38,6 +38,26 @@ import type { Translator } from '../../lib/plain-language';
  */
 export const GUIDE_SECTIONS = ['what', 'first', 'permissions', 'history', 'limits'] as const;
 
+/**
+ * The walk, in the order somebody actually does it.
+ *
+ * Named keys and not `` `guide.first${n}` ``: a composed key is invisible to the catalogue guard
+ * (`i18n-catalogue.test.ts` reads LITERAL strings out of the source), so a walk numbered 1..5 was
+ * the one part of this screen that could lose its Spanish without anything turning red.
+ *
+ * `firstTest` is the step flows#16 found missing. «Try it» has existed since flows#2, and a walk
+ * that goes fill → allow → switch on teaches somebody to turn an automation loose on their
+ * business having never once watched it run.
+ */
+const FIRST_STEPS = [
+  'guide.firstPick',
+  'guide.firstUse',
+  'guide.firstFill',
+  'guide.firstAllow',
+  'guide.firstTest',
+  'guide.firstEnable',
+] as const;
+
 export class ErpFlowsGuide extends LitElement {
   static styles = css`
     :host {
@@ -261,13 +281,14 @@ export class ErpFlowsGuide extends LitElement {
         <p>${this.t('guide.whatBody')}</p>
         <p class="muted">${this.t('guide.whatExample')}</p>
         ${this.spineShot()}
+        <p>${this.t('guide.whatCan')}</p>
       </section>
 
       <section data-section="first">
         ${this.heading('first')}
         <p>${this.t('guide.firstBody')}</p>
         <ol>
-          ${[1, 2, 3, 4, 5].map((n) => html`<li>${this.t(`guide.first${n}`)}</li>`)}
+          ${FIRST_STEPS.map((key) => html`<li>${this.t(key)}</li>`)}
         </ol>
       </section>
 
@@ -286,12 +307,15 @@ export class ErpFlowsGuide extends LitElement {
         <p>${this.t('guide.historyGuard')}</p>
       </section>
 
+      <!-- Two engine limits and one the assistant imposes on itself. What is NOT here any more is
+           «there is no screen for the message, assistant and http steps»: flows#3 built all three,
+           and a guide that keeps saying otherwise is the product talking somebody out of the
+           feature that takes their automation outside the building (flows#16). -->
       <section data-section="limits">
         ${this.heading('limits')}
         <p>${this.t('guide.limitsBranches')}</p>
-        <p>${this.t('guide.limitsChannels')}</p>
         <p>${this.t('guide.limitsDates')}</p>
-        <p class="muted">${this.t('guide.limitsInside')}</p>
+        <p class="muted">${this.t('guide.limitsAssistant')}</p>
       </section>
     </div>`;
   }

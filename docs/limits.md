@@ -30,12 +30,15 @@ Consecuencias que la pantalla dice en voz alta en vez de disimular:
 - un `{{secret.X}}` **jamás** se resuelve aquí — sería el único sitio del producto donde una
   credencial write-only se vuelve legible.
 
-## Fuera de esta entrega (v1)
+## Ya NO es un límite: «Probar» antes de activar
 
-- **«Probar» antes de activar** contra la última venta/cita real. Probablemente la función de más
-  valor del editor (Brackenbury et al., CHI 2019: la gente **no** predice bien el comportamiento
-  de un flujo con un fallo, ni leyéndolo). Necesita `POST …/run` con un input sintetizado y una
-  vista de «qué habría pasado» que no escriba nada; no cabía aquí.
+Esta sección decía que probar contra la última venta/cita real quedaba «fuera de esta entrega».
+**Lo entregó flows#2** (v0.1.5) y está descrito arriba: la pestaña reconstruye el `input` con las
+muestras reales por campo de `…/events/shape` y recorre la espina sin ejecutar nada.
+
+Se deja escrito el porqué, que sigue siendo la razón de que la pestaña exista: la gente **no**
+predice bien el comportamiento de un flujo con un fallo, ni leyéndolo (Brackenbury et al., CHI
+2019).
 
 ## Lo que el borrador por IA NO hace (flows#4)
 
@@ -74,11 +77,13 @@ Las dos se nombran en la guía del dueño, en «Lo que todavía no puede hacer»
 
 ## Limitaciones que son deuda del hub, no de este módulo
 
-- **No hay endpoint que LISTE los eventos de un hub.** `…/events/shape?name=` contesta qué trae
-  **un** evento, pero hay que saber su nombre para preguntar. El desplegable se siembra de un
-  catálogo corto escrito a mano (los eventos que importan a un restaurante y a una peluquería) y
-  **cada uno se verifica contra el hub**; lo que este fichero no conoce se alcanza por el campo de
-  texto libre. Con un catálogo real servido por HTTP, esta lista pasaría a ser solo etiquetas.
+- ~~**No hay endpoint que LISTE los eventos de un hub.**~~ **Resuelto** por hub#823 y cableado por
+  flows#8 (v0.1.8): `GET /api/hub/events` devuelve la unión de lo que declaran los módulos
+  instalados y lo que el outbox ha visto de verdad, así que el desplegable ofrece los eventos de
+  ESTE negocio. El catálogo escrito a mano (`trigger-catalog.ts`) sobrevive **solo como
+  diccionario** de etiquetas, tal y como se predijo aquí; un evento sin frase se ofrece igual, con
+  su nombre crudo. Y cuando el hub no puede contestar, la pantalla lo dice — no hay fall back
+  silencioso a la lista de antes.
 - **Tampoco hay catálogo de commands.** El nombre del command de un paso se escribe a mano, y quien
   lo verifica de verdad es `PUT …/grants`, que rechaza la lista entera si nombra un command que no
   existe — así que el error llega en el sitio donde se puede arreglar.
