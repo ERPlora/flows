@@ -290,7 +290,7 @@ export class ErpFlowsGallery extends LitElement {
   private renderPanel(template: FlowTemplate) {
     const missing = missingModules(template, this.known);
     const grants = templateGrants(template, this.t);
-    return html`<div class="panel">
+    return html`<div class="panel" id=${`panel-${template.id}`}>
       <p class="plain">${this.t(template.plainKey)}</p>
 
       <div class="block">
@@ -357,6 +357,7 @@ export class ErpFlowsGallery extends LitElement {
         type="button"
         class="pick"
         aria-expanded=${open ? 'true' : 'false'}
+        aria-controls=${`panel-${template.id}`}
         @click=${() => this.open(template.id)}
       >
         <ion-icon name=${template.icon} aria-hidden="true"></ion-icon>

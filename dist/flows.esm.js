@@ -3057,6 +3057,7 @@ function errorCode(e4) {
 }
 
 // modules/flows/ui/components/erp-flows-editor/erp-flows-editor.ts
+var TABS = ["editor", "test", "permissions", "history"];
 function guardRows(when) {
   const rows = [];
   for (const [path, ops] of Object.entries(when ?? {})) {
@@ -3574,6 +3575,32 @@ var ErpFlowsEditor = class extends i3 {
       void this.loadShape();
     }
   }
+  /**
+   * The arrow keys along the tab strip (WAI-ARIA's tabs pattern).
+   *
+   * The strip is ONE stop for the tab key — the selected tab holds `tabindex="0"` and the rest
+   * `-1` — so without this the other three panels are simply unreachable from a keyboard. Which is
+   * the same defect as a dead button, arriving through a different door: the history is five key
+   * presses away, or none at all.
+   *
+   * It wraps, because the pattern's own answer to «what is to the left of the first one» is «the
+   * last one», and a strip that stops dead at both ends teaches people to reach for the mouse.
+   */
+  onTabKey(e4) {
+    const step = { ArrowRight: 1, ArrowLeft: -1 };
+    let next;
+    if (e4.key in step) {
+      const at2 = TABS.indexOf(this.tab);
+      next = TABS[(at2 + step[e4.key] + TABS.length) % TABS.length];
+    } else if (e4.key === "Home") next = TABS[0];
+    else if (e4.key === "End") next = TABS[TABS.length - 1];
+    if (!next) return;
+    e4.preventDefault();
+    this.tab = next;
+    void this.updateComplete.then(() => {
+      this.renderRoot.querySelector(`#tab-${this.tab}`)?.focus();
+    });
+  }
   updated(changed) {
     if (changed.has("tab") && this.tab === "history") void this.loadRuns();
     if (this.openStep === "trigger") void this.ensureEventCatalog();
@@ -3957,6 +3984,7 @@ var ErpFlowsEditor = class extends i3 {
             type="button"
             class="open"
             style="padding:.2rem .3rem"
+            aria-expanded=${open ? "true" : "false"}
             @click=${() => {
         this.openStep = open ? null : step.id;
       }}
@@ -3976,6 +4004,7 @@ var ErpFlowsEditor = class extends i3 {
             type="button"
             class="open"
             style="padding:.2rem .3rem"
+            aria-expanded=${open ? "true" : "false"}
             @click=${() => {
         this.openStep = open ? null : step.id;
       }}
@@ -4856,12 +4885,15 @@ var ErpFlowsEditor = class extends i3 {
         </ion-button>
       </div>
 
-      <div class="tabs" role="tablist">
-        ${["editor", "test", "permissions", "history"].map(
+      <div class="tabs" role="tablist" @keydown=${(e4) => this.onTabKey(e4)}>
+        ${TABS.map(
       (tab) => b2`<button
             type="button"
             role="tab"
+            id=${`tab-${tab}`}
+            aria-controls="tabpanel"
             aria-selected=${this.tab === tab ? "true" : "false"}
+            tabindex=${this.tab === tab ? "0" : "-1"}
             @click=${() => {
         this.tab = tab;
       }}
@@ -4871,7 +4903,7 @@ var ErpFlowsEditor = class extends i3 {
     )}
       </div>
 
-      <div class="body">
+      <div class="body" role="tabpanel" id="tabpanel" aria-labelledby=${`tab-${this.tab}`}>
         ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
               >${this.error}</ok-inline-feedback
             >` : A}
@@ -5364,7 +5396,7 @@ var ErpFlowsGallery = class extends i3 {
   renderPanel(template) {
     const missing = missingModules(template, this.known);
     const grants = templateGrants(template, this.t);
-    return b2`<div class="panel">
+    return b2`<div class="panel" id=${`panel-${template.id}`}>
       <p class="plain">${this.t(template.plainKey)}</p>
 
       <div class="block">
@@ -5424,6 +5456,7 @@ var ErpFlowsGallery = class extends i3 {
         type="button"
         class="pick"
         aria-expanded=${open ? "true" : "false"}
+        aria-controls=${`panel-${template.id}`}
         @click=${() => this.open(template.id)}
       >
         <ion-icon name=${template.icon} aria-hidden="true"></ion-icon>
