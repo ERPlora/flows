@@ -52,6 +52,7 @@ import type { RunRow, RunStepRow, Translator } from '../../lib/plain-language';
 import { TRIGGER_CATALOG, catalogEntry } from '../../lib/trigger-catalog';
 import { errorCode } from '../../lib/hub-flows';
 import type { EventShape, Flow, ModuleClient, SecretInfo } from '../../lib/hub-flows';
+import type { DraftGap } from '../../lib/ai-draft';
 
 /** How a `when`/`filter` object is edited: a flat list of rows, rebuilt into the nested object. */
 interface GuardRow {
@@ -463,6 +464,22 @@ export class ErpFlowsEditor extends LitElement {
     .muted {
       color: var(--ok-muted, #6b6a63);
     }
+    /* ── A proposal nobody has accepted yet (flows#4) ──────────────────────────────────────────
+       The marker is on the NODE, so the sentence in the banner and the card it is about are the
+       same thing on screen. A list of complaints with nothing to point at is how «check the
+       parameters» becomes «which parameters». */
+    [data-gap] > .card,
+    [data-gap] > .chip {
+      border-color: var(--ok-warning, var(--ion-color-warning, #c98a00));
+      border-style: dashed;
+    }
+    .draft-notes {
+      margin: 0.4rem 0 0;
+      padding-left: 1.1rem;
+    }
+    .draft-notes li {
+      margin: 0.15rem 0;
+    }
   `;
 
   @property({ attribute: false }) client: ModuleClient | null = null;
@@ -471,6 +488,18 @@ export class ErpFlowsEditor extends LitElement {
   @property({ attribute: false }) flow: Flow | null = null;
 
   @property({ attribute: false }) t: Translator = (k) => k;
+
+  /**
+   * Set when this document came from the assistant and **nobody has accepted it yet** (flows#4).
+   *
+   * It changes nothing about how the editor works — the spine is the same spine, and that is the
+   * point: a proposal is reviewed where automations are read, not in a special screen with its own
+   * rules. What it adds is what the evidence says is missing without it. The AI gets the skeleton
+   * right and the parameters wrong (Zapier documents its own Copilot as producing «a basic
+   * outline»), so the parameters it could not resolve are named, next to the steps they belong to,
+   * before anything is created.
+   */
+  @property({ attribute: false }) draft: { notes: string[]; gaps: DraftGap[] } | null = null;
 
   @state() document: FlowDoc = emptyDoc();
 
@@ -738,10 +767,48 @@ export class ErpFlowsEditor extends LitElement {
 
   // ── Rendering ───────────────────────────────────────────────────────────────────────────────
 
+  /** `true` when the assistant left something unresolved on this node (`trigger`, or a step id). */
+  private hasGap(id: string): boolean {
+    return !!this.draft?.gaps.some((g) => g.stepId === id);
+  }
+
+  /**
+   * The banner over a proposal: what it IS, what the assistant could not decide, and what to check.
+   *
+   * The first sentence is the load-bearing one — «it is off, it has no permissions, nothing happens
+   * until you turn it on». An owner reading a screen full of their own business's words needs to
+   * know, before anything else, whether it is already doing something.
+   */
+  private renderDraftBanner() {
+    const draft = this.draft;
+    if (!draft) return nothing;
+    return html`<div class="list" style="margin-bottom:.75rem">
+      <ok-inline-feedback tone="warning" icon="sparkles-outline" data-draft-banner>
+        ${this.t('draft.unconfirmed')}
+      </ok-inline-feedback>
+      ${draft.gaps.length
+        ? html`<div>
+            <span class="eyebrow">${this.t('draft.gapsTitle')}</span>
+            <ul class="draft-notes">
+              ${draft.gaps.map((g) => html`<li>${this.t(g.key, g.params)}</li>`)}
+            </ul>
+          </div>`
+        : nothing}
+      ${draft.notes.length
+        ? html`<div>
+            <span class="eyebrow">${this.t('draft.notesTitle')}</span>
+            <ul class="draft-notes">
+              ${draft.notes.map((n) => html`<li>${n}</li>`)}
+            </ul>
+          </div>`
+        : nothing}
+    </div>`;
+  }
+
   private renderTriggerNode() {
     const trigger = this.trigger;
     const open = this.openStep === 'trigger';
-    return html`<div class="node trigger" data-node="trigger">
+    return html`<div class="node trigger" data-node="trigger" ?data-gap=${this.hasGap('trigger')}>
       <div class="card">
         <div class="row" style="padding:0">
           <button
@@ -877,7 +944,7 @@ export class ErpFlowsEditor extends LitElement {
     const handle = html`<ion-reorder aria-label=${this.t('ui.reorderHint')}>⠿</ion-reorder>`;
 
     if (step.kind === 'delay') {
-      return html`<div class="node segment" data-node=${step.id}>
+      return html`<div class="node segment" data-node=${step.id} ?data-gap=${this.hasGap(step.id)}>
         <div class="chip">
           ${handle}
           <button
@@ -897,7 +964,7 @@ export class ErpFlowsEditor extends LitElement {
     }
 
     if (step.kind === 'condition') {
-      return html`<div class="node guard" data-node=${step.id}>
+      return html`<div class="node guard" data-node=${step.id} ?data-gap=${this.hasGap(step.id)}>
         <div class="chip">
           ${handle}
           <button
@@ -919,7 +986,7 @@ export class ErpFlowsEditor extends LitElement {
       </div>`;
     }
 
-    return html`<div class="node" data-node=${step.id}>
+    return html`<div class="node" data-node=${step.id} ?data-gap=${this.hasGap(step.id)}>
       <div class="card">
         <div class="row" style="padding:0">
           ${handle}
@@ -1782,6 +1849,7 @@ export class ErpFlowsEditor extends LitElement {
               >${this.notice}</ok-inline-feedback
             >`
           : nothing}
+        ${this.renderDraftBanner()}
         ${this.tab === 'editor'
           ? this.renderSpine()
           : this.tab === 'permissions'

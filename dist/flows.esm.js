@@ -1851,7 +1851,7 @@ __decorateClass4([
 ], OkStatusPill.prototype, "size");
 define("ok-status-pill", OkStatusPill);
 
-// modules/.wt-flows-ib/ui/components/erp-flows-value/erp-flows-value.ts
+// modules/.wt-flows-4/ui/components/erp-flows-value/erp-flows-value.ts
 var ErpFlowsValue = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2060,7 +2060,7 @@ __decorateClass([
 ], ErpFlowsValue.prototype, "name", 2);
 define("erp-flows-value", ErpFlowsValue);
 
-// modules/.wt-flows-ib/ui/lib/plain-language.ts
+// modules/.wt-flows-4/ui/lib/plain-language.ts
 var MINUTE = 60;
 var HOUR = 3600;
 var DAY = 86400;
@@ -2203,7 +2203,7 @@ function describeSample(field, t3) {
   return field.truncated ? `${text}\u2026` : text;
 }
 
-// modules/.wt-flows-ib/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
+// modules/.wt-flows-4/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
 var ErpFlowsFieldPicker = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2447,7 +2447,7 @@ __decorateClass([
 ], ErpFlowsFieldPicker.prototype, "t", 2);
 define("erp-flows-field-picker", ErpFlowsFieldPicker);
 
-// modules/.wt-flows-ib/ui/lib/flow-doc.ts
+// modules/.wt-flows-4/ui/lib/flow-doc.ts
 var SCHEMA_VERSION = 1;
 var PATH_ROOTS = ["input", "steps", "event", "secret"];
 var OPERATORS = [
@@ -2510,10 +2510,10 @@ function blankStep(id, kind) {
   }
   return { id, kind, command: "", params: {} };
 }
-function addStep(doc, kind, at) {
+function addStep(doc, kind, at2) {
   const step = blankStep(newStepId(doc), kind);
   const steps = [...doc.steps];
-  steps.splice(at ?? steps.length, 0, step);
+  steps.splice(at2 ?? steps.length, 0, step);
   return { ...doc, steps };
 }
 function removeStep(doc, index) {
@@ -2657,7 +2657,7 @@ function mergeGrants(live, add, revoke) {
   return out;
 }
 
-// modules/.wt-flows-ib/ui/lib/trigger-catalog.ts
+// modules/.wt-flows-4/ui/lib/trigger-catalog.ts
 var TRIGGER_CATALOG = [
   { event: "sale.completed", labelKey: "ui.evSaleCompleted", module: "sales" },
   { event: "sale.voided", labelKey: "ui.evSaleVoided", module: "sales" },
@@ -2724,7 +2724,7 @@ function catalogEntry(event) {
   return TRIGGER_CATALOG.find((e4) => e4.event === event);
 }
 
-// modules/.wt-flows-ib/ui/lib/hub-flows.ts
+// modules/.wt-flows-4/ui/lib/hub-flows.ts
 var CAPABILITY_DENIED = "capability_denied";
 function hasFlows(candidate) {
   const c4 = candidate;
@@ -2740,7 +2740,7 @@ function errorCode(e4) {
   return typeof code === "string" ? code : "";
 }
 
-// modules/.wt-flows-ib/ui/components/erp-flows-editor/erp-flows-editor.ts
+// modules/.wt-flows-4/ui/components/erp-flows-editor/erp-flows-editor.ts
 function guardRows(when) {
   const rows = [];
   for (const [path, ops] of Object.entries(when ?? {})) {
@@ -2773,6 +2773,7 @@ var ErpFlowsEditor = class extends i3 {
     this.client = null;
     this.flow = null;
     this.t = (k2) => k2;
+    this.draft = null;
     this.document = emptyDoc();
     this.name = "";
     this.enabled = true;
@@ -3133,6 +3134,22 @@ var ErpFlowsEditor = class extends i3 {
     .muted {
       color: var(--ok-muted, #6b6a63);
     }
+    /* ── A proposal nobody has accepted yet (flows#4) ──────────────────────────────────────────
+       The marker is on the NODE, so the sentence in the banner and the card it is about are the
+       same thing on screen. A list of complaints with nothing to point at is how «check the
+       parameters» becomes «which parameters». */
+    [data-gap] > .card,
+    [data-gap] > .chip {
+      border-color: var(--ok-warning, var(--ion-color-warning, #c98a00));
+      border-style: dashed;
+    }
+    .draft-notes {
+      margin: 0.4rem 0 0;
+      padding-left: 1.1rem;
+    }
+    .draft-notes li {
+      margin: 0.15rem 0;
+    }
   `;
   }
   willUpdate(changed) {
@@ -3312,10 +3329,42 @@ var ErpFlowsEditor = class extends i3 {
     return entry ? this.t(entry.labelKey) : event ?? "";
   }
   // ── Rendering ───────────────────────────────────────────────────────────────────────────────
+  /** `true` when the assistant left something unresolved on this node (`trigger`, or a step id). */
+  hasGap(id) {
+    return !!this.draft?.gaps.some((g3) => g3.stepId === id);
+  }
+  /**
+   * The banner over a proposal: what it IS, what the assistant could not decide, and what to check.
+   *
+   * The first sentence is the load-bearing one — «it is off, it has no permissions, nothing happens
+   * until you turn it on». An owner reading a screen full of their own business's words needs to
+   * know, before anything else, whether it is already doing something.
+   */
+  renderDraftBanner() {
+    const draft = this.draft;
+    if (!draft) return A;
+    return b2`<div class="list" style="margin-bottom:.75rem">
+      <ok-inline-feedback tone="warning" icon="sparkles-outline" data-draft-banner>
+        ${this.t("draft.unconfirmed")}
+      </ok-inline-feedback>
+      ${draft.gaps.length ? b2`<div>
+            <span class="eyebrow">${this.t("draft.gapsTitle")}</span>
+            <ul class="draft-notes">
+              ${draft.gaps.map((g3) => b2`<li>${this.t(g3.key, g3.params)}</li>`)}
+            </ul>
+          </div>` : A}
+      ${draft.notes.length ? b2`<div>
+            <span class="eyebrow">${this.t("draft.notesTitle")}</span>
+            <ul class="draft-notes">
+              ${draft.notes.map((n5) => b2`<li>${n5}</li>`)}
+            </ul>
+          </div>` : A}
+    </div>`;
+  }
   renderTriggerNode() {
     const trigger = this.trigger;
     const open = this.openStep === "trigger";
-    return b2`<div class="node trigger" data-node="trigger">
+    return b2`<div class="node trigger" data-node="trigger" ?data-gap=${this.hasGap("trigger")}>
       <div class="card">
         <div class="row" style="padding:0">
           <button
@@ -3423,7 +3472,7 @@ var ErpFlowsEditor = class extends i3 {
     </button>`;
     const handle = b2`<ion-reorder aria-label=${this.t("ui.reorderHint")}>⠿</ion-reorder>`;
     if (step.kind === "delay") {
-      return b2`<div class="node segment" data-node=${step.id}>
+      return b2`<div class="node segment" data-node=${step.id} ?data-gap=${this.hasGap(step.id)}>
         <div class="chip">
           ${handle}
           <button
@@ -3442,7 +3491,7 @@ var ErpFlowsEditor = class extends i3 {
       </div>`;
     }
     if (step.kind === "condition") {
-      return b2`<div class="node guard" data-node=${step.id}>
+      return b2`<div class="node guard" data-node=${step.id} ?data-gap=${this.hasGap(step.id)}>
         <div class="chip">
           ${handle}
           <button
@@ -3463,7 +3512,7 @@ var ErpFlowsEditor = class extends i3 {
         ${open ? b2`<div class="panel">${this.renderGuardPanel(step, index)}</div>` : A}
       </div>`;
     }
-    return b2`<div class="node" data-node=${step.id}>
+    return b2`<div class="node" data-node=${step.id} ?data-gap=${this.hasGap(step.id)}>
       <div class="card">
         <div class="row" style="padding:0">
           ${handle}
@@ -4250,6 +4299,7 @@ var ErpFlowsEditor = class extends i3 {
         ${this.notice ? b2`<ok-inline-feedback tone="success" icon="checkmark-circle-outline"
               >${this.notice}</ok-inline-feedback
             >` : A}
+        ${this.renderDraftBanner()}
         ${this.tab === "editor" ? this.renderSpine() : this.tab === "permissions" ? this.renderPermissions() : this.renderHistory()}
       </div>
 
@@ -4276,6 +4326,9 @@ __decorateClass([
 __decorateClass([
   n4({ attribute: false })
 ], ErpFlowsEditor.prototype, "t", 2);
+__decorateClass([
+  n4({ attribute: false })
+], ErpFlowsEditor.prototype, "draft", 2);
 __decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "document", 2);
@@ -4329,7 +4382,7 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "pickerRoot", 2);
 define("erp-flows-editor", ErpFlowsEditor);
 
-// modules/.wt-flows-ib/ui/lib/templates.ts
+// modules/.wt-flows-4/ui/lib/templates.ts
 var SECTORS = ["any", "beauty", "food"];
 var SCHEMA_VERSION2 = 1;
 function run(id, command, params) {
@@ -4495,7 +4548,7 @@ function missingModules(template, known) {
   return out;
 }
 
-// modules/.wt-flows-ib/ui/components/erp-flows-gallery/erp-flows-gallery.ts
+// modules/.wt-flows-4/ui/components/erp-flows-gallery/erp-flows-gallery.ts
 var ErpFlowsGallery = class extends i3 {
   constructor() {
     super(...arguments);
@@ -4848,7 +4901,7 @@ __decorateClass([
 ], ErpFlowsGallery.prototype, "error", 2);
 define("erp-flows-gallery", ErpFlowsGallery);
 
-// modules/.wt-flows-ib/ui/components/erp-flows-guide/erp-flows-guide.ts
+// modules/.wt-flows-4/ui/components/erp-flows-guide/erp-flows-guide.ts
 var ErpFlowsGuide = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5110,7 +5163,7 @@ __decorateClass([
 ], ErpFlowsGuide.prototype, "t", 2);
 define("erp-flows-guide", ErpFlowsGuide);
 
-// modules/.wt-flows-ib/ui/components/erp-flows-approvals/erp-flows-approvals.ts
+// modules/.wt-flows-4/ui/components/erp-flows-approvals/erp-flows-approvals.ts
 var ErpFlowsApprovals = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5325,7 +5378,201 @@ __decorateClass([
 ], ErpFlowsApprovals.prototype, "busy", 2);
 define("erp-flows-approvals", ErpFlowsApprovals);
 
-// modules/.wt-flows-ib/locales/es.json
+// modules/.wt-flows-4/ui/lib/ai-draft.ts
+var DRAFT_STEP_KINDS = ["command", "condition", "delay"];
+function readNotes(raw) {
+  const value = typeof raw === "string" ? safeParse(raw) : raw;
+  if (!Array.isArray(value)) return [];
+  return value.filter((n5) => typeof n5 === "string" && n5.trim() !== "");
+}
+function safeParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return void 0;
+  }
+}
+function readDraft(row) {
+  const id = String(row?.id ?? "");
+  const name = typeof row?.name === "string" ? row.name : "";
+  const raw = typeof row?.definition === "string" ? safeParse(row.definition) : row?.definition;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, problem: { key: "draft.errUnreadable", params: { name } } };
+  }
+  return {
+    ok: true,
+    draft: {
+      id,
+      name,
+      doc: readDoc(raw),
+      notes: readNotes(row?.notes),
+      createdAt: typeof row?.created_at === "string" ? row.created_at : ""
+    }
+  };
+}
+function at(root, path) {
+  let cur = root;
+  for (const key2 of path) {
+    if (!cur || typeof cur !== "object") return void 0;
+    cur = cur[key2];
+  }
+  return cur;
+}
+function enumAt(root, path) {
+  const value = at(root, path);
+  if (!Array.isArray(value)) return void 0;
+  const names = value.filter((v2) => typeof v2 === "string");
+  return names.length ? names : void 0;
+}
+function schemaFacts(schema) {
+  const operators = Object.keys(
+    at(schema, ["$defs", "condition", "additionalProperties", "properties"]) ?? {}
+  );
+  const version = at(schema, ["properties", "schema_version", "const"]);
+  return {
+    schemaVersion: typeof version === "number" ? version : SCHEMA_VERSION,
+    stepKinds: enumAt(schema, ["$defs", "step", "properties", "kind", "enum"]) ?? [
+      "command",
+      "condition",
+      "delay",
+      "http",
+      "ai",
+      "notify"
+    ],
+    triggerKinds: enumAt(schema, ["$defs", "trigger", "properties", "kind", "enum"]) ?? [
+      "event",
+      "cron",
+      "at",
+      "manual"
+    ],
+    operators: operators.length ? operators : [...OPERATORS],
+    // `false` only when the hub explicitly says something else. A schema this module could not
+    // read must not turn the hub#786 check off: absence of proof is not proof of an array.
+    toolsIsObject: at(schema, ["$defs", "step", "properties", "tools", "type"]) !== "array"
+  };
+}
+var TRIGGER_FIELD = {
+  event: "event",
+  cron: "cron",
+  at: "at"
+};
+function contractProblems(doc, facts) {
+  const out = [];
+  if (doc.schema_version !== facts.schemaVersion) {
+    out.push({
+      key: "draft.errVersion",
+      params: { got: doc.schema_version, want: facts.schemaVersion }
+    });
+  }
+  for (const trigger of doc.triggers ?? []) {
+    const kind = String(trigger?.kind ?? "");
+    if (!facts.triggerKinds.includes(kind)) {
+      out.push({ key: "draft.errTriggerKind", params: { kind } });
+      continue;
+    }
+    const field = TRIGGER_FIELD[kind];
+    if (field && !String(trigger[field] ?? "").trim()) {
+      out.push({ key: "draft.errTriggerField", params: { kind, field } });
+    }
+  }
+  const steps = Array.isArray(doc.steps) ? doc.steps : [];
+  if (!steps.length) {
+    out.push({ key: "draft.errNoSteps" });
+  }
+  const seen = /* @__PURE__ */ new Set();
+  for (const step of steps) {
+    const id = String(step?.id ?? "").trim();
+    if (!id) {
+      out.push({ key: "draft.errStepId" });
+    } else if (seen.has(id)) {
+      out.push({ key: "draft.errDuplicateId", params: { id } });
+    } else {
+      seen.add(id);
+    }
+    const kind = String(step?.kind ?? "");
+    if (!facts.stepKinds.includes(kind)) {
+      out.push({ key: "draft.errStepKind", params: { id, kind } });
+      continue;
+    }
+    if (kind === "condition") out.push(...operatorProblems(step, facts));
+    if (kind === "ai" && facts.toolsIsObject && step.tools !== void 0 && step.tools !== null) {
+      if (Array.isArray(step.tools) || typeof step.tools !== "object") {
+        out.push({ key: "draft.errToolsShape", params: { id } });
+      }
+    }
+  }
+  return out;
+}
+function operatorProblems(step, facts) {
+  const out = [];
+  for (const ops of Object.values(step.when ?? {})) {
+    for (const op of Object.keys(ops ?? {})) {
+      if (!facts.operators.includes(op)) {
+        out.push({ key: "draft.errOperator", params: { id: step.id, operator: op } });
+      }
+    }
+  }
+  return out;
+}
+function isBlank(value) {
+  if (value === null || value === void 0) return true;
+  if (typeof value === "string") return value.trim() === "";
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+function danglingRoot(value) {
+  if (typeof value !== "string") return false;
+  const root = value.split(".")[0];
+  return PATH_ROOTS.includes(root) && value.length <= root.length + 1;
+}
+function draftGaps(doc, known) {
+  const out = [];
+  for (const trigger of doc.triggers ?? []) {
+    if (trigger?.kind !== "event") continue;
+    const event = String(trigger.event ?? "").trim();
+    if (!event) {
+      out.push({ stepId: "trigger", key: "draft.gapEventMissing" });
+    } else if (known[event] === false) {
+      out.push({ stepId: "trigger", key: "draft.gapEventUnknown", params: { event } });
+    }
+  }
+  for (const step of Array.isArray(doc.steps) ? doc.steps : []) {
+    const stepId = String(step?.id ?? "");
+    const kind = String(step?.kind ?? "");
+    if (!DRAFT_STEP_KINDS.includes(kind)) {
+      out.push({ stepId, key: "draft.gapNotEditable", params: { kind } });
+      continue;
+    }
+    if (kind === "command") {
+      if (isBlank(step.command)) {
+        out.push({ stepId, key: "draft.gapCommandMissing" });
+      }
+      for (const [name, value] of Object.entries(step.params ?? {})) {
+        if (isBlank(value) || danglingRoot(value)) {
+          out.push({ stepId, key: "draft.gapParamEmpty", params: { name } });
+        }
+      }
+    }
+    if (kind === "condition") {
+      const entries = Object.entries(step.when ?? {});
+      if (!entries.length) out.push({ stepId, key: "draft.gapGuardEmpty" });
+      for (const [path, ops] of entries) {
+        if (!path.trim()) {
+          out.push({ stepId, key: "draft.gapGuardField" });
+          continue;
+        }
+        for (const [op, value] of Object.entries(ops ?? {})) {
+          if (op !== "exists" && isBlank(value)) {
+            out.push({ stepId, key: "draft.gapGuardValue", params: { field: path } });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// modules/.wt-flows-4/locales/es.json
 var es_default = {
   name: "Automatizaciones",
   navigation: {
@@ -5663,10 +5910,42 @@ var es_default = {
     shotGrant: "Escribir una nota en la ficha del cliente",
     shotGrantDone: "A\xF1adir una tarea a tu lista",
     shotWhen: "Ayer, 19:04"
+  },
+  draft: {
+    section: "Propuestas por el asistente",
+    sectionHint: "El asistente las escribi\xF3 cuando le pediste una automatizaci\xF3n. No hace nada hasta que la revises y la actives.",
+    badge: "Borrador",
+    review: "Revisar",
+    dismiss: "Descartar",
+    dismissed: "Descartada.",
+    notesTitle: "Lo que el asistente no ha podido decidir",
+    gapsTitle: "Revisa esto antes de activarla",
+    unconfirmed: "Esto es un borrador que escribi\xF3 el asistente. Est\xE1 apagado, no tiene permisos y no pasa nada hasta que lo actives t\xFA.",
+    createPaused: "Crearla en pausa",
+    created: "Creada y en pausa. Dale permisos y luego act\xEDvala.",
+    askHint: "P\xEDdele una automatizaci\xF3n al asistente \u2014 por ejemplo: \xABcuando alguien reserve por internet, recu\xE9rdame llamarle\xBB.",
+    errUnreadable: "El asistente no ha escrito una automatizaci\xF3n legible para \xAB{name}\xBB. Desc\xE1rtala y vuelve a ped\xEDrsela.",
+    errVersion: "Est\xE1 escrita en el formato de automatizaciones {got} y este hub usa el {want}.",
+    errTriggerKind: "\xAB{kind}\xBB no es una forma de arrancar una automatizaci\xF3n aqu\xED.",
+    errTriggerField: "Un arranque \xAB{kind}\xBB necesita su {field} y no lo trae.",
+    errNoSteps: "No tiene pasos, as\xED que no har\xEDa nada.",
+    errStepId: "Hay un paso sin nombre propio, y los pasos siguientes se leen entre ellos por ese nombre.",
+    errDuplicateId: "Hay dos pasos que se llaman \xAB{id}\xBB.",
+    errStepKind: "El paso \xAB{id}\xBB es un \xAB{kind}\xBB, y este hub no lo ejecuta.",
+    errOperator: "El paso \xAB{id}\xBB compara con \xAB{operator}\xBB, que no es una de las comparaciones que este hub conoce.",
+    errToolsShape: "El paso \xAB{id}\xBB pone lo que el asistente puede usar como una lista suelta; este hub espera las consultas y las acciones por separado.",
+    gapEventMissing: "Di qu\xE9 tiene que pasar para que esto arranque.",
+    gapEventUnknown: "Este hub nunca env\xEDa \xAB{event}\xBB. Elige algo que s\xED ocurra aqu\xED.",
+    gapNotEditable: "Es un paso \xAB{kind}\xBB: el asistente no puede proponer uno. Rev\xEDsalo antes de encender esto.",
+    gapCommandMissing: "Di qu\xE9 tiene que hacer este paso.",
+    gapParamEmpty: "\xAB{name}\xBB est\xE1 vac\xEDo.",
+    gapGuardEmpty: "Esta condici\xF3n no compara nada, as\xED que deja pasar todo.",
+    gapGuardField: "Elige el campo que mira esta condici\xF3n.",
+    gapGuardValue: "Di cu\xE1nto tiene que valer \xAB{field}\xBB."
   }
 };
 
-// modules/.wt-flows-ib/locales/en.json
+// modules/.wt-flows-4/locales/en.json
 var en_default = {
   name: "Automations",
   navigation: {
@@ -6004,10 +6283,42 @@ var en_default = {
     shotGrant: "Write a note in the customer's card",
     shotGrantDone: "Add a job to your list",
     shotWhen: "Yesterday, 19:04"
+  },
+  draft: {
+    section: "Proposed by the assistant",
+    sectionHint: "The assistant wrote these after you asked it for an automation. Nothing runs until you check it and turn it on.",
+    badge: "Draft",
+    review: "Review",
+    dismiss: "Discard",
+    dismissed: "Discarded.",
+    notesTitle: "What the assistant could not work out",
+    gapsTitle: "Check these before turning it on",
+    unconfirmed: "This is a draft the assistant wrote. It is off, it has no permissions, and nothing happens until you turn it on.",
+    createPaused: "Create it, paused",
+    created: "Created and paused. Give it permissions, then turn it on.",
+    askHint: "Ask the assistant for an automation \u2014 for example: \u201Cwhen someone books online, remind me to call them\u201D.",
+    errUnreadable: "The assistant did not write a readable automation for \u201C{name}\u201D. Discard it and ask again.",
+    errVersion: "It was written for automation format {got}; this hub uses {want}.",
+    errTriggerKind: "\u201C{kind}\u201D is not a way an automation can start here.",
+    errTriggerField: "A \u201C{kind}\u201D start needs its {field} and it is missing.",
+    errNoSteps: "It has no steps, so there is nothing for it to do.",
+    errStepId: "A step has no name of its own, and later steps read each other by that name.",
+    errDuplicateId: "Two steps are both called \u201C{id}\u201D.",
+    errStepKind: "Step \u201C{id}\u201D is a \u201C{kind}\u201D, which this hub does not run.",
+    errOperator: "Step \u201C{id}\u201D compares with \u201C{operator}\u201D, which is not one of the comparisons this hub knows.",
+    errToolsShape: "Step \u201C{id}\u201D lists what the assistant may use as a plain list; this hub expects queries and commands named separately.",
+    gapEventMissing: "Say what has to happen for this to start.",
+    gapEventUnknown: "This hub never sends \u201C{event}\u201D. Pick something that happens here.",
+    gapNotEditable: "This is a \u201C{kind}\u201D step: the assistant is not allowed to propose one. Check it before you turn this on.",
+    gapCommandMissing: "Say what this step should do.",
+    gapParamEmpty: "\u201C{name}\u201D is empty.",
+    gapGuardEmpty: "This condition compares nothing, so it lets everything through.",
+    gapGuardField: "Pick the field this condition looks at.",
+    gapGuardValue: "Say what \u201C{field}\u201D has to be."
   }
 };
 
-// modules/.wt-flows-ib/ui/components/erp-flows-app/erp-flows-app.ts
+// modules/.wt-flows-4/ui/components/erp-flows-app/erp-flows-app.ts
 var CATALOG = { es: es_default, en: en_default };
 var ErpFlowsApp = class extends i3 {
   constructor() {
@@ -6022,6 +6333,11 @@ var ErpFlowsApp = class extends i3 {
     this.approvalCount = 0;
     this.error = "";
     this.coreVersion = "";
+    this.tray = [];
+    this.reviewing = null;
+    this.draftReview = null;
+    /** The contract THIS hub serves, read from `GET /api/hub/flows/schema` — never bundled. */
+    this.facts = schemaFacts(void 0);
     this.onLocaleChange = () => this.requestUpdate();
     /** The module catalogue, resolved against the shell's active language (ADR-0055). */
     this.t = (key2, params) => {
@@ -6132,6 +6448,24 @@ var ErpFlowsApp = class extends i3 {
       max-width: 34rem;
       margin: 2rem auto;
     }
+    .hint {
+      font-size: 0.85rem;
+      color: var(--ok-muted, #6b6a63);
+    }
+    /* A proposal's row is NOT a button: the whole card is not tappable, because the two things it
+       can do — review, discard — are decisions, and «I tapped it by accident» must not be one of
+       them. Same shape as a flow row, without the affordance. */
+    .flow > .draft-main {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.15rem;
+      padding: 0.7rem 0.75rem;
+      min-height: 3.25rem;
+      justify-content: center;
+    }
   `;
   }
   async connectedCallback() {
@@ -6154,6 +6488,7 @@ var ErpFlowsApp = class extends i3 {
     try {
       const schema = await client.flows.schema();
       this.coreVersion = schema?.core_version ?? "";
+      this.facts = schemaFacts(schema?.schema);
       if (schema && schema.schema_version !== SCHEMA_VERSION) {
         this.gate = "unsupported";
         return;
@@ -6186,8 +6521,10 @@ var ErpFlowsApp = class extends i3 {
       this.gate = "ready";
     } catch (e4) {
       this.setGateFromError(e4);
+      return;
     }
     await this.countApprovals();
+    await this.loadTray();
   }
   /**
    * How many proposals are waiting on a person.
@@ -6208,6 +6545,129 @@ var ErpFlowsApp = class extends i3 {
     } catch {
       this.approvalCount = 0;
     }
+  }
+  // ── What the assistant proposed (flows#4) ───────────────────────────────────────────────────
+  /**
+   * The proposals waiting for a person, each already judged against this hub's contract.
+   *
+   * Every failure here is SWALLOWED on purpose, and it is worth saying why: this query is the
+   * module's own, and an older published version of this very module does not declare it. A hub
+   * that installed the module last month would answer `query_not_found`, and letting that reach
+   * the gate would replace a working automations screen with an error page over a feature that
+   * simply is not there yet. No tray is a correct screen; a broken one is not.
+   */
+  async loadTray() {
+    const query = this.client?.query;
+    if (typeof query !== "function") return;
+    let rows = [];
+    try {
+      rows = await query.call(this.client, "flows.drafts.list") ?? [];
+    } catch {
+      this.tray = [];
+      return;
+    }
+    this.tray = (Array.isArray(rows) ? rows : []).map((row) => this.judge(row));
+  }
+  /** A stored row becomes something the tray can render: either openable, or refused with reasons. */
+  judge(row) {
+    const read = readDraft(row);
+    const id = String(row?.id ?? "");
+    const name = typeof row?.name === "string" ? row.name : "";
+    if (!read.ok) return { id, name, problems: [read.problem] };
+    const problems = contractProblems(read.draft.doc, this.facts);
+    return problems.length ? { id, name: read.draft.name, problems } : { id, name: read.draft.name, draft: read.draft, problems: [] };
+  }
+  /**
+   * Opens a proposal in the SAME vertical spine everything else opens in — as an automation that
+   * **does not exist yet**.
+   *
+   * `id: ''` is what carries that: the editor's save creates instead of updating, so up to the
+   * moment the owner presses it there is no flow, no trigger and no grant. `enabled: false` is
+   * the belt to that braces — if a later change ever made an unsaved draft savable by accident,
+   * it would still be born paused.
+   */
+  async openDraft(item) {
+    const draft = item.draft;
+    if (!draft) return;
+    this.reviewing = item;
+    this.editing = {
+      id: "",
+      name: draft.name,
+      enabled: false,
+      definition: draft.doc
+    };
+    this.isNew = false;
+    this.editorTab = "editor";
+    this.draftReview = { notes: draft.notes, gaps: draftGaps(draft.doc, {}) };
+    const event = draft.doc.triggers.find((t3) => t3.kind === "event")?.event ?? "";
+    if (!event || !this.client) return;
+    let known = true;
+    try {
+      await this.client.events.shape(event);
+    } catch {
+      known = false;
+    }
+    if (this.reviewing?.id !== item.id) return;
+    this.draftReview = { notes: draft.notes, gaps: draftGaps(draft.doc, { [event]: known }) };
+  }
+  /** Records the decision on the proposal. The row survives as the record that it was made. */
+  async resolveDraft(item, outcome, flowId = "") {
+    this.tray = this.tray.filter((t3) => t3.id !== item.id);
+    const command = this.client?.command;
+    if (typeof command !== "function") return;
+    try {
+      await command.call(this.client, "flows.drafts.resolve", {
+        id: item.id,
+        outcome,
+        flow_id: flowId
+      });
+    } catch (e4) {
+      this.error = e4?.message || this.t("ui.errGeneric");
+    }
+  }
+  /**
+   * The proposals, above the automations that already exist.
+   *
+   * The badge says «Draft» and the sentence under the heading says what that means, because the
+   * one thing an owner must not have to guess is whether the thing on their screen is already
+   * doing something to their business.
+   */
+  renderTray() {
+    if (!this.tray.length) return A;
+    return b2`<div class="list">
+      <h3 class="section">${this.t("draft.section")}</h3>
+      <span class="hint">${this.t("draft.sectionHint")}</span>
+      ${this.tray.map(
+      (item) => b2`<div class="flow" data-draft=${item.id}>
+          <div class="draft-main">
+            <span class="name">${item.name || this.t("ui.unnamed")}</span>
+            ${item.problems.map(
+        (p3) => b2`<span class="when">${this.t(p3.key, p3.params)}</span>`
+      )}
+          </div>
+          <span class="side">
+            <ok-status-pill tone="warning" label=${this.t("draft.badge")}></ok-status-pill>
+            ${item.draft ? b2`<ion-button
+                  size="small"
+                  fill="outline"
+                  data-act="review"
+                  @click=${() => void this.openDraft(item)}
+                >
+                  ${this.t("draft.review")}
+                </ion-button>` : A}
+            <button
+              type="button"
+              class="icon-btn"
+              data-act="dismiss"
+              aria-label=${this.t("draft.dismiss")}
+              @click=${() => void this.resolveDraft(item, "dismissed")}
+            >
+              ×
+            </button>
+          </span>
+        </div>`
+    )}
+    </div>`;
   }
   /**
    * Flips the switch, sending the WHOLE flow.
@@ -6347,15 +6807,22 @@ var ErpFlowsApp = class extends i3 {
         .flow=${this.editing}
         .t=${this.t}
         .tab=${this.editorTab}
+        .draft=${this.draftReview}
         @flows-back=${() => {
         this.editing = null;
         this.isNew = false;
         this.editorTab = "editor";
+        this.reviewing = null;
+        this.draftReview = null;
         void this.reload();
       }}
         @flows-saved=${(e4) => {
         this.editing = e4.detail.flow;
         this.isNew = false;
+        const reviewed = this.reviewing;
+        this.reviewing = null;
+        this.draftReview = null;
+        if (reviewed) void this.resolveDraft(reviewed, "used", e4.detail.flow.id);
       }}
       ></erp-flows-editor>`;
     }
@@ -6387,7 +6854,7 @@ var ErpFlowsApp = class extends i3 {
       this.approvalCount = e4.detail.count;
     }}
             ></erp-flows-approvals>` : A}
-        ${this.renderList()}
+        ${this.renderTray()} ${this.renderList()}
         <erp-flows-gallery
           .client=${this.client}
           .t=${this.t}
@@ -6430,4 +6897,13 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsApp.prototype, "coreVersion", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApp.prototype, "tray", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApp.prototype, "reviewing", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApp.prototype, "draftReview", 2);
 define("erp-flows-app", ErpFlowsApp);

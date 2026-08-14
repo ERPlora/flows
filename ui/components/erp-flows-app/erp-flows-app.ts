@@ -13,6 +13,8 @@ import { describeTrigger } from '../../lib/plain-language';
 import { catalogEntry } from '../../lib/trigger-catalog';
 import { CAPABILITY_DENIED, errorCode, resolveClient } from '../../lib/hub-flows';
 import type { Flow, ModuleClient } from '../../lib/hub-flows';
+import { contractProblems, draftGaps, readDraft, schemaFacts } from '../../lib/ai-draft';
+import type { Draft, DraftGap, DraftProblem, DraftRow, SchemaFacts } from '../../lib/ai-draft';
 // The module's i18n catalogue (ADR-0055): esbuild inlines these JSONs into the bundle and the
 // active language comes from the shell (`erplora.locale`, `erplora:locale-changed`).
 import esLocale from '../../../locales/es.json';
@@ -22,6 +24,22 @@ const CATALOG: Record<string, unknown> = { es: esLocale, en: enLocale };
 
 /** What the whole screen is showing, and why. */
 type Gate = 'loading' | 'ready' | 'unsupported' | 'denied' | 'not_admin' | 'error';
+
+/**
+ * One proposal in the tray, already judged (flows#4).
+ *
+ * `draft` is present only when the row could be read AND meets the contract this hub serves.
+ * `problems` is the other half: a proposal that fails is shown WITH its reason and can only be
+ * discarded. There is deliberately no third state where it opens «mostly fine» — a document
+ * repaired down to the parts we understood is how an automation ends up doing three quarters of
+ * what it says on screen.
+ */
+interface TrayItem {
+  id: string;
+  name: string;
+  draft?: Draft;
+  problems: DraftProblem[];
+}
 
 /**
  * **The automations screen** — the one component `module.json` mounts.
@@ -140,6 +158,24 @@ export class ErpFlowsApp extends LitElement {
       max-width: 34rem;
       margin: 2rem auto;
     }
+    .hint {
+      font-size: 0.85rem;
+      color: var(--ok-muted, #6b6a63);
+    }
+    /* A proposal's row is NOT a button: the whole card is not tappable, because the two things it
+       can do — review, discard — are decisions, and «I tapped it by accident» must not be one of
+       them. Same shape as a flow row, without the affordance. */
+    .flow > .draft-main {
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.15rem;
+      padding: 0.7rem 0.75rem;
+      min-height: 3.25rem;
+      justify-content: center;
+    }
   `;
 
   /**
@@ -167,6 +203,18 @@ export class ErpFlowsApp extends LitElement {
   @state() private error = '';
 
   @state() private coreVersion = '';
+
+  /** What the assistant proposed and nobody has answered yet (flows#4). */
+  @state() private tray: TrayItem[] = [];
+
+  /** The proposal currently open in the editor, so saving it can be recorded against it. */
+  @state() private reviewing: TrayItem | null = null;
+
+  /** What the editor is told to shout about: the assistant's notes and the holes it left. */
+  @state() private draftReview: { notes: string[]; gaps: DraftGap[] } | null = null;
+
+  /** The contract THIS hub serves, read from `GET /api/hub/flows/schema` — never bundled. */
+  private facts: SchemaFacts = schemaFacts(undefined);
 
   private readonly onLocaleChange = (): void => this.requestUpdate();
 
@@ -203,6 +251,7 @@ export class ErpFlowsApp extends LitElement {
     try {
       const schema = await client.flows.schema();
       this.coreVersion = schema?.core_version ?? '';
+      this.facts = schemaFacts(schema?.schema);
       if (schema && schema.schema_version !== SCHEMA_VERSION) {
         // Ahead of its hub, this editor would offer a step the hub refuses to save; behind it, it
         // would hide one that works. Saying which of the two is happening beats a save error.
@@ -239,8 +288,10 @@ export class ErpFlowsApp extends LitElement {
       this.gate = 'ready';
     } catch (e) {
       this.setGateFromError(e);
+      return;
     }
     await this.countApprovals();
+    await this.loadTray();
   }
 
   /**
@@ -264,6 +315,141 @@ export class ErpFlowsApp extends LitElement {
       this.approvalCount = 0;
     }
   }
+
+  // ── What the assistant proposed (flows#4) ───────────────────────────────────────────────────
+
+  /**
+   * The proposals waiting for a person, each already judged against this hub's contract.
+   *
+   * Every failure here is SWALLOWED on purpose, and it is worth saying why: this query is the
+   * module's own, and an older published version of this very module does not declare it. A hub
+   * that installed the module last month would answer `query_not_found`, and letting that reach
+   * the gate would replace a working automations screen with an error page over a feature that
+   * simply is not there yet. No tray is a correct screen; a broken one is not.
+   */
+  private async loadTray(): Promise<void> {
+    const query = this.client?.query;
+    if (typeof query !== 'function') return;
+    let rows: DraftRow[] = [];
+    try {
+      rows = ((await query.call(this.client, 'flows.drafts.list')) as DraftRow[]) ?? [];
+    } catch {
+      this.tray = [];
+      return;
+    }
+    this.tray = (Array.isArray(rows) ? rows : []).map((row) => this.judge(row));
+  }
+
+  /** A stored row becomes something the tray can render: either openable, or refused with reasons. */
+  private judge(row: DraftRow): TrayItem {
+    const read = readDraft(row);
+    const id = String(row?.id ?? '');
+    const name = typeof row?.name === 'string' ? row.name : '';
+    if (!read.ok) return { id, name, problems: [read.problem] };
+    const problems = contractProblems(read.draft.doc, this.facts);
+    return problems.length
+      ? { id, name: read.draft.name, problems }
+      : { id, name: read.draft.name, draft: read.draft, problems: [] };
+  }
+
+  /**
+   * Opens a proposal in the SAME vertical spine everything else opens in — as an automation that
+   * **does not exist yet**.
+   *
+   * `id: ''` is what carries that: the editor's save creates instead of updating, so up to the
+   * moment the owner presses it there is no flow, no trigger and no grant. `enabled: false` is
+   * the belt to that braces — if a later change ever made an unsaved draft savable by accident,
+   * it would still be born paused.
+   */
+  private async openDraft(item: TrayItem): Promise<void> {
+    const draft = item.draft;
+    if (!draft) return;
+    this.reviewing = item;
+    this.editing = {
+      id: '',
+      name: draft.name,
+      enabled: false,
+      definition: draft.doc as unknown as Record<string, unknown>,
+    };
+    this.isNew = false;
+    this.editorTab = 'editor';
+    this.draftReview = { notes: draft.notes, gaps: draftGaps(draft.doc, {}) };
+    // Then ASK the hub about the trigger, and re-judge with the answer. The order matters: the
+    // spine opens now, and «this hub never sends that» appears a moment later — the alternative is
+    // a blank screen for as long as a round-trip, over a check that only ever adds a warning.
+    const event = draft.doc.triggers.find((t) => t.kind === 'event')?.event ?? '';
+    if (!event || !this.client) return;
+    let known = true;
+    try {
+      await this.client.events.shape(event);
+    } catch {
+      known = false;
+    }
+    if (this.reviewing?.id !== item.id) return;
+    this.draftReview = { notes: draft.notes, gaps: draftGaps(draft.doc, { [event]: known }) };
+  }
+
+  /** Records the decision on the proposal. The row survives as the record that it was made. */
+  private async resolveDraft(item: TrayItem, outcome: 'used' | 'dismissed', flowId = ''): Promise<void> {
+    this.tray = this.tray.filter((t) => t.id !== item.id);
+    const command = this.client?.command;
+    if (typeof command !== 'function') return;
+    try {
+      await command.call(this.client, 'flows.drafts.resolve', {
+        id: item.id,
+        outcome,
+        flow_id: flowId,
+      });
+    } catch (e) {
+      this.error = (e as Error)?.message || this.t('ui.errGeneric');
+    }
+  }
+
+  /**
+   * The proposals, above the automations that already exist.
+   *
+   * The badge says «Draft» and the sentence under the heading says what that means, because the
+   * one thing an owner must not have to guess is whether the thing on their screen is already
+   * doing something to their business.
+   */
+  private renderTray() {
+    if (!this.tray.length) return nothing;
+    return html`<div class="list">
+      <h3 class="section">${this.t('draft.section')}</h3>
+      <span class="hint">${this.t('draft.sectionHint')}</span>
+      ${this.tray.map(
+        (item) => html`<div class="flow" data-draft=${item.id}>
+          <div class="draft-main">
+            <span class="name">${item.name || this.t('ui.unnamed')}</span>
+            ${item.problems.map(
+              (p) => html`<span class="when">${this.t(p.key, p.params)}</span>`,
+            )}
+          </div>
+          <span class="side">
+            <ok-status-pill tone="warning" label=${this.t('draft.badge')}></ok-status-pill>
+            ${item.draft
+              ? html`<ion-button
+                  size="small"
+                  fill="outline"
+                  data-act="review"
+                  @click=${() => void this.openDraft(item)}
+                >
+                  ${this.t('draft.review')}
+                </ion-button>`
+              : nothing}
+            <button
+              type="button"
+              class="icon-btn"
+              data-act="dismiss"
+              aria-label=${this.t('draft.dismiss')}
+              @click=${() => void this.resolveDraft(item, 'dismissed')}
+            >
+              ×
+            </button>
+          </span>
+        </div>`,
+      )}
+    </div>`;  }
 
   /**
    * Flips the switch, sending the WHOLE flow.
@@ -412,15 +598,24 @@ export class ErpFlowsApp extends LitElement {
         .flow=${this.editing}
         .t=${this.t}
         .tab=${this.editorTab}
+        .draft=${this.draftReview}
         @flows-back=${() => {
           this.editing = null;
           this.isNew = false;
           this.editorTab = 'editor';
+          this.reviewing = null;
+          this.draftReview = null;
           void this.reload();
         }}
         @flows-saved=${(e: CustomEvent<{ flow: Flow }>) => {
           this.editing = e.detail.flow;
           this.isNew = false;
+          // The proposal did its job: it became this flow. Recording it is what takes it out of
+          // the tray — and the flow it points at is paused and ungranted, like any other new one.
+          const reviewed = this.reviewing;
+          this.reviewing = null;
+          this.draftReview = null;
+          if (reviewed) void this.resolveDraft(reviewed, 'used', e.detail.flow.id);
         }}
       ></erp-flows-editor>`;
     }
@@ -458,7 +653,7 @@ export class ErpFlowsApp extends LitElement {
               }}
             ></erp-flows-approvals>`
           : nothing}
-        ${this.renderList()}
+        ${this.renderTray()} ${this.renderList()}
         <erp-flows-gallery
           .client=${this.client}
           .t=${this.t}

@@ -17,6 +17,11 @@ Al abrirlo **no te encuentras una pantalla en blanco**: hay una galería de auto
 hechas, por sector, que se eligen de una en una. La que elijas se crea **apagada**, con lo que
 tienes que decidir señalado y con los permisos que necesita explicados **antes** de encenderla.
 
+Y si prefieres no montarla tú: **pídesela al asistente**. «Cuando alguien no venga a su cita,
+recuérdame llamarle» y te deja la automatización escrita — pero **como borrador**: aparece arriba
+del todo marcada como *Borrador*, apagada, sin permisos y con lo que no ha sabido decidir señalado.
+No hace nada hasta que la revisas y la enciendes tú.
+
 Y hay una **guía dentro del propio módulo** («¿Cómo funciona esto?», en la galería): qué es una
 automatización, tu primera paso a paso, los permisos, cómo saber si funcionó y —sin adornos— lo
 que todavía no puede hacer.
@@ -86,11 +91,43 @@ módulo se actualiza por su cuenta, así que una copia sería la foto del hub co
 | **Secretos** write-only (`…/flows/secrets`) desde el propio step `http` | ✅ (flows#3) |
 | **Bandeja de aprobación** (`…/approvals`) para los `ai` con `policy: manual` | ✅ (flows#3) |
 | Permisos derivados de los cinco `kind` de grant, patrón de URL incluido | ✅ (flows#3) |
-| Borrador por IA | ⛔ fuera de esta entrega |
+| **Borrador escrito por el asistente** — bandeja de propuestas (flows#4) | ✅ |
+| «Probar» antes de activar | ⛔ fuera de esta entrega |
 
 Un documento escrito por un editor **más nuevo** se abre igual, en solo lectura, y se guarda
 intacto: pintarlo sin un step y después guardarlo es como se borra en silencio una automatización
 que funcionaba.
+
+## El borrador que escribe el asistente (flows#4)
+
+La regla es dura y es de producto: **lo que escribe la IA nace BORRADOR, nunca un flujo activo.**
+Aquí eso no es una política que alguien tenga que recordar, es **estructural**:
+
+- El asistente **no puede** llamar a `/api/hub/flows`: esas rutas exigen sesión local de
+  dueño/admin y rechazan el token de máquina, que es justo lo que lleva un turno del asistente.
+- Lo que sí puede es llamar a un **command de este módulo** — `flows.drafts.propose`, expuesto
+  como tool por su bloque `ai` —, que escribe una fila en `flows_flowdraft`. **Un borrador no es
+  un flujo**: el kernel no lo conoce, `_flow_triggers` no puede apuntarle, `_flow_grants` no puede
+  nombrarlo y ningún tick lo recoge.
+- Se convierte en automatización cuando **una persona** pulsa el botón: entonces el navegador hace
+  `POST /api/hub/flows` con `enabled: false` y **sin grants**, igual que una plantilla.
+
+Lo que la IA propone se juzga **contra el contrato que sirve este hub** (`GET /api/hub/flows/schema`,
+del que se leen las enums: versión, kinds, operadores, y que `tools` es un **objeto**, la trampa de
+hub#786). Un documento que no lo cumpla se **rechaza entero con su frase**: no se abre «a medias».
+
+Y como la evidencia dice que la IA **acierta el esqueleto y falla los parámetros** (Zapier lo
+documenta de su propio Copilot: genera «a basic outline» y deja instrucciones), el borrador se abre
+en la **misma espina vertical** con los huecos marcados en las tarjetas y listados arriba, más lo
+que el propio asistente dice que no ha sabido decidir.
+
+**Lo que el modelo puede PROPONER es más estrecho que lo que una persona puede CONSTRUIR.** Desde
+flows#3 el editor termina los seis kinds, así que el motivo ya no es «el dueño no sabría
+rellenarlo»: el esquema de la tool (`schemas/draft_propose.json`) admite solo `command`,
+`condition` y `delay` porque un `http` llamaría a una URL que no eligió nadie, un `notify` cuesta
+dinero por mensaje (Meta cobra cada WhatsApp) y un `ai` es otra llamada facturada. Los tres son
+justo lo que el D3 del ADR-0283 deja en manual, y una propuesta es la evidencia más floja que hay.
+El dueño los añade a mano, en la misma espina, una pantalla después.
 
 ## Estructura
 
@@ -102,6 +139,10 @@ ui/lib/plain-language.ts    todo lo que el dueño lee, en palabras
 ui/lib/trigger-catalog.ts   los eventos que se ofrecen (el hub es la autoridad, no este fichero)
 ui/lib/hub-flows.ts         la puerta al kernel + los tipos de la superficie
 ui/lib/templates.ts         las plantillas de la galería (documento + huecos + permisos)
+ui/lib/ai-draft.ts          lo que propuso el asistente: leerlo, juzgarlo y señalar sus huecos
+migrations/postgres/        `flows_flowdraft` — las propuestas, que NO son flujos
+commands/ · queries/        `flows.drafts.propose` (tool del asistente) · `.resolve` · `.list`
+schemas/draft_propose.json  el contrato que se le entrega al modelo como parámetros de la tool
 ui/components/erp-flows-app          la pantalla que monta el shell: puerta + lista + galería
 ui/components/erp-flows-gallery      la galería por sector y el panel que explica una plantilla
 ui/components/erp-flows-guide        la guía del dueño (vive aquí porque `docs/` NO viaja en el zip)
@@ -110,8 +151,9 @@ ui/components/erp-flows-value        un valor compuesto de texto y pills
 ui/components/erp-flows-field-picker el selector de datos, con ejemplos REALES
 ```
 
-Sin `queries/`, sin `commands/`, sin `migrations/` y sin handler WASM: es el primer módulo
-puramente de UI de los 25.
+Sin handler WASM. Hasta flows#4 tampoco tenía `queries/`, `commands/` ni `migrations/`: la única
+razón de que ahora los tenga es que el asistente necesita una puerta a la que llamar, y la del
+kernel le está cerrada a propósito.
 
 ## Desarrollo
 

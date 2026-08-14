@@ -10,9 +10,29 @@
 
 ## Fuera de esta entrega (v1)
 
-- **Borrador generado por IA.** El asistente ya conoce las tools de este hub concreto; genera
-  **borrador**, nunca flujo activo (la evidencia dice que acierta el esqueleto y falla los
-  parámetros). Aterrizaría en esta misma lista vertical.
+- **«Probar» antes de activar** contra la última venta/cita real. Probablemente la función de más
+  valor del editor (Brackenbury et al., CHI 2019: la gente **no** predice bien el comportamiento
+  de un flujo con un fallo, ni leyéndolo). Necesita `POST …/run` con un input sintetizado y una
+  vista de «qué habría pasado» que no escriba nada; no cabía aquí.
+
+## Lo que el borrador por IA NO hace (flows#4)
+
+Ya existe —el asistente deja la propuesta en la bandeja— pero con límites que son decisiones, no
+deudas escondidas:
+
+- **No propone `notify`, `http` ni `ai`** — y no es que no se pueda: desde flows#3 el editor los
+  termina. Es que lo que un modelo puede **proponer** es más estrecho que lo que una persona puede
+  **construir**: un `http` llama a una URL que no eligió nadie, un `notify` cuesta dinero por
+  mensaje y un `ai` es otra llamada facturada. Así que «mándale un WhatsApp» sale como la tarea más
+  parecida que sí funciona, y el asistente lo dice en sus notas. El dueño añade el `notify` a mano.
+- **No concede permisos, y no hay forma de que lo haga.** El borrador no es un flujo, así que no
+  hay a qué conceder nada. Los grants se piden después, sobre la automatización ya creada, y los
+  concede una persona.
+- **No comprueba que el command exista.** El hub no tiene endpoint que liste sus commands (sí de
+  eventos, hub#823). Un nombre inventado se rechaza al **guardar** y otra vez al conceder el
+  permiso — tarde, pero nunca en silencio.
+- **No recuerda la conversación.** Cada propuesta es una fila suelta: el asistente no puede
+  «corregir la de antes», escribe otra. Corregir es lo que hace el dueño en la espina.
 
 ## Lo que la galería NO ofrece, y por qué (flows#1)
 
