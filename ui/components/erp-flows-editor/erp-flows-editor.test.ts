@@ -20,7 +20,10 @@ function fakeClient(overrides: Record<string, unknown> = {}) {
       grants: vi.fn(async () => []),
       replaceGrants: vi.fn(async (_id: string, g: unknown) => g),
       run: vi.fn(async () => ({})),
-      runs: vi.fn(async () => ({ data: [] })),
+      // A BARE ARRAY, which is what the SDK really resolves to (its transport ends in
+      // `unwrap(env)`). The old fake answered `{data: []}` — the shape the code wanted — and
+      // that is why an always-empty history tab survived until a real hub showed it.
+      runs: vi.fn(async () => []),
       getRun: vi.fn(async () => ({ run: {}, steps: [], events: [] })),
       schema: vi.fn(async () => ({ schema_version: 1, core_version: '1.0.2', schema: {} })),
       // Write-only by contract: names come back, values never do — there is no `getSecret`, and
