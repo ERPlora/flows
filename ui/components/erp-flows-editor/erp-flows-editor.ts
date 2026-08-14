@@ -55,6 +55,7 @@ import { loadEventCatalog } from '../../lib/event-catalog';
 import type { EventCatalog } from '../../lib/event-catalog';
 import { inputFromShape, simulate } from '../../lib/simulate';
 import type { ConditionResult } from '../../lib/simulate';
+import { classify, needsAttention } from '../../lib/run-trouble';
 import { CAPABILITY_DENIED, errorCode } from '../../lib/hub-flows';
 import type { EventShape, Flow, ModuleClient, SecretInfo } from '../../lib/hub-flows';
 import type { DraftGap } from '../../lib/ai-draft';
@@ -68,6 +69,19 @@ import type { DraftGap } from '../../lib/ai-draft';
 const TABS = ['editor', 'test', 'permissions', 'history'] as const;
 
 type Tab = (typeof TABS)[number];
+
+/**
+ * How long a step took, in whole seconds — or `undefined` when the kernel did not stamp both ends.
+ *
+ * A step still running, or one from a run that died mid-flight, has no finish. Showing «0s» there
+ * would say it was instant, which is the one reading that is definitely wrong.
+ */
+function stepSeconds(step: RunStepRow): number | undefined {
+  const from = Date.parse(String(step.started_at ?? ''));
+  const to = Date.parse(String(step.finished_at ?? ''));
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) return undefined;
+  return Math.round((to - from) / 1000);
+}
 
 /** How a `when`/`filter` object is edited: a flat list of rows, rebuilt into the nested object. */
 interface GuardRow {
@@ -573,6 +587,53 @@ export class ErpFlowsEditor extends LitElement {
       border-radius: var(--ok-radius-sm, 10px);
       background: var(--ok-surface, #fff);
       padding: 0.6rem 0.7rem;
+    }
+    /* What went wrong, and what to do — the two lines that matter, at full size. The kernel's own
+       wording is folded away underneath: it is for support, not for the person reading this. */
+    .trouble {
+      margin-top: 0.4rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      font-size: 0.9rem;
+    }
+    .trouble .why {
+      font-weight: 600;
+    }
+    .trouble .do {
+      color: var(--ok-muted, #6b6a63);
+    }
+    .trouble details {
+      margin-top: 0.2rem;
+    }
+    .trouble summary {
+      cursor: pointer;
+      font-size: 0.82rem;
+      color: var(--ok-muted, #6b6a63);
+      min-height: 1.75rem;
+    }
+    .trouble code {
+      display: block;
+      margin-top: 0.25rem;
+      font-size: 0.8rem;
+      overflow-wrap: anywhere;
+      color: var(--ok-muted, #6b6a63);
+    }
+    h4.section {
+      margin: 0 0 0.15rem;
+      font-size: 0.78rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    [data-attention] {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      padding: 0.6rem;
+      border: 1px solid var(--ok-danger, var(--ion-color-danger, #c0392b));
+      border-radius: var(--ok-radius, 14px);
+      margin-bottom: 0.5rem;
     }
     .run ul {
       margin: 0.5rem 0 0;
@@ -2115,40 +2176,120 @@ export class ErpFlowsEditor extends LitElement {
     });
   }
 
+  /**
+   * What went wrong, said in the owner's words, with the next thing to do — and the kernel's own
+   * sentence folded away underneath.
+   *
+   * The order is the whole point of flows#20: `step s2 failed: flow.grant_denied` is accurate and
+   * useless to the person reading it hours later. A code as the headline is what makes somebody
+   * phone support about a problem they could have fixed in two taps.
+   */
+  private renderTrouble(run: RunRow) {
+    const trouble = classify(run.last_error);
+    if (trouble.kind === 'none') return nothing;
+    return html`<div class="trouble" data-trouble=${trouble.kind}>
+      <!-- An unclassified error is a refusal from the module whose command ran («no hay stock
+           suficiente»). That sentence is the actionable one, so it stays as the headline rather
+           than being replaced by a generic story about a problem we do not understand. -->
+      <span class="why"
+        >${trouble.messageKey
+          ? this.t(trouble.messageKey)
+          : this.t('ui.ranFailed', { reason: trouble.technical })}</span
+      >
+      ${trouble.actionKey
+        ? html`<span class="do">${this.t(trouble.actionKey)}</span>`
+        : nothing}
+      ${trouble.messageKey
+        ? html`<details>
+            <summary>${this.t('ui.troubleTechnical')}</summary>
+            <code>${trouble.technical}</code>
+          </details>`
+        : nothing}
+    </div>`;
+  }
+
+  private renderRun(run: RunRow) {
+    const outcome = runOutcome(run, this.t);
+    const steps = this.runSteps[String(run.id)];
+    const byId = new Map(this.document.steps.map((s) => [s.id, s]));
+    return html`<div class="run" data-run=${String(run.id ?? '')}>
+      <div class="row" style="padding:0;gap:.5rem">
+        <ok-status-pill tone=${outcome.tone} label=${outcome.label}></ok-status-pill>
+        <span class="grow muted">${this.when(run.started_at ?? run.created_at)}</span>
+        <!-- The reference, one tap away. It is the only thread that ties what the owner saw to
+             what a log holds, and reading a uuid down a telephone is not a support channel. -->
+        <button
+          type="button"
+          class="icon-btn"
+          data-act="copy-run"
+          aria-label=${this.t('ui.runCopyId')}
+          title=${this.t('ui.runCopyId')}
+          @click=${() => void this.copyRunId(String(run.id ?? ''))}
+        >
+          ⧉
+        </button>
+        <button
+          type="button"
+          class="icon-btn"
+          data-act="open-run"
+          aria-expanded=${steps ? 'true' : 'false'}
+          @click=${() => void this.toggleRun(String(run.id))}
+        >
+          ▾
+        </button>
+      </div>
+      ${this.renderTrouble(run)}
+      ${steps
+        ? html`<ul>
+            ${steps.map(
+              (s) => html`<li>
+                ${describeRunStep(s, this.t, byId.get(String(s.step_id)))}
+                ${stepSeconds(s) !== undefined
+                  ? html`<span class="muted"> · ${this.t('ui.runTook', { seconds: stepSeconds(s) })}</span>`
+                  : nothing}
+              </li>`,
+            )}
+          </ul>`
+        : nothing}
+    </div>`;
+  }
+
+  /**
+   * The history, with **what is asking for somebody at the top**.
+   *
+   * A failure four rows down a list ordered by time is a failure nobody sees: the runs that worked
+   * are the majority and they push it off the screen. Splitting the list is the cheapest version of
+   * the tray flows#20 asks for that this module can actually build — the kernel's dead-letter has
+   * no method on the flows surface at all (no retry, no discard, nothing to call), so a tray with
+   * buttons would be a drawing of one.
+   */
   private renderHistory() {
     if (!this.runs.length) {
       return html`<div class="list"><span class="muted">${this.t('ui.historyEmpty')}</span></div>`;
     }
-    const byId = new Map(this.document.steps.map((s) => [s.id, s]));
+    const broken = this.runs.filter(needsAttention);
+    const rest = this.runs.filter((run) => !needsAttention(run));
     return html`<div class="list">
-      ${this.runs.map((run) => {
-        const outcome = runOutcome(run, this.t);
-        const steps = this.runSteps[String(run.id)];
-        return html`<div class="run">
-          <div class="row" style="padding:0;gap:.5rem">
-            <ok-status-pill tone=${outcome.tone} label=${outcome.label}></ok-status-pill>
-            <span class="grow muted">${this.when(run.started_at ?? run.created_at)}</span>
-            <button type="button" class="icon-btn" @click=${() => void this.toggleRun(String(run.id))}>
-              ▾
-            </button>
-          </div>
-          <!-- The reason goes on the ROW, not behind the chevron. «Se paró por un error» with the
-               error one click away is the shape of a screen that makes somebody phone support. -->
-          ${run.status === 'failed' && run.last_error
-            ? html`<div class="muted" style="font-size:.85rem">
-                ${this.t('ui.ranFailed', { reason: run.last_error })}
-              </div>`
-            : nothing}
-          ${steps
-            ? html`<ul>
-                ${steps.map(
-                  (s) => html`<li>${describeRunStep(s, this.t, byId.get(String(s.step_id)))}</li>`,
-                )}
-              </ul>`
-            : nothing}
-        </div>`;
-      })}
+      ${broken.length
+        ? html`<div data-attention>
+            <h4 class="section">${this.t('ui.attentionTitle')}</h4>
+            <span class="muted">${this.t('ui.attentionCount', { count: broken.length })}</span>
+            ${broken.map((run) => this.renderRun(run))}
+          </div>`
+        : nothing}
+      ${rest.map((run) => this.renderRun(run))}
     </div>`;
+  }
+
+  /** Puts the run's reference on the clipboard. A refusal costs the copy, never the screen. */
+  private async copyRunId(id: string): Promise<void> {
+    if (!id) return;
+    try {
+      await navigator.clipboard?.writeText(id);
+      this.notice = this.t('ui.runCopied');
+    } catch {
+      // No clipboard (an old webview, a denied permission): the id is still on screen to read.
+    }
   }
 
   render() {

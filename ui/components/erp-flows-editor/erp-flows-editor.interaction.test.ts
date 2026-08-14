@@ -231,3 +231,85 @@ describe('the way back', () => {
     expect(seen).toHaveLength(1);
   });
 });
+
+/**
+ * **The history, read by somebody who was not there when it happened** (flows#20).
+ *
+ * Driven the same way as everything else in this file: the tab is CLICKED, never assigned.
+ */
+describe('a run that stopped on a problem', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  const failing = (lastError: string) => {
+    const client = fakeClient();
+    client.flows.runs = vi.fn(async () => [
+      { id: 'r1', status: 'failed', started_at: '2026-08-14T10:00:00Z', last_error: lastError },
+      { id: 'r2', status: 'done', started_at: '2026-08-14T11:00:00Z' },
+    ]) as never;
+    return client;
+  };
+
+  async function openHistory(client: ReturnType<typeof fakeClient>): Promise<ErpFlowsEditor> {
+    const el = document.createElement('erp-flows-editor') as ErpFlowsEditor;
+    el.client = client as never;
+    el.t = ((k: string) => k) as never;
+    el.flow = {
+      id: 'f1',
+      name: 'Test',
+      enabled: false,
+      definition: { schema_version: 1, triggers: [{ kind: 'manual' }], steps: STEPS },
+    } as never;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    await el.updateComplete;
+    await click(el, tabs(el)[3]);
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    await el.updateComplete;
+    return el;
+  }
+
+  // A failure four rows down a list ordered by time is a failure nobody sees: the runs that worked
+  // are the majority and they push it off the screen.
+  it('is lifted out of the list, above the ones that worked', async () => {
+    const el = await openHistory(failing('step s2 failed: flow.grant_denied'));
+    const attention = el.renderRoot.querySelector('[data-attention]');
+    expect(attention, 'nothing was lifted out').toBeTruthy();
+    expect(attention!.querySelectorAll('[data-run]')).toHaveLength(1);
+    expect(attention!.querySelector('[data-run]')?.getAttribute('data-run')).toBe('r1');
+    // And the healthy one is NOT in there, or the heading is a lie.
+    expect(el.renderRoot.querySelectorAll('[data-run]')).toHaveLength(2);
+  });
+
+  it('says what to do about it, and keeps the code out of the headline', async () => {
+    const el = await openHistory(failing('step s2 failed: flow.grant_denied'));
+    const trouble = el.renderRoot.querySelector('[data-trouble]')!;
+    expect(trouble.getAttribute('data-trouble')).toBe('permission');
+    expect(trouble.querySelector('.why')?.textContent?.trim()).toBe('ui.troublePermission');
+    expect(trouble.querySelector('.do')?.textContent?.trim()).toBe('ui.troubleDoPermission');
+    // The kernel's own words survive — behind a fold, because support asks for them and the owner
+    // does not.
+    expect(trouble.querySelector('details code')?.textContent).toContain('flow.grant_denied');
+  });
+
+  it('leaves a module’s own refusal as the headline, because that one IS the answer', async () => {
+    const el = await openHistory(failing('customers.notes.add: customer 8f2 does not exist'));
+    const trouble = el.renderRoot.querySelector('[data-trouble]')!;
+    expect(trouble.getAttribute('data-trouble')).toBe('unknown');
+    expect(trouble.querySelector('.why')?.textContent).toContain('ui.ranFailed');
+    expect(trouble.querySelector('details')).toBeNull();
+  });
+
+  it('offers the reference, because reading a uuid down a telephone is not a support channel', async () => {
+    const el = await openHistory(failing('flow.grant_denied'));
+    expect(el.renderRoot.querySelector('[data-run="r1"] [data-act="copy-run"]')).toBeTruthy();
+  });
+
+  it('shows nothing lifted out when every run worked', async () => {
+    const client = fakeClient();
+    client.flows.runs = vi.fn(async () => [{ id: 'r2', status: 'done' }]) as never;
+    const el = await openHistory(client);
+    expect(el.renderRoot.querySelector('[data-attention]')).toBeNull();
+    expect(el.renderRoot.querySelectorAll('[data-run]')).toHaveLength(1);
+  });
+});
