@@ -125,8 +125,26 @@ export interface FlowsApi {
   reject?(id: string, body?: Record<string, unknown>): Promise<unknown>;
 }
 
+/**
+ * One line of `GET /api/hub/events` (hub#823): an event this hub can produce, **name only** —
+ * what it carries stays behind `shape()` with the redaction of ADR-0312.
+ */
+export interface EventCatalogEntry {
+  name: string;
+  /** Installed modules declaring they emit it. Empty = only the outbox remembers it. */
+  declared_by?: string[];
+  /** When this hub last emitted it. Absent = never, inside the ninety-day retention window. */
+  last_seen_at?: string;
+}
+
 export interface EventsApi {
   shape(name: string, opts?: { limit?: number }): Promise<EventShape>;
+  /**
+   * The events this hub can fire (hub#823). **Optional on purpose**: a hub older than that method
+   * hands out a client without it, and the trigger picker has to SAY so rather than pretend —
+   * see `event-catalog.ts`.
+   */
+  list?(): Promise<EventCatalogEntry[]>;
 }
 
 export interface ModuleClient {

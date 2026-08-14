@@ -1,21 +1,23 @@
 /**
- * **What an owner can say «when this happens» about.**
+ * **The words for an event — nothing more** (flows#8).
  *
- * The hub has no endpoint that LISTS its events — `GET /api/hub/events/shape?name=…` (hub#715)
- * answers what one event carries, but you have to know its name to ask. So the picker needs
- * candidates from somewhere, and this is that somewhere: a short, hand-written list of the events
- * that matter to the businesses ERPlora sells to (a restaurant and a hair salon), each with words
- * a shop owner recognises.
+ * This file used to be the SOURCE of the «when this happens» dropdown, because the hub had no
+ * endpoint that LISTED its events: `…/events/shape?name=…` (hub#715) tells you what one event
+ * carries, but you must already know its name to ask. Since hub#823 the hub answers
+ * `GET /api/hub/events`, so the dropdown is filled from the hub — see `event-catalog.ts` — and what
+ * is left here is exactly what that endpoint deliberately does not carry: **a phrase a shop owner
+ * recognises**, in place of `appointments.appointment.no_show`.
  *
- * **The hub, not this file, is the authority.** Every entry is checked against the hub before it
- * is offered: the picker asks for its shape and greys out — *with the reason* — anything this hub
- * does not emit, because the module that owns it is not installed. Nothing here can make an event
- * appear that does not exist, and the free-text box next to the list reaches the ones this file
- * has never heard of.
+ * The last paragraph of the old docstring predicted this and it turned out to be right: «when the
+ * hub grows a real catalogue endpoint, this list becomes a set of labels and the picker stops
+ * seeding from it — the shape of the code does not have to change».
  *
- * The names are copied from the `emit` declarations of the 24 published modules, not invented.
- * When the hub grows a real catalogue endpoint, this list becomes a set of labels and the picker
- * stops seeding from it — the shape of the code does not have to change.
+ * **This file can no longer make an event appear or disappear.** An event it has never heard of is
+ * still offered, under its raw name; an event it lists that this hub does not emit is simply never
+ * asked about. Adding an entry here is a translation, not a feature — which is why it is safe for
+ * it to age.
+ *
+ * The names are copied from the `emit` declarations of the published modules, not invented.
  */
 
 export interface TriggerCatalogEntry {
