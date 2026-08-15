@@ -391,6 +391,15 @@
       "taskTitle": "Contestar el mensaje de WhatsApp",
       "taskDescription": "Léelo en la bandeja y contesta. Si acaba en una reserva o en un pedido, mételo como siempre."
     },
+    "fiscalRejected": {
+      "name": "Avísame si una factura no llega a Hacienda",
+      "summary": "Que un registro de facturación falle deja de ser algo de lo que te enteras solo abriendo una pantalla.",
+      "plain": "Cuando una factura no consiga registrarse → dejar una tarea urgente para revisarla.",
+      "blankWho": "Quién la revisa",
+      "blankWhoHint": "Quien arregle las facturas. Si lo dejas sin asignar cae en la lista común, que en un negocio pequeño está bien.",
+      "taskTitle": "Una factura no se ha registrado en Hacienda",
+      "taskDescription": "Abre VeriFactu, busca el registro marcado como fallido y lee el motivo. Puede ser que Hacienda lo haya rechazado o que la conexión no haya llegado a salir. Hasta que se registre, esa factura no está presentada."
+    },
     "cashClose": {
       "name": "Al cerrar la caja, alguien repasa el día",
       "summary": "Se cierra la sesión y el repaso cae en una lista con la tienda todavía ahí.",

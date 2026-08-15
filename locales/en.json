@@ -391,6 +391,15 @@
       "taskTitle": "Answer the WhatsApp message",
       "taskDescription": "Read it in the inbox and answer. If it turns into a booking or an order, put it through as usual."
     },
+    "fiscalRejected": {
+      "name": "Warn me if an invoice does not reach the tax agency",
+      "summary": "A billing record that is refused stops being something you only find out by opening a screen.",
+      "plain": "When an invoice fails to register → leave an urgent task to check it.",
+      "blankWho": "Who checks it",
+      "blankWhoHint": "Whoever fixes invoices. Leave it unassigned and it lands in the shared list, which is fine in a small shop.",
+      "taskTitle": "An invoice has not been registered with the tax agency",
+      "taskDescription": "Open VeriFactu, find the record marked as failed and read the reason. It can be the agency refusing it, or the connection never reaching it. Until it is registered, that invoice is not filed."
+    },
     "cashClose": {
       "name": "When the till closes, somebody checks the day",
       "summary": "The session is closed and the check lands on a list while the shop is still standing there.",
