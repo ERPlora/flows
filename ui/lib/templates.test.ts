@@ -218,6 +218,11 @@ describe('the everyday automations of flows#18', () => {
     ['new-staff-checklist', 'staff.member.created', 'R0 #7 — somebody joins → the checklist'],
     ['whatsapp-answer', 'whatsapp_inbox.message.received', 'R0 #8 — a message arrives → answer it'],
     ['cash-close-review', 'cash_register.session_closed', 'R0 #12 — the till closes → check the day'],
+    [
+      'fiscal-rejection-alert',
+      'verifactu.record.rejected',
+      'R0 #6 — the AEAT said no → somebody finds out without opening a screen',
+    ],
   ])('%s starts on %s', (id, event) => {
     const template = byId(id);
     expect(template, id).toBeTruthy();
@@ -237,9 +242,22 @@ describe('the everyday automations of flows#18', () => {
    * this catalogue has SEEN in a real payload. `no-show-followup` is the precedent — it puts no
    * name in its title because that event carries only an id.
    *
-   * The four added here map none at all, so their text cannot go stale behind a payload change.
+   * The five added here map none at all, so their text cannot go stale behind a payload change.
+   *
+   * `fiscal-rejection-alert` is the one where the temptation was strongest — «revisa la factura
+   * INV-2» reads far better than «revisa la última rechazada» — and it is also where it would have
+   * been most wrong: `verifactu.record.rejected` covers four different failures behind one name
+   * (`reason`), so a sentence naming the AEAT would be a lie the day the wire is what failed. The
+   * mapping can arrive when this catalogue has seen the payload against a hub that really emitted
+   * one, and not before.
    */
-  it.each(['new-staff-checklist', 'whatsapp-answer', 'cash-close-review', 'friday-week-review'])(
+  it.each([
+    'new-staff-checklist',
+    'whatsapp-answer',
+    'cash-close-review',
+    'friday-week-review',
+    'fiscal-rejection-alert',
+  ])(
     '%s maps no payload field it has not seen',
     (id) => {
       const doc = buildTemplate(byId(id)!, t);
@@ -248,7 +266,7 @@ describe('the everyday automations of flows#18', () => {
   );
 
   it('names the module behind every event it waits for, so «install X» can be said', () => {
-    for (const id of ['new-staff-checklist', 'whatsapp-answer', 'cash-close-review', 'friday-week-review']) {
+    for (const id of ['new-staff-checklist', 'whatsapp-answer', 'cash-close-review', 'friday-week-review', 'fiscal-rejection-alert']) {
       const template = byId(id)!;
       expect(template.witnesses.length, id).toBeGreaterThan(0);
       for (const witness of template.witnesses) expect(witness.module, id).toBeTruthy();
@@ -256,7 +274,7 @@ describe('the everyday automations of flows#18', () => {
   });
 
   it('asks for its permissions by name, before the flow exists', () => {
-    for (const id of ['new-staff-checklist', 'whatsapp-answer', 'cash-close-review', 'friday-week-review']) {
+    for (const id of ['new-staff-checklist', 'whatsapp-answer', 'cash-close-review', 'friday-week-review', 'fiscal-rejection-alert']) {
       const grants = templateGrants(byId(id)!, t);
       expect(grants.length, id).toBeGreaterThan(0);
       for (const grant of grants) expect(byId(id)!.grantReasons[grant.value], grant.value).toBeTruthy();

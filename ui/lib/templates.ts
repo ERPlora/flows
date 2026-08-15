@@ -254,6 +254,57 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     }),
   },
   /**
+   * **R0 #6 — the AEAT said no → somebody finds out without opening a screen** (flows#18).
+   *
+   * This is the one place in the product where NOT finding out has consequences before the tax
+   * agency. Until verifactu#42 the module wrote its refusals into its own audit table and nothing
+   * left: a row on a screen somebody has to open, and the bar that closes at two in the morning
+   * does not open it. `verifactu.record.rejected` is that outcome leaving the module.
+   *
+   * **One name, four failures.** The event fires whether the AEAT refused the record, the wire
+   * never carried it, the record could not say which tax agency owns it, or the XML failed the
+   * schema — `reason` tells them apart. That is deliberate on the emitting side (a trigger picks
+   * ONE event, and an owner who only gets the AEAT half has built the silent version of the alarm
+   * they asked for), and it is exactly why this card **maps no field and names no cause**: a task
+   * that says «la AEAT ha rechazado» would be wrong the day the failure was the connection. The
+   * sentence says what is true of all four — an invoice is not registered — and where to look.
+   *
+   * A task and not a message, like every other card here: `notify` needs a channel grant, a
+   * recipient grant and a configured transport, and a recipe that half-works on most hubs is worse
+   * than one that works on all of them. It is also the right shape — a rejection needs somebody to
+   * DO something, and a task is the thing that survives being read at a bad moment.
+   */
+  {
+    id: 'fiscal-rejection-alert',
+    sector: 'any',
+    icon: 'alert-circle-outline',
+    nameKey: 'tpl.fiscalRejected.name',
+    summaryKey: 'tpl.fiscalRejected.summary',
+    plainKey: 'tpl.fiscalRejected.plain',
+    blanks: [
+      { labelKey: 'tpl.fiscalRejected.blankWho', hintKey: 'tpl.fiscalRejected.blankWhoHint' },
+    ],
+    witnesses: [
+      { event: 'verifactu.record.rejected', module: 'verifactu' },
+      { event: 'tasks.task.created', module: 'tasks' },
+    ],
+    grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
+    build: (t) => ({
+      schema_version: SCHEMA_VERSION,
+      triggers: [{ kind: 'event', event: 'verifactu.record.rejected' }],
+      steps: [
+        run('s1', 'tasks.tasks.create', {
+          title: t('tpl.fiscalRejected.taskTitle'),
+          description: t('tpl.fiscalRejected.taskDescription'),
+          // The one card in this gallery that is `urgent` rather than `high`: everything else here
+          // is business that can wait a day, and this is a document the tax agency does not have.
+          priority: 'urgent',
+        }),
+      ],
+    }),
+  },
+
+  /**
    * **R0 #5 — Friday evening → the week gets looked at.**
    *
    * flows#18 asked for the week's takings IN the message. The engine has no read step: v1 runs

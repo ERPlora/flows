@@ -5345,6 +5345,56 @@ var TEMPLATES = [
     })
   },
   /**
+   * **R0 #6 — the AEAT said no → somebody finds out without opening a screen** (flows#18).
+   *
+   * This is the one place in the product where NOT finding out has consequences before the tax
+   * agency. Until verifactu#42 the module wrote its refusals into its own audit table and nothing
+   * left: a row on a screen somebody has to open, and the bar that closes at two in the morning
+   * does not open it. `verifactu.record.rejected` is that outcome leaving the module.
+   *
+   * **One name, four failures.** The event fires whether the AEAT refused the record, the wire
+   * never carried it, the record could not say which tax agency owns it, or the XML failed the
+   * schema — `reason` tells them apart. That is deliberate on the emitting side (a trigger picks
+   * ONE event, and an owner who only gets the AEAT half has built the silent version of the alarm
+   * they asked for), and it is exactly why this card **maps no field and names no cause**: a task
+   * that says «la AEAT ha rechazado» would be wrong the day the failure was the connection. The
+   * sentence says what is true of all four — an invoice is not registered — and where to look.
+   *
+   * A task and not a message, like every other card here: `notify` needs a channel grant, a
+   * recipient grant and a configured transport, and a recipe that half-works on most hubs is worse
+   * than one that works on all of them. It is also the right shape — a rejection needs somebody to
+   * DO something, and a task is the thing that survives being read at a bad moment.
+   */
+  {
+    id: "fiscal-rejection-alert",
+    sector: "any",
+    icon: "alert-circle-outline",
+    nameKey: "tpl.fiscalRejected.name",
+    summaryKey: "tpl.fiscalRejected.summary",
+    plainKey: "tpl.fiscalRejected.plain",
+    blanks: [
+      { labelKey: "tpl.fiscalRejected.blankWho", hintKey: "tpl.fiscalRejected.blankWhoHint" }
+    ],
+    witnesses: [
+      { event: "verifactu.record.rejected", module: "verifactu" },
+      { event: "tasks.task.created", module: "tasks" }
+    ],
+    grantReasons: { "tasks.tasks.create": "tpl.grant.tasksCreate" },
+    build: (t3) => ({
+      schema_version: SCHEMA_VERSION2,
+      triggers: [{ kind: "event", event: "verifactu.record.rejected" }],
+      steps: [
+        run("s1", "tasks.tasks.create", {
+          title: t3("tpl.fiscalRejected.taskTitle"),
+          description: t3("tpl.fiscalRejected.taskDescription"),
+          // The one card in this gallery that is `urgent` rather than `high`: everything else here
+          // is business that can wait a day, and this is a document the tax agency does not have.
+          priority: "urgent"
+        })
+      ]
+    })
+  },
+  /**
    * **R0 #5 — Friday evening → the week gets looked at.**
    *
    * flows#18 asked for the week's takings IN the message. The engine has no read step: v1 runs
@@ -7350,6 +7400,15 @@ var es_default = {
       taskTitle: "Contestar el mensaje de WhatsApp",
       taskDescription: "L\xE9elo en la bandeja y contesta. Si acaba en una reserva o en un pedido, m\xE9telo como siempre."
     },
+    fiscalRejected: {
+      name: "Av\xEDsame si una factura no llega a Hacienda",
+      summary: "Que un registro de facturaci\xF3n falle deja de ser algo de lo que te enteras solo abriendo una pantalla.",
+      plain: "Cuando una factura no consiga registrarse \u2192 dejar una tarea urgente para revisarla.",
+      blankWho: "Qui\xE9n la revisa",
+      blankWhoHint: "Quien arregle las facturas. Si lo dejas sin asignar cae en la lista com\xFAn, que en un negocio peque\xF1o est\xE1 bien.",
+      taskTitle: "Una factura no se ha registrado en Hacienda",
+      taskDescription: "Abre VeriFactu, busca el registro marcado como fallido y lee el motivo. Puede ser que Hacienda lo haya rechazado o que la conexi\xF3n no haya llegado a salir. Hasta que se registre, esa factura no est\xE1 presentada."
+    },
     cashClose: {
       name: "Al cerrar la caja, alguien repasa el d\xEDa",
       summary: "Se cierra la sesi\xF3n y el repaso cae en una lista con la tienda todav\xEDa ah\xED.",
@@ -7850,6 +7909,15 @@ var en_default = {
       blankWhoHint: "One person, not \xABsomebody\xBB. A task everybody can see is a task everybody assumes the other one took.",
       taskTitle: "Answer the WhatsApp message",
       taskDescription: "Read it in the inbox and answer. If it turns into a booking or an order, put it through as usual."
+    },
+    fiscalRejected: {
+      name: "Warn me if an invoice does not reach the tax agency",
+      summary: "A billing record that is refused stops being something you only find out by opening a screen.",
+      plain: "When an invoice fails to register \u2192 leave an urgent task to check it.",
+      blankWho: "Who checks it",
+      blankWhoHint: "Whoever fixes invoices. Leave it unassigned and it lands in the shared list, which is fine in a small shop.",
+      taskTitle: "An invoice has not been registered with the tax agency",
+      taskDescription: "Open VeriFactu, find the record marked as failed and read the reason. It can be the agency refusing it, or the connection never reaching it. Until it is registered, that invoice is not filed."
     },
     cashClose: {
       name: "When the till closes, somebody checks the day",
