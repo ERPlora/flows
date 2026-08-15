@@ -137,6 +137,37 @@ export interface EventCatalogEntry {
   last_seen_at?: string;
 }
 
+/**
+ * One event that never got delivered (`GET /api/hub/events/dead`, hub#660 → hub#953).
+ *
+ * The whole payload travels: an operator deciding between «replay this» and «close it for good» is
+ * deciding ABOUT the payload — it is what tells a lost invoice from noise.
+ */
+export interface DeadEvent {
+  id: string;
+  event_name: string;
+  /** The **emitting** module: who produced the event, not who refused it. */
+  module_id: string;
+  user_id?: string;
+  payload?: unknown;
+  last_error?: string;
+  attempts?: number;
+  depth?: number;
+  created_at?: string;
+  /**
+   * Why the row is terminal, when the answer is not «it burnt its eight attempts» (hub#827).
+   * `''`/absent for an ordinary one; `flow.release_revoked` when the owner withdrew the flow's
+   * authorisation with the message still queued.
+   */
+  failure_kind?: string;
+  /**
+   * Whether a retry can do anything with this row — **decided by the runtime, never guessed here**.
+   * `false` means the screen must not draw the button: retrying a revoked release answered `200`,
+   * reset the attempts and died again for the same reason.
+   */
+  retryable?: boolean;
+}
+
 export interface EventsApi {
   shape(name: string, opts?: { limit?: number }): Promise<EventShape>;
   /**
@@ -145,6 +176,19 @@ export interface EventsApi {
    * see `event-catalog.ts`.
    */
   list?(): Promise<EventCatalogEntry[]>;
+  /**
+   * **The dead-letter queue** (hub#953). Optional for the same reason `list` is, and it matters
+   * more here: a tray that silently shows nothing on an older hub is saying «nothing is wrong»
+   * about a hub that cannot tell you whether anything is wrong. See `erp-flows-dead-letter`.
+   */
+  dead?(): Promise<DeadEvent[]>;
+  deadCount?(): Promise<{ count: number }>;
+  /** Rejects with `flow.release_revoked` when the retry can never work — never a quiet success. */
+  retry?(id: string): Promise<unknown>;
+  /** Closes the row for good. The hub records WHO and WHEN; there is no reason field (hub#955). */
+  discard?(id: string): Promise<unknown>;
+  retryAll?(): Promise<{ retried: number }>;
+  trace?(id: string): Promise<unknown>;
 }
 
 export interface ModuleClient {

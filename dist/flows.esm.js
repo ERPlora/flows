@@ -6311,6 +6311,396 @@ __decorateClass([
 ], ErpFlowsApprovals.prototype, "busy", 2);
 define("erp-flows-approvals", ErpFlowsApprovals);
 
+// modules/flows/ui/components/erp-flows-dead-letter/erp-flows-dead-letter.ts
+var ErpFlowsDeadLetter = class extends i3 {
+  constructor() {
+    super(...arguments);
+    this.client = null;
+    this.t = (k2) => k2;
+    this.rows = [];
+    this.status = "ready";
+    this.error = "";
+    this.confirming = "";
+    this.busy = [];
+    this.notice = "";
+  }
+  static {
+    this.styles = i`
+    :host {
+      display: block;
+      font-family: var(--ok-font, var(--ion-font-family, system-ui), sans-serif);
+      color: var(--ok-text, var(--ion-text-color, #1c1b18));
+    }
+    .list {
+      max-width: 44rem;
+      margin: 0 auto 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .head {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    h3.section {
+      margin: 0;
+      font-size: 0.78rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--ok-muted, #6b6a63);
+      font-weight: 600;
+    }
+    .grow {
+      flex: 1;
+    }
+    .card {
+      background: var(--ok-surface, var(--ion-card-background, #fff));
+      border: 1px solid var(--ok-border, var(--ion-border-color, #d7d5cc));
+      border-radius: var(--ok-radius, 14px);
+      padding: 0.7rem 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .what {
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .why {
+      font-size: 0.9rem;
+      overflow-wrap: anywhere;
+    }
+    .meta {
+      font-size: 0.8rem;
+      color: var(--ok-muted, #6b6a63);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      align-items: center;
+    }
+    code {
+      font-size: 0.8rem;
+      overflow-wrap: anywhere;
+    }
+    /* The payload is the evidence, so it is complete — but it is a machine's words, so it is set
+       apart and scrolls inside its own box instead of pushing the buttons off a phone. */
+    pre {
+      margin: 0;
+      padding: 0.5rem 0.6rem;
+      background: var(--ok-surface-muted, rgba(0, 0, 0, 0.04));
+      border-radius: var(--ok-radius-sm, 10px);
+      font-size: 0.82rem;
+      max-height: 12rem;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    details summary {
+      cursor: pointer;
+      font-size: 0.8rem;
+      color: var(--ok-muted, #6b6a63);
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      align-items: center;
+    }
+    button {
+      font: inherit;
+      cursor: pointer;
+      border-radius: var(--ok-radius-pill, 999px);
+      /* A finger on the counter tablet, not a mouse. */
+      min-height: 2.75rem;
+      padding: 0 1rem;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      background: var(--ok-surface, #fff);
+      color: inherit;
+    }
+    button[data-act='retry'],
+    button[data-act='retry-all'] {
+      border-color: var(--ok-primary, #3880ff);
+      color: var(--ok-primary, #3880ff);
+      font-weight: 600;
+    }
+    button[data-act='discard-confirm'] {
+      border-color: var(--ok-danger, #eb445a);
+      color: var(--ok-danger, #eb445a);
+      font-weight: 600;
+    }
+    button[data-act='copy'] {
+      min-height: 2rem;
+      padding: 0 0.6rem;
+      font-size: 0.8rem;
+    }
+    .muted {
+      color: var(--ok-muted, #6b6a63);
+    }
+  `;
+  }
+  connectedCallback() {
+    super.connectedCallback();
+    void this.load();
+  }
+  /** Public so the screen around it can refresh the tray after a run without remounting it. */
+  async load() {
+    const events = this.client?.events;
+    if (typeof events?.dead !== "function") {
+      this.rows = [];
+      this.status = "unsupported";
+      this.announce();
+      return;
+    }
+    try {
+      const rows = await events.dead();
+      this.rows = Array.isArray(rows) ? rows : [];
+      this.status = "ready";
+      this.error = "";
+    } catch (e4) {
+      this.rows = [];
+      this.status = errorCode(e4) === "capability_denied" ? "denied" : "failed";
+      this.error = e4?.message || this.t("ui.errGeneric");
+    }
+    this.announce();
+  }
+  announce() {
+    this.dispatchEvent(
+      new CustomEvent("flows-dead-count", {
+        detail: { count: this.rows.length },
+        bubbles: true,
+        composed: true
+      })
+    );
+  }
+  /** The rows a retry can actually move — the runtime's verdict, never this screen's guess. */
+  get retryable() {
+    return this.rows.filter((row) => row.retryable !== false);
+  }
+  async retry(row) {
+    const call = this.client?.events?.retry;
+    if (typeof call !== "function" || this.busy.includes(row.id)) return;
+    this.busy = [...this.busy, row.id];
+    this.error = "";
+    try {
+      await call.call(this.client?.events, row.id);
+      this.rows = this.rows.filter((r6) => r6.id !== row.id);
+      this.announce();
+    } catch (e4) {
+      this.error = this.refusal(e4);
+    } finally {
+      this.busy = this.busy.filter((id) => id !== row.id);
+    }
+  }
+  async discard(row) {
+    const call = this.client?.events?.discard;
+    if (typeof call !== "function" || this.busy.includes(row.id)) return;
+    this.busy = [...this.busy, row.id];
+    this.error = "";
+    try {
+      await call.call(this.client?.events, row.id);
+      this.rows = this.rows.filter((r6) => r6.id !== row.id);
+      this.confirming = "";
+      this.announce();
+    } catch (e4) {
+      this.error = this.refusal(e4);
+    } finally {
+      this.busy = this.busy.filter((id) => id !== row.id);
+    }
+  }
+  /**
+   * Every dead-letter of this hub, back in front of the relay at once — the gesture for the case
+   * that produced a queue in the first place: something transient broke (the database blinked, a
+   * module was deactivated mid-flight) and killed several at the same time.
+   *
+   * Offered only when more than one row can actually move, because the endpoint SKIPS the ones that
+   * cannot (hub#827) — a sweep advertised over a queue of one retryable row would promise a
+   * clean-up it does not perform.
+   */
+  async retryAll() {
+    const call = this.client?.events?.retryAll;
+    if (typeof call !== "function" || this.busy.includes("*")) return;
+    this.busy = [...this.busy, "*"];
+    this.error = "";
+    try {
+      const moved = await call.call(this.client?.events);
+      this.notice = this.t("ui.deadRetriedAll", { count: moved?.retried ?? 0 });
+      await this.load();
+    } catch (e4) {
+      this.error = this.refusal(e4);
+    } finally {
+      this.busy = this.busy.filter((id) => id !== "*");
+    }
+  }
+  /** A refusal in words. The revoked release has its own, because its remedy is a different one. */
+  refusal(e4) {
+    if (errorCode(e4) === "flow.release_revoked") return this.t("ui.deadRevoked");
+    if (errorCode(e4) === "capability_denied") return this.t("ui.deadDenied");
+    return e4?.message || this.t("ui.errGeneric");
+  }
+  async copy(id) {
+    if (!id) return;
+    try {
+      await navigator.clipboard?.writeText(id);
+      this.notice = this.t("ui.runCopied");
+    } catch {
+    }
+  }
+  when(iso) {
+    if (!iso) return "";
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return String(iso);
+    return date.toLocaleString(this.client?.locale || "es", {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+  /** The payload as evidence — never trimmed to fit. It is what tells an invoice from noise. */
+  payload(row) {
+    try {
+      return JSON.stringify(row.payload ?? {}, null, 2);
+    } catch {
+      return String(row.payload ?? "");
+    }
+  }
+  renderRow(row) {
+    const trouble = classify(row.last_error);
+    const canRetry = row.retryable !== false;
+    const busy = this.busy.includes(row.id);
+    return b2`<div class="card" data-dead=${row.id}>
+      <span class="what">${this.t("ui.deadWhat", { event: row.event_name })}</span>
+      <span class="why">
+        ${canRetry ? trouble.messageKey ? this.t(trouble.messageKey) : this.t("ui.deadUnexplained") : this.t("ui.deadRevoked")}
+      </span>
+      <!-- What to do next, and for the revoked row that is deliberately NOT «press retry». -->
+      <span class="why muted">
+        ${canRetry ? trouble.actionKey ? this.t(trouble.actionKey) : this.t("ui.deadDoRetry") : this.t("ui.deadDoRevoked")}
+      </span>
+      <pre>${this.payload(row)}</pre>
+      <span class="meta">
+        ${this.t("ui.deadFrom", { module: row.module_id || "\u2014" })} ·
+        ${this.t(row.attempts === 1 ? "ui.deadAttemptsOne" : "ui.deadAttempts", {
+      count: row.attempts ?? 0
+    })}
+        · ${this.when(row.created_at)} ·
+        <code>${row.id}</code>
+        <button type="button" data-act="copy" @click=${() => void this.copy(row.id)}>
+          ${this.t("ui.runCopyId")}
+        </button>
+      </span>
+      ${trouble.technical ? b2`<details>
+            <summary>${this.t("ui.troubleTechnical")}</summary>
+            <pre>${trouble.technical}</pre>
+          </details>` : A}
+      ${this.confirming === row.id ? b2`<div class="actions" data-confirm=${row.id}>
+            <span class="why">${this.t("ui.deadDiscardConfirm")}</span>
+            <!-- Said out loud, because it is what the hub really keeps: who and when, and no
+                 reason (hub#955). Asking for one and dropping it would be worse than not asking. -->
+            <span class="why muted">${this.t("ui.deadDiscardNoReason")}</span>
+            <button
+              type="button"
+              data-act="discard-confirm"
+              ?disabled=${busy}
+              @click=${() => void this.discard(row)}
+            >
+              ${this.t("ui.deadDiscardDo")}
+            </button>
+            <button
+              type="button"
+              data-act="discard-cancel"
+              @click=${() => {
+      this.confirming = "";
+    }}
+            >
+              ${this.t("ui.cancel")}
+            </button>
+          </div>` : b2`<div class="actions">
+            ${canRetry ? b2`<button
+                  type="button"
+                  data-act="retry"
+                  ?disabled=${busy}
+                  @click=${() => void this.retry(row)}
+                >
+                  ${this.t("ui.deadRetry")}
+                </button>` : A}
+            <button
+              type="button"
+              data-act="discard"
+              @click=${() => {
+      this.confirming = row.id;
+    }}
+            >
+              ${this.t("ui.deadDiscard")}
+            </button>
+          </div>`}
+    </div>`;
+  }
+  render() {
+    if (this.status === "unsupported") {
+      return b2`<div class="list">
+        <h3 class="section">${this.t("ui.deadTitle")}</h3>
+        <span class="muted">${this.t("ui.deadUnsupported")}</span>
+      </div>`;
+    }
+    if (this.status === "denied") {
+      return b2`<div class="list">
+        <h3 class="section">${this.t("ui.deadTitle")}</h3>
+        <ok-inline-feedback tone="warning" icon="lock-closed-outline"
+          >${this.t("ui.deadDenied")}</ok-inline-feedback
+        >
+      </div>`;
+    }
+    return b2`<div class="list">
+      <div class="head">
+        <h3 class="section">${this.t("ui.deadTitle")}</h3>
+        <span class="grow"></span>
+        ${this.retryable.length > 1 ? b2`<button
+              type="button"
+              data-act="retry-all"
+              ?disabled=${this.busy.includes("*")}
+              @click=${() => void this.retryAll()}
+            >
+              ${this.t("ui.deadRetryAll", { count: this.retryable.length })}
+            </button>` : A}
+      </div>
+      ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+            >${this.error}</ok-inline-feedback
+          >` : A}
+      ${this.notice ? b2`<span class="muted">${this.notice}</span>` : A}
+      ${this.rows.length ? b2`<span class="muted">${this.t("ui.deadIntro")}</span>` : b2`<span class="muted">${this.t("ui.deadEmpty")}</span>`}
+      ${this.rows.map((row) => this.renderRow(row))}
+    </div>`;
+  }
+};
+__decorateClass([
+  n4({ attribute: false })
+], ErpFlowsDeadLetter.prototype, "client", 2);
+__decorateClass([
+  n4({ attribute: false })
+], ErpFlowsDeadLetter.prototype, "t", 2);
+__decorateClass([
+  r5()
+], ErpFlowsDeadLetter.prototype, "rows", 2);
+__decorateClass([
+  r5()
+], ErpFlowsDeadLetter.prototype, "status", 2);
+__decorateClass([
+  r5()
+], ErpFlowsDeadLetter.prototype, "error", 2);
+__decorateClass([
+  r5()
+], ErpFlowsDeadLetter.prototype, "confirming", 2);
+__decorateClass([
+  r5()
+], ErpFlowsDeadLetter.prototype, "busy", 2);
+__decorateClass([
+  r5()
+], ErpFlowsDeadLetter.prototype, "notice", 2);
+define("erp-flows-dead-letter", ErpFlowsDeadLetter);
+
 // modules/flows/ui/lib/flow-list.ts
 var EMPTY_VIEW = { q: "", state: "all", trigger: "all", sort: "updated" };
 function triggerKindOf(flow) {
@@ -6898,6 +7288,26 @@ var es_default = {
     troubleTechnical: "El texto t\xE9cnico, para soporte",
     runCopyId: "Copiar la referencia",
     runCopied: "Copiada. P\xE9gala si nos preguntas por esta ejecuci\xF3n.",
+    deadTitle: "Necesita tu atenci\xF3n",
+    deadIntro: "Esto no lleg\xF3 a pasar. Decide qu\xE9 hacer con cada uno.",
+    deadEmpty: "No hay nada atascado.",
+    deadUnsupported: "Este hub es m\xE1s antiguo que esta pantalla, as\xED que no puede decirte si algo se ha atascado. Actualizarlo es lo que enciende esto.",
+    deadDenied: "Automatizaciones no tiene permiso para ver lo que se ha atascado. Abre Ajustes \u2192 Permisos y conc\xE9deselo.",
+    deadWhat: "{event} no lleg\xF3 a salir",
+    deadFrom: "de {module}",
+    deadAttempts: "{count} intentos",
+    deadAttemptsOne: "1 intento",
+    deadUnexplained: "Se par\xF3, y lo que hay doblado debajo es todo lo que le contaron al hub sobre el motivo.",
+    deadDoRetry: "Si ya has arreglado lo que lo caus\xF3, vuelve a enviarlo.",
+    deadRevoked: "Le quitaste el permiso que necesitaba mientras segu\xEDa esperando, as\xED que tal cual est\xE1 no puede salir nunca.",
+    deadDoRevoked: "Vuelve a concederlo en Permisos y lanza la automatizaci\xF3n. Reenviar este fallar\xEDa por lo mismo.",
+    deadRetry: "Volver a enviarlo",
+    deadRetryAll: "Volver a enviar los {count}",
+    deadRetriedAll: "{count} reenviados. Si la causa sigue ah\xED, volver\xE1n.",
+    deadDiscard: "Cerrarlo",
+    deadDiscardConfirm: "\xBFCerrarlo para siempre? Deja de contar y ya nadie volver\xE1 a enviarlo.",
+    deadDiscardNoReason: "Guardamos qui\xE9n lo cerr\xF3 y cu\xE1ndo. Todav\xEDa no hay d\xF3nde apuntar por qu\xE9.",
+    deadDiscardDo: "S\xED, cerrarlo",
     runTook: "tard\xF3 {seconds}s"
   },
   tpl: {
@@ -7379,6 +7789,26 @@ var en_default = {
     troubleTechnical: "The technical wording, for support",
     runCopyId: "Copy the reference",
     runCopied: "Copied. Paste it if you ask us about this run.",
+    deadTitle: "Needs your attention",
+    deadIntro: "These never happened. Decide what to do with each one.",
+    deadEmpty: "Nothing is stuck.",
+    deadUnsupported: "This hub is older than this screen, so it cannot tell you whether anything got stuck. Updating it is what turns this on.",
+    deadDenied: "Automations has not been allowed to see what got stuck. Open Settings \u2192 Permissions and allow it.",
+    deadWhat: "{event} never went through",
+    deadFrom: "from {module}",
+    deadAttempts: "{count} tries",
+    deadAttemptsOne: "1 try",
+    deadUnexplained: "It stopped, and what is folded below is everything the hub was told about why.",
+    deadDoRetry: "If you have fixed what caused it, send it again.",
+    deadRevoked: "You took away the permission this needed while it was still waiting, so it can never go out as it stands.",
+    deadDoRevoked: "Allow it again in Permissions and run the automation. Sending this one again would fail for the same reason.",
+    deadRetry: "Send it again",
+    deadRetryAll: "Send all {count} again",
+    deadRetriedAll: "{count} sent again. If the cause is still there they will come back.",
+    deadDiscard: "Close it",
+    deadDiscardConfirm: "Close this for good? It stops counting and nothing will ever send it again.",
+    deadDiscardNoReason: "We record who closed it and when. There is nowhere to write down why yet.",
+    deadDiscardDo: "Yes, close it",
     runTook: "took {seconds}s"
   },
   tpl: {
@@ -7541,6 +7971,9 @@ var ErpFlowsApp = class extends i3 {
     this.editorTab = "editor";
     this.guideOpen = false;
     this.approvalCount = 0;
+    this.deadCount = 0;
+    this.deadDenied = false;
+    this.deadShown = false;
     this.error = "";
     this.coreVersion = "";
     this.tray = [];
@@ -7846,7 +8279,43 @@ var ErpFlowsApp = class extends i3 {
       return;
     }
     await this.countApprovals();
+    await this.countDead();
     await this.loadTray();
+  }
+  /**
+   * **Is anything stuck?** — asked with the CHEAP count (`GET …/dead/count`), never by pulling the
+   * queue down with its payloads just to decide whether a heading appears.
+   *
+   * The tray is mounted only when the answer is not zero, for the same reason the approvals one is:
+   * a box headed «needs your attention» that is empty every day is furniture, and furniture is what
+   * people stop seeing — which is precisely how a lost invoice stays lost.
+   *
+   * Two exceptions to «zero means silence», and both are about not hiding something the owner can
+   * fix or is owed:
+   *
+   * - `capability_denied` — the queue exists and THIS module has not been allowed to read it. That
+   *   is a checkbox in Settings → Permissions, so it gets a line on screen; swallowing it would be
+   *   the module quietly concealing its own missing permission.
+   * - a hub with no such surface at all (older than hub#953) — deliberately silent. There is
+   *   nothing the owner can do, and this module is not published to hubs that old anyway.
+   */
+  async countDead() {
+    const count = this.client?.events?.deadCount;
+    if (typeof count !== "function") {
+      this.deadCount = 0;
+      this.deadDenied = false;
+      return;
+    }
+    try {
+      const answer = await count.call(this.client?.events);
+      this.deadCount = Number(answer?.count) || 0;
+      this.deadDenied = false;
+      if (this.deadCount) this.deadShown = true;
+    } catch (e4) {
+      this.deadCount = 0;
+      this.deadDenied = errorCode(e4) === CAPABILITY_DENIED;
+      if (this.deadDenied) this.deadShown = true;
+    }
   }
   /**
    * How many proposals are waiting on a person.
@@ -8364,6 +8833,13 @@ var ErpFlowsApp = class extends i3 {
       this.approvalCount = e4.detail.count;
     }}
             ></erp-flows-approvals>` : A}
+        ${this.deadShown ? b2`<erp-flows-dead-letter
+              .client=${this.client}
+              .t=${this.t}
+              @flows-dead-count=${(e4) => {
+      this.deadCount = e4.detail.count;
+    }}
+            ></erp-flows-dead-letter>` : A}
         ${this.renderTray()} ${this.renderList()}
         <erp-flows-gallery
           .client=${this.client}
@@ -8401,6 +8877,15 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsApp.prototype, "approvalCount", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApp.prototype, "deadCount", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApp.prototype, "deadDenied", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApp.prototype, "deadShown", 2);
 __decorateClass([
   r5()
 ], ErpFlowsApp.prototype, "error", 2);

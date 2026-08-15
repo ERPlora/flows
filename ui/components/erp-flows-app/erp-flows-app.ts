@@ -8,6 +8,7 @@ import '../erp-flows-editor/erp-flows-editor';
 import '../erp-flows-gallery/erp-flows-gallery';
 import '../erp-flows-guide/erp-flows-guide';
 import '../erp-flows-approvals/erp-flows-approvals';
+import '../erp-flows-dead-letter/erp-flows-dead-letter';
 import { readDoc, SCHEMA_VERSION } from '../../lib/flow-doc';
 import {
   EMPTY_VIEW,
@@ -317,6 +318,22 @@ export class ErpFlowsApp extends LitElement {
   /** Pending approvals. `0` mounts no tray at all — see {@link countApprovals}. */
   @state() private approvalCount = 0;
 
+  /** How many events of this hub never got delivered (flows#20). `0` = no tray at all. */
+  @state() private deadCount = 0;
+
+  /** The queue exists and this module has not been allowed to read it — a fixable refusal. */
+  @state() private deadDenied = false;
+
+  /**
+   * Once the tray has earned its place it KEEPS it for this visit.
+   *
+   * Otherwise clearing the last row would make the tray vanish under the owner's finger, taking
+   * the confirmation of what they just did with it — «did that work?» with nothing left on screen
+   * to answer. What replaces the rows is «nothing is stuck», which is the reassuring version of
+   * empty, and it is gone again next time the screen is opened.
+   */
+  @state() private deadShown = false;
+
   @state() private error = '';
 
   @state() private coreVersion = '';
@@ -420,7 +437,46 @@ export class ErpFlowsApp extends LitElement {
       return;
     }
     await this.countApprovals();
+    await this.countDead();
     await this.loadTray();
+  }
+
+  /**
+   * **Is anything stuck?** — asked with the CHEAP count (`GET …/dead/count`), never by pulling the
+   * queue down with its payloads just to decide whether a heading appears.
+   *
+   * The tray is mounted only when the answer is not zero, for the same reason the approvals one is:
+   * a box headed «needs your attention» that is empty every day is furniture, and furniture is what
+   * people stop seeing — which is precisely how a lost invoice stays lost.
+   *
+   * Two exceptions to «zero means silence», and both are about not hiding something the owner can
+   * fix or is owed:
+   *
+   * - `capability_denied` — the queue exists and THIS module has not been allowed to read it. That
+   *   is a checkbox in Settings → Permissions, so it gets a line on screen; swallowing it would be
+   *   the module quietly concealing its own missing permission.
+   * - a hub with no such surface at all (older than hub#953) — deliberately silent. There is
+   *   nothing the owner can do, and this module is not published to hubs that old anyway.
+   */
+  private async countDead(): Promise<void> {
+    const count = this.client?.events?.deadCount;
+    if (typeof count !== 'function') {
+      this.deadCount = 0;
+      this.deadDenied = false;
+      return;
+    }
+    try {
+      const answer = await count.call(this.client?.events);
+      this.deadCount = Number(answer?.count) || 0;
+      this.deadDenied = false;
+      if (this.deadCount) this.deadShown = true;
+    } catch (e) {
+      this.deadCount = 0;
+      this.deadDenied = errorCode(e) === CAPABILITY_DENIED;
+      if (this.deadDenied) this.deadShown = true;
+      // Any other refusal costs the tray and never the screen: the automations are still listable,
+      // and replacing them with an error over a side dish would be the worse trade.
+    }
   }
 
   /**
@@ -993,6 +1049,15 @@ export class ErpFlowsApp extends LitElement {
                 this.approvalCount = e.detail.count;
               }}
             ></erp-flows-approvals>`
+          : nothing}
+        ${this.deadShown
+          ? html`<erp-flows-dead-letter
+              .client=${this.client}
+              .t=${this.t}
+              @flows-dead-count=${(e: CustomEvent<{ count: number }>) => {
+                this.deadCount = e.detail.count;
+              }}
+            ></erp-flows-dead-letter>`
           : nothing}
         ${this.renderTray()} ${this.renderList()}
         <erp-flows-gallery
