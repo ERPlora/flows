@@ -1,5 +1,6 @@
 {
   "name": "Automatizaciones",
+  "description": "Automatiza el trabajo repetitivo sin programar: recordatorios de citas, avisos de stock bajo y mensajes a clientes que salen solos.",
   "navigation": {
     "automations": {
       "label": "Automatizaciones"
