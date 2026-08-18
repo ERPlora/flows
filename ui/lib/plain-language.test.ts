@@ -201,6 +201,25 @@ describe('what a step does, said once on the card', () => {
     expect(describeStep({ id: 's1', kind: 'notify', channel: 'email' }, t)).toBe('ui.stepNotifyEmpty');
   });
 
+  it('names the read a query step performs, and whether it wants a row or a number (flows#30)', () => {
+    // `first` reads as «looks up X»; `count` reads as «counts X». Both are the deterministic read
+    // of hub#954, and which one it is decides what the next step can use.
+    expect(
+      describeStep({ id: 'w', kind: 'query', query: 'sales.summary', result: 'first' }, t),
+    ).toBe('ui.stepQuery(query=sales.summary)');
+    expect(describeStep({ id: 'w', kind: 'query', query: 'sales.summary', result: 'count' }, t)).toBe(
+      'ui.stepQueryCount(query=sales.summary)',
+    );
+    // No `result` is the kernel's `first`.
+    expect(describeStep({ id: 'w', kind: 'query', query: 'sales.summary' }, t)).toBe(
+      'ui.stepQuery(query=sales.summary)',
+    );
+  });
+
+  it('asks for the read of a query step that has none', () => {
+    expect(describeStep({ id: 'w', kind: 'query', query: '' }, t)).toBe('ui.stepQueryEmpty');
+  });
+
   it('still refuses to pretend about a step from an editor newer than itself', () => {
     // The fallback is not dead code: it is what keeps a document written by a future editor
     // OPENABLE instead of being silently rewritten without the step it could not draw.
@@ -240,6 +259,17 @@ describe('what happened, for somebody who wants to know it worked', () => {
         command: 'tasks.task.create',
       }),
     ).toBe('ui.ranCommand(command=tasks.task.create)');
+  });
+
+  it('says whether a query step FOUND anything — zero rows is the flow working, not failing', () => {
+    // hub#954: 0 rows is not a fault. The run carries on with `found: false`, and a `condition`
+    // decides. History that called that «failed» would send the owner hunting a bug.
+    expect(
+      describeRunStep({ step_id: 'w', kind: 'query', status: 'done', output: { found: true, count: 3 } }, t),
+    ).toBe('ui.ranQueryFound(count=3)');
+    expect(
+      describeRunStep({ step_id: 'w', kind: 'query', status: 'done', output: { found: false, count: 0 } }, t),
+    ).toBe('ui.ranQueryNothing');
   });
 
   it('gives the reason a step failed, because that is the only actionable thing on the screen', () => {

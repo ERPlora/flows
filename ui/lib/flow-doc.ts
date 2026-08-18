@@ -20,8 +20,11 @@ export const SCHEMA_VERSION = 1;
 /** Roots of the mapping language (`def.rs`). `secret.` is legal only inside an `http` step. */
 export const PATH_ROOTS = ['input', 'steps', 'event', 'secret'] as const;
 
-/** The six step kinds the kernel executes. The editor draws three of them (see {@link isSpineKind}). */
-export type StepKind = 'command' | 'condition' | 'delay' | 'http' | 'ai' | 'notify';
+/**
+ * The step kinds the kernel executes — all of them drawn by this editor (see {@link isSpineKind}).
+ * `query` is the deterministic read (hub#954, flows#30): a flow reads without a model in between.
+ */
+export type StepKind = 'command' | 'condition' | 'delay' | 'http' | 'ai' | 'notify' | 'query';
 
 /** The four ways a flow starts. */
 export type TriggerKind = 'event' | 'cron' | 'at' | 'manual';
@@ -83,6 +86,10 @@ export interface Step {
   to?: Recipient;
   template?: string;
   vars?: Record<string, unknown>;
+  /** `query` — `params` is shared with `command`. */
+  query?: string;
+  result?: QueryResult;
+  limit?: number;
   [k: string]: unknown;
 }
 
@@ -98,7 +105,24 @@ export const STEP_KEYS: Readonly<Record<StepKind, readonly string[]>> = {
   http: ['id', 'kind', 'method', 'url', 'headers', 'body', 'timeout'],
   ai: ['id', 'kind', 'prompt', 'tools', 'policy', 'max_iters'],
   notify: ['id', 'kind', 'channel', 'to', 'template', 'vars'],
+  query: ['id', 'kind', 'query', 'params', 'result', 'limit'],
 };
+
+/**
+ * What a `query` step leaves in `steps.<id>` (hub#954). `first` (the kernel's default): the
+ * fields of the first row at the root, plus `found` and `count`. `count`: only those two.
+ * **There is no `rows`** — the mapping language cannot index an array, and the kernel refuses
+ * `result: "rows"` at save rather than accept a step whose output nobody could read.
+ */
+export const QUERY_RESULTS = ['first', 'count'] as const;
+export type QueryResult = (typeof QUERY_RESULTS)[number];
+
+/**
+ * The most rows one `query` step may bring into a run. **Refused above it, not trimmed**
+ * (`flow.limit_out_of_range`, `max_iters`' precedent): a document that says more than it reads is
+ * how a report comes out wrong with nobody noticing.
+ */
+export const MAX_QUERY_ROWS = 200;
 
 /** The methods `def.rs` accepts. `CONNECT`/`TRACE` are absent on purpose: they are tunnels. */
 export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
@@ -217,6 +241,12 @@ function blankStep(id: string, kind: StepKind): Step {
   // default person to write to and a guessed one is the mistake this whole grant exists to stop.
   if (kind === 'notify') {
     return { id, kind, channel: 'email', to: { query: '', params: {}, field: '' }, vars: {} };
+  }
+  // The kernel's own defaults, written out loud: `first` because «read one thing and use its
+  // fields» is what a shop owner means by «look it up», and the ceiling as the limit because the
+  // number is what the hub would apply anyway — showing it is what lets the owner lower it.
+  if (kind === 'query') {
+    return { id, kind, query: '', params: {}, result: 'first', limit: MAX_QUERY_ROWS };
   }
   return { id, kind, command: '', params: {} };
 }
@@ -373,6 +403,11 @@ export function requiredGrants(doc: FlowDoc): Grant[] {
         for (const query of step.tools?.queries ?? []) need('query', query);
         for (const command of step.tools?.commands ?? []) need('command', command);
         break;
+      // The SAME grant kind an ai tool asks for (hub#954 added no permission surface): what
+      // changed is that reading no longer needs a model in between, not who may read.
+      case 'query':
+        need('query', step.query);
+        break;
       // TWO grants, never one. The channel is what it costs (Meta bills every WhatsApp, an email is
       // free); the recipient is who gets written to. Allowing one says nothing about the other.
       case 'notify': {
@@ -466,4 +501,16 @@ export function mergeGrants(live: Grant[], add: Grant[], revoke: Grant[]): Grant
     out.push({ kind: g.kind, value: g.value });
   }
   return out;
+}
+
+/**
+ * The paths a later step can read out of a `query` step, for the panel to SAY so.
+ *
+ * `<field>` stands for whatever columns the read returns — the editor cannot know them without a
+ * round trip, and inventing names would teach paths that resolve to nothing. `rows` is never on
+ * this list, on purpose (see {@link QUERY_RESULTS}).
+ */
+export function queryOutputs(step: Step): string[] {
+  const base = [`steps.${step.id}.found`, `steps.${step.id}.count`];
+  return step.result === 'count' ? base : [...base, `steps.${step.id}.<field>`];
 }

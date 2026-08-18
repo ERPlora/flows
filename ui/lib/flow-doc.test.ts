@@ -16,6 +16,8 @@ import {
   isSpineKind,
   partsToTemplate,
   httpPatternFor,
+  MAX_QUERY_ROWS,
+  queryOutputs,
 } from './flow-doc';
 
 describe('the document a flow is', () => {
@@ -192,11 +194,11 @@ describe('what a flow needs permission to do', () => {
 });
 
 describe('what the spine can draw', () => {
-  it('draws all SIX kinds the kernel executes (flows#3)', () => {
+  it('draws all the kinds the kernel executes (flows#3, flows#30, flows#31)', () => {
     // Until flows#3 the last three opened read-only, which meant the owner could see the step and
-    // not fix it. All six are editable now; anything else is still a document from a newer editor
-    // and must open untouched rather than be rewritten without it.
-    for (const kind of ['command', 'condition', 'delay', 'http', 'ai', 'notify']) {
+    // not fix it. Every kind is editable now; anything else is still a document from a newer
+    // editor and must open untouched rather than be rewritten without it.
+    for (const kind of ['command', 'condition', 'delay', 'http', 'ai', 'notify', 'query']) {
       expect(isSpineKind(kind), kind).toBe(true);
     }
     expect(isSpineKind('whatever-comes-next')).toBe(false);
@@ -243,6 +245,58 @@ describe('a step is born with exactly the keys the kernel allows', () => {
     const step = addStep(emptyDoc(), 'notify').steps[0];
     expect(step.channel).toBe('email');
     expect(step.to).toEqual({ query: '', params: {}, field: '' });
+  });
+});
+
+describe('the `query` step — the deterministic read (hub#954, flows#30)', () => {
+  it('is a kind this editor draws and edits', () => {
+    // Until flows#30 a `query` step opened read-only: the owner could see it and not fix it.
+    expect(isSpineKind('query')).toBe(true);
+  });
+
+  it('is born with exactly the keys the kernel whitelists, and the kernel defaults', () => {
+    // `def.rs`: `id, kind, query, params, result, limit`. `result: first` and `limit: 200` are
+    // the kernel's own defaults, written out loud so the panel shows what will really happen.
+    const step = addStep(emptyDoc(), 'query').steps[0];
+    expect(Object.keys(step).sort()).toEqual(['id', 'kind', 'limit', 'params', 'query', 'result']);
+    expect(step.query).toBe('');
+    expect(step.params).toEqual({});
+    expect(step.result).toBe('first');
+    expect(step.limit).toBe(MAX_QUERY_ROWS);
+  });
+
+  it('caps the rows at the kernel ceiling, which is 200 and refuses rather than trims', () => {
+    expect(MAX_QUERY_ROWS).toBe(200);
+  });
+
+  it('asks for a `query` grant on the read it performs — the same grant an ai tool would', () => {
+    // hub#954 added no permission surface: the step goes through `GrantKind::Query`, exactly like
+    // `tools.queries` of an `ai` step. So the permissions tab derives it the same way.
+    const doc = readDoc({
+      schema_version: 1,
+      steps: [{ id: 'week', kind: 'query', query: 'sales.summary', params: {}, result: 'first' }],
+    });
+    expect(requiredGrants(doc)).toEqual([{ kind: 'query', value: 'sales.summary' }]);
+  });
+
+  it('asks for nothing while the read has no name yet', () => {
+    const doc = readDoc({ schema_version: 1, steps: [{ id: 'q', kind: 'query', query: '  ' }] });
+    expect(requiredGrants(doc)).toEqual([]);
+  });
+
+  it('names what a later step can read out of it — and never `rows`', () => {
+    // `result: first` leaves the row's fields at the root plus `found` and `count`; `count`
+    // leaves only those two. `rows` does not exist in v1: the mapping language cannot index an
+    // array, and offering `steps.week.rows.0.total` would resolve to nothing in silence.
+    expect(queryOutputs({ id: 'week', kind: 'query', query: 'sales.summary', result: 'first' })).toEqual([
+      'steps.week.found',
+      'steps.week.count',
+      'steps.week.<field>',
+    ]);
+    expect(queryOutputs({ id: 'week', kind: 'query', query: 'sales.summary', result: 'count' })).toEqual([
+      'steps.week.found',
+      'steps.week.count',
+    ]);
   });
 });
 

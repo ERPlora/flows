@@ -306,6 +306,13 @@ export function conditionResult(when: Condition | undefined, scope: unknown): Co
         uncertain = true;
         continue;
       }
+      // The output of a step that has not run is unknown for EVERY operator, `exists` included:
+      // whether `steps.week.found` is there depends on the read that did not happen. This is the
+      // `query → condition` pattern of hub#954, and «stops here» about it would be a lie.
+      if (actual === UNKNOWN) {
+        uncertain = true;
+        continue;
+      }
       if (!evalOp(operator, actual, expected)) failed.push({ path, op: operator, expected });
     }
   }
@@ -399,7 +406,9 @@ function stepValues(step: Step, scope: unknown): SimulatedValue[] {
     out.push({ label, text, blank, redacted, ...(unknown ? { unknown } : {}) });
   };
 
-  if (step.kind === 'command') {
+  // A `query` step (hub#954) is shown by what it would READ WITH; what comes back is only known
+  // once it has run, and a later step reading `steps.<id>.found` says so (see `lookup`).
+  if (step.kind === 'command' || step.kind === 'query') {
     for (const [key, value] of Object.entries(step.params ?? {})) add(key, value);
   } else if (step.kind === 'http') {
     add('url', step.url ?? '');

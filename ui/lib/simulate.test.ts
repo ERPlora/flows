@@ -297,6 +297,27 @@ describe('«probar»: what this flow WOULD do, with nothing actually happening',
     expect(out.triggerMatched).toBe(true);
   });
 
+  it('shows the params a query step would read with, resolved — and executes nothing (flows#30)', () => {
+    // A read has no side effects, but «probar» still runs NOTHING: the values it shows are what
+    // the kernel would hand the query. What comes back is only known once it has run, and a
+    // later step reading `steps.<id>.found` says so instead of guessing.
+    const out = simulate(
+      doc([
+        { id: 'w', kind: 'query', query: 'sales.summary', params: { from: '{{input.day}}', to: 'input.day' } },
+        { id: 'g', kind: 'condition', when: { 'steps.w.found': { eq: true } } },
+      ]),
+      { day: '2026-08-18' },
+    );
+    expect(out.steps[0].outcome).toBe('would-run');
+    expect(out.steps[0].values).toEqual([
+      { label: 'from', text: '2026-08-18', blank: false, redacted: false },
+      { label: 'to', text: '2026-08-18', blank: false, redacted: false },
+    ]);
+    // The guard on `found` is UNCERTAIN, not failed: it does not stop the walk.
+    expect(out.steps[1].outcome).toBe('would-run');
+    expect(out.steps[1].condition?.uncertain).toBe(true);
+  });
+
   it('reads a later step as unknown rather than pretending to know its output', () => {
     // `steps.s1.id` is real in the kernel and unknowable here: nothing ran. Calling it a blank
     // would report a bug that is not there.

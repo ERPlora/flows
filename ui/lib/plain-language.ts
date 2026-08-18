@@ -170,6 +170,13 @@ export function describeStep(step: Step, t: Translator): string {
       const key = step.channel === 'whatsapp' ? 'ui.stepNotifyWhatsapp' : 'ui.stepNotifyEmail';
       return t(key, { field: humaniseField(String(field)) });
     }
+    case 'query': {
+      const query = typeof step.query === 'string' ? step.query.trim() : '';
+      if (!query) return t('ui.stepQueryEmpty');
+      // «Looks up» and «counts» are different sentences because they leave different things
+      // behind: a row's fields, or only a number. No `result` is the kernel's `first`.
+      return t(step.result === 'count' ? 'ui.stepQueryCount' : 'ui.stepQuery', { query });
+    }
     default:
       // Not dead code: it is what keeps a document written by a NEWER editor openable, instead of
       // silently rewritten without the step this one could not draw.
@@ -253,6 +260,12 @@ export function describeRunStep(row: RunStepRow, t: Translator, spec?: Step): st
   if (row.kind === 'command') {
     const command = typeof spec?.command === 'string' ? spec.command : '';
     return command ? t('ui.ranCommand', { command }) : t('ui.ranCommandUnnamed');
+  }
+  // Zero rows is the flow WORKING (hub#954): the run carries on with `found: false` and a guard
+  // decides. Said as «found nothing», never as a failure.
+  if (row.kind === 'query') {
+    const output = row.output as { found?: boolean; count?: number } | undefined;
+    return output?.found ? t('ui.ranQueryFound', { count: output.count ?? 0 }) : t('ui.ranQueryNothing');
   }
   return t('ui.ranStep', { kind: row.kind ?? '' });
 }
