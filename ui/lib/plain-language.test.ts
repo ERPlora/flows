@@ -220,6 +220,25 @@ describe('what a step does, said once on the card', () => {
     expect(describeStep({ id: 'w', kind: 'query', query: '' }, t)).toBe('ui.stepQueryEmpty');
   });
 
+  it('reads an approval step as the QUESTION it asks, and who it asks (flows#31)', () => {
+    // The title IS the question — the kernel refuses a step without one. Braces never reach the
+    // card, exactly as for a prompt.
+    expect(
+      describeStep(
+        { id: 'ok', kind: 'approval', title: 'Approve the order of {{steps.po.supplier_name}}?', assignee: { role: 'manager' } },
+        t,
+      ),
+    ).toBe('ui.stepApproval(title=Approve the order of Po › Supplier name?,role=manager)');
+    // No assignee: whoever administers the hub. Said as such, never as an empty role.
+    expect(describeStep({ id: 'ok', kind: 'approval', title: 'Go ahead?' }, t)).toBe(
+      'ui.stepApprovalAdmins(title=Go ahead?)',
+    );
+  });
+
+  it('asks for the question of an approval step that has none', () => {
+    expect(describeStep({ id: 'ok', kind: 'approval', title: '  ' }, t)).toBe('ui.stepApprovalEmpty');
+  });
+
   it('still refuses to pretend about a step from an editor newer than itself', () => {
     // The fallback is not dead code: it is what keeps a document written by a future editor
     // OPENABLE instead of being silently rewritten without the step it could not draw.
@@ -270,6 +289,18 @@ describe('what happened, for somebody who wants to know it worked', () => {
     expect(
       describeRunStep({ step_id: 'w', kind: 'query', status: 'done', output: { found: false, count: 0 } }, t),
     ).toBe('ui.ranQueryNothing');
+  });
+
+  it('says how an approval step was answered — or that it is still waiting (flows#31)', () => {
+    // Three terminal answers and one open state. `expired` is a decided status in the kernel: the
+    // question is closed, not still hanging.
+    const row = (over: Record<string, unknown>) => ({ step_id: 'ok', kind: 'approval', ...over });
+    expect(describeRunStep(row({ status: 'done', output: { decision: 'approved', decided_by: 'hub_user:7' } }), t)).toBe(
+      'ui.ranApprovalApproved',
+    );
+    expect(describeRunStep(row({ status: 'done', output: { decision: 'rejected' } }), t)).toBe('ui.ranApprovalRejected');
+    expect(describeRunStep(row({ status: 'done', output: { decision: 'expired' } }), t)).toBe('ui.ranApprovalExpired');
+    expect(describeRunStep(row({ status: 'running', output: {} }), t)).toBe('ui.ranApprovalWaiting');
   });
 
   it('gives the reason a step failed, because that is the only actionable thing on the screen', () => {

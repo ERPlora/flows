@@ -23,8 +23,17 @@ export const PATH_ROOTS = ['input', 'steps', 'event', 'secret'] as const;
 /**
  * The step kinds the kernel executes — all of them drawn by this editor (see {@link isSpineKind}).
  * `query` is the deterministic read (hub#954, flows#30): a flow reads without a model in between.
+ * `approval` is the pause (hub#950, flows#31): a flow asks a person without a model in between.
  */
-export type StepKind = 'command' | 'condition' | 'delay' | 'http' | 'ai' | 'notify' | 'query';
+export type StepKind =
+  | 'command'
+  | 'condition'
+  | 'delay'
+  | 'http'
+  | 'ai'
+  | 'notify'
+  | 'query'
+  | 'approval';
 
 /** The four ways a flow starts. */
 export type TriggerKind = 'event' | 'cron' | 'at' | 'manual';
@@ -90,6 +99,13 @@ export interface Step {
   query?: string;
   result?: QueryResult;
   limit?: number;
+  /** `approval` */
+  title?: string;
+  summary?: string;
+  assignee?: Assignee;
+  expires_in?: number;
+  on_expire?: ExpiryPolicy;
+  on_reject?: RejectPolicy;
   [k: string]: unknown;
 }
 
@@ -106,7 +122,39 @@ export const STEP_KEYS: Readonly<Record<StepKind, readonly string[]>> = {
   ai: ['id', 'kind', 'prompt', 'tools', 'policy', 'max_iters'],
   notify: ['id', 'kind', 'channel', 'to', 'template', 'vars'],
   query: ['id', 'kind', 'query', 'params', 'result', 'limit'],
+  approval: ['id', 'kind', 'title', 'summary', 'assignee', 'expires_in', 'on_expire', 'on_reject'],
 };
+
+/**
+ * `approval.assignee` — **a role, and there is deliberately no shape in which a person can be
+ * named** (hub#950). Same refusal as a `notify` recipient, for the same reason: a document that
+ * could say «Marta» stops working the day Marta leaves, and the marketplace template that shipped
+ * with it would name somebody else's employee. Absent = whoever administers the hub.
+ */
+export interface Assignee {
+  role: string;
+}
+
+/**
+ * What happens to the RUN when nobody answers in time (`on_expire`), and when somebody says no
+ * (`on_reject`). v1 is LINEAR, and these two are what replaces branching: `continue` plus a
+ * `condition` on `steps.<id>.decision` composes the three outcomes without a fork.
+ */
+export const EXPIRY_POLICIES = ['reject', 'cancel', 'continue'] as const;
+export type ExpiryPolicy = (typeof EXPIRY_POLICIES)[number];
+export const REJECT_POLICIES = ['cancel', 'continue'] as const;
+export type RejectPolicy = (typeof REJECT_POLICIES)[number];
+
+/** How long an `approval` waits when the document does not say: **72 hours**, the tray's TTL. */
+export const DEFAULT_APPROVAL_TTL_SECONDS = 259200;
+
+/**
+ * The most an `approval` may wait: **30 days**. Refused above it, not clamped (`limit`'s and
+ * `max_iters`' precedent): a run parked for longer is a standing authorisation nobody remembers
+ * giving — Power Automate kills the run at ~30 days and leaves the approval orphaned, which is
+ * the #1 complaint of its forums.
+ */
+export const MAX_APPROVAL_TTL_SECONDS = 2592000;
 
 /**
  * What a `query` step leaves in `steps.<id>` (hub#954). `first` (the kernel's default): the
@@ -247,6 +295,21 @@ function blankStep(id: string, kind: StepKind): Step {
   // number is what the hub would apply anyway — showing it is what lets the owner lower it.
   if (kind === 'query') {
     return { id, kind, query: '', params: {}, result: 'first', limit: MAX_QUERY_ROWS };
+  }
+  // The kernel's own defaults, written out loud: 72 h, and the RESTRICTIVE answers — a no ends
+  // the run, silence counts as a no. NO `assignee`: absent means whoever administers the hub,
+  // the one role that always has somebody, and no `command`/`payload`, which the kernel refuses
+  // by name because this step executes nothing.
+  if (kind === 'approval') {
+    return {
+      id,
+      kind,
+      title: '',
+      summary: '',
+      expires_in: DEFAULT_APPROVAL_TTL_SECONDS,
+      on_expire: 'reject',
+      on_reject: 'cancel',
+    };
   }
   return { id, kind, command: '', params: {} };
 }
@@ -513,4 +576,13 @@ export function mergeGrants(live: Grant[], add: Grant[], revoke: Grant[]): Grant
 export function queryOutputs(step: Step): string[] {
   const base = [`steps.${step.id}.found`, `steps.${step.id}.count`];
   return step.result === 'count' ? base : [...base, `steps.${step.id}.<field>`];
+}
+
+/**
+ * The paths a later step can read out of an `approval` step (hub#950): the decision
+ * (`approved|rejected|expired`), who made it, when, and the comment they left. Only reachable
+ * when the run CONTINUES past the step — which is what `on_reject`/`on_expire: continue` are for.
+ */
+export function approvalOutputs(step: Step): string[] {
+  return ['decision', 'decided_by', 'decided_at', 'comment'].map((f) => `steps.${step.id}.${f}`);
 }

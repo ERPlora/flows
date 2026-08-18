@@ -187,6 +187,7 @@ export function schemaFacts(schema: unknown): SchemaFacts {
       'ai',
       'notify',
       'query',
+      'approval',
     ],
     triggerKinds: enumAt(schema, ['$defs', 'trigger', 'properties', 'kind', 'enum']) ?? [
       'event',

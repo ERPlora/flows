@@ -2140,6 +2140,13 @@ function describeStep(step, t3) {
       if (!query) return t3("ui.stepQueryEmpty");
       return t3(step.result === "count" ? "ui.stepQueryCount" : "ui.stepQuery", { query });
     }
+    case "approval": {
+      const title = typeof step.title === "string" ? step.title.trim() : "";
+      if (!title) return t3("ui.stepApprovalEmpty");
+      const role = step.assignee?.role?.trim() ?? "";
+      const question = shorten(inWords(title));
+      return role ? t3("ui.stepApproval", { title: question, role }) : t3("ui.stepApprovalAdmins", { title: question });
+    }
     default:
       return t3("ui.stepUnsupported", { kind: step.kind });
   }
@@ -2200,6 +2207,13 @@ function describeRunStep(row, t3, spec) {
   if (row.kind === "query") {
     const output = row.output;
     return output?.found ? t3("ui.ranQueryFound", { count: output.count ?? 0 }) : t3("ui.ranQueryNothing");
+  }
+  if (row.kind === "approval") {
+    const decision = row.output?.decision;
+    if (decision === "approved") return t3("ui.ranApprovalApproved");
+    if (decision === "rejected") return t3("ui.ranApprovalRejected");
+    if (decision === "expired") return t3("ui.ranApprovalExpired");
+    return t3("ui.ranApprovalWaiting");
   }
   return t3("ui.ranStep", { kind: row.kind ?? "" });
 }
@@ -2483,8 +2497,13 @@ var STEP_KEYS = {
   http: ["id", "kind", "method", "url", "headers", "body", "timeout"],
   ai: ["id", "kind", "prompt", "tools", "policy", "max_iters"],
   notify: ["id", "kind", "channel", "to", "template", "vars"],
-  query: ["id", "kind", "query", "params", "result", "limit"]
+  query: ["id", "kind", "query", "params", "result", "limit"],
+  approval: ["id", "kind", "title", "summary", "assignee", "expires_in", "on_expire", "on_reject"]
 };
+var EXPIRY_POLICIES = ["reject", "cancel", "continue"];
+var REJECT_POLICIES = ["cancel", "continue"];
+var DEFAULT_APPROVAL_TTL_SECONDS = 259200;
+var MAX_APPROVAL_TTL_SECONDS = 2592e3;
 var QUERY_RESULTS = ["first", "count"];
 var MAX_QUERY_ROWS = 200;
 var HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
@@ -2528,6 +2547,17 @@ function blankStep(id, kind) {
   }
   if (kind === "query") {
     return { id, kind, query: "", params: {}, result: "first", limit: MAX_QUERY_ROWS };
+  }
+  if (kind === "approval") {
+    return {
+      id,
+      kind,
+      title: "",
+      summary: "",
+      expires_in: DEFAULT_APPROVAL_TTL_SECONDS,
+      on_expire: "reject",
+      on_reject: "cancel"
+    };
   }
   return { id, kind, command: "", params: {} };
 }
@@ -2690,6 +2720,9 @@ function mergeGrants(live, add, revoke) {
 function queryOutputs(step) {
   const base = [`steps.${step.id}.found`, `steps.${step.id}.count`];
   return step.result === "count" ? base : [...base, `steps.${step.id}.<field>`];
+}
+function approvalOutputs(step) {
+  return ["decision", "decided_by", "decided_at", "comment"].map((f3) => `steps.${step.id}.${f3}`);
 }
 
 // modules/flows/ui/lib/trigger-catalog.ts
@@ -3019,6 +3052,9 @@ function stepValues(step, scope) {
     add("prompt", step.prompt ?? "");
   } else if (step.kind === "notify") {
     for (const [key2, value] of Object.entries(step.vars ?? {})) add(key2, value);
+  } else if (step.kind === "approval") {
+    add("title", step.title ?? "");
+    if (typeof step.summary === "string" && step.summary !== "") add("summary", step.summary);
   }
   return out;
 }
@@ -3055,7 +3091,8 @@ function simulate(doc, input) {
       id: step.id,
       kind: step.kind,
       outcome: "would-run",
-      values: stepValues(step, scope)
+      values: stepValues(step, scope),
+      ...step.kind === "approval" ? { pauses: true } : {}
     });
   }
   return {
@@ -3123,6 +3160,11 @@ function needsAttention(run2) {
 
 // modules/flows/ui/lib/hub-flows.ts
 var CAPABILITY_DENIED = "capability_denied";
+var APPROVAL_EXPIRED = "flow.approval_expired";
+var APPROVAL_ALREADY_DECIDED = "flow.approval_already_decided";
+var APPROVAL_NOT_YOURS = "flow.approval_not_yours";
+var EVENT_APPROVAL_CREATED = "flow.approval.created";
+var EVENT_APPROVAL_EXPIRED = "flow.approval.expired";
 function hasFlows(candidate) {
   const c4 = candidate;
   return !!c4 && typeof c4 === "object" && !!c4.flows && !!c4.events;
@@ -3158,6 +3200,7 @@ function guardRows(when) {
   }
   return rows;
 }
+var BASE_ROLES = ["admin", "manager", "employee"];
 function clamp(value, min, max, fallback) {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, Math.round(value)));
@@ -4185,6 +4228,7 @@ var ErpFlowsEditor = class extends i3 {
     if (step.kind === "ai") return this.renderAiPanel(step, index);
     if (step.kind === "notify") return this.renderNotifyPanel(step, index);
     if (step.kind === "query") return this.renderQueryPanel(step, index);
+    if (step.kind === "approval") return this.renderApprovalPanel(step, index);
     return this.renderCommandPanel(step, index);
   }
   /**
@@ -4808,6 +4852,137 @@ var ErpFlowsEditor = class extends i3 {
       >
     `;
   }
+  /**
+   * **The `approval` step** — the pause (hub#950, flows#31). Until it existed a flow could only
+   * stop and wait for a person by putting an `ai` step in the way: a metered, non-deterministic
+   * call to a model to resolve a yes/no. Now it asks without one.
+   *
+   * What this panel has to get right is what the market got wrong. Power Automate's *Start and
+   * wait for an approval* kills the run at ~30 days and leaves the approval orphaned in the
+   * Action Center — the #1 complaint of its forums — so the wait here is EXPLICIT and capped, and
+   * what happens when it runs out is a choice the owner makes on this screen. And v1 is linear:
+   * the two policies are what replaces branching, so they are explained where they are set.
+   */
+  renderApprovalPanel(step, index) {
+    const role = step.assignee?.role ?? "";
+    const expiresIn = Number(step.expires_in ?? DEFAULT_APPROVAL_TTL_SECONDS);
+    const presets = [3600, 14400, 86400, 259200, 604800, 1209600, MAX_APPROVAL_TTL_SECONDS];
+    const waits = presets.includes(expiresIn) ? presets : [...presets, expiresIn].sort((a3, b3) => a3 - b3);
+    const onReject = String(step.on_reject ?? "cancel");
+    const onExpire = String(step.on_expire ?? "reject");
+    const continues = onReject === "continue" || onExpire === "continue";
+    return b2`
+      ${this.renderValue({
+      field: "title",
+      label: this.t("ui.approvalTitle"),
+      value: step.title ?? "",
+      template: true,
+      onChange: (title) => this.setDoc(patchStep(this.document, index, { title: String(title) }))
+    })}
+      <!-- Templated when the request is CREATED, not when the tray is read: editing the flow
+           later does not change a question already asked. Said here, where the text is typed. -->
+      <span class="hint">${this.t("ui.approvalTitleHint")}</span>
+      ${this.renderValue({
+      field: "summary",
+      label: this.t("ui.approvalSummary"),
+      value: step.summary ?? "",
+      template: true,
+      onChange: (summary) => this.setDoc(patchStep(this.document, index, { summary: String(summary) }))
+    })}
+
+      <div class="field">
+        <label for="ar-${step.id}">${this.t("ui.approvalAssignee")}</label>
+        <!-- A ROLE, and there is no box in which a person can be named — that absence is the
+             guarantee (hub#950): a document that could say «Marta» stops working the day Marta
+             leaves. The base roles are offered; a role a module declares can still be typed. -->
+        <input
+          id="ar-${step.id}"
+          data-field="assignee-role"
+          type="text"
+          list="roles-${step.id}"
+          placeholder=${this.t("ui.approvalAssigneeAdmins")}
+          .value=${role}
+          @change=${(e4) => {
+      const next = e4.target.value.trim();
+      const { assignee: _dropped, ...rest } = this.document.steps[index];
+      const patched = next ? { ...rest, assignee: { role: next } } : rest;
+      this.setDoc({
+        ...this.document,
+        steps: this.document.steps.map((s4, i4) => i4 === index ? patched : s4)
+      });
+    }}
+        />
+        <datalist id="roles-${step.id}" data-field="roles">
+          ${BASE_ROLES.map((r6) => b2`<option value=${r6}></option>`)}
+        </datalist>
+        <span class="hint">${this.t("ui.approvalAssigneeHint")}</span>
+      </div>
+
+      <div class="field">
+        <label for="ae-${step.id}">${this.t("ui.approvalExpiresIn")}</label>
+        <select
+          id="ae-${step.id}"
+          data-field="expires-in"
+          .value=${String(expiresIn)}
+          @change=${(e4) => this.setDoc(
+      patchStep(this.document, index, {
+        expires_in: clamp(
+          Number(e4.target.value),
+          1,
+          MAX_APPROVAL_TTL_SECONDS,
+          DEFAULT_APPROVAL_TTL_SECONDS
+        )
+      })
+    )}
+        >
+          ${waits.map((w2) => option(String(w2), describeDelay(w2, this.t), String(expiresIn)))}
+        </select>
+        <span class="hint">${this.t("ui.approvalExpiresInHint")}</span>
+      </div>
+
+      <div class="param-row">
+        <div class="field">
+          <label for="aj-${step.id}">${this.t("ui.approvalOnReject")}</label>
+          <select
+            id="aj-${step.id}"
+            data-field="on-reject"
+            .value=${onReject}
+            @change=${(e4) => this.setDoc(
+      patchStep(this.document, index, {
+        on_reject: e4.target.value
+      })
+    )}
+          >
+            ${REJECT_POLICIES.map((p3) => option(p3, this.t(`ui.approvalOnReject_${p3}`), onReject))}
+          </select>
+        </div>
+        <div class="field">
+          <label for="ax-${step.id}">${this.t("ui.approvalOnExpire")}</label>
+          <select
+            id="ax-${step.id}"
+            data-field="on-expire"
+            .value=${onExpire}
+            @change=${(e4) => this.setDoc(
+      patchStep(this.document, index, {
+        on_expire: e4.target.value
+      })
+    )}
+          >
+            ${EXPIRY_POLICIES.map((p3) => option(p3, this.t(`ui.approvalOnExpire_${p3}`), onExpire))}
+          </select>
+        </div>
+      </div>
+      <!-- v1 is LINEAR and this pair is what replaces branching: continue + a guard on the
+           decision composes approved / rejected / expired without a fork. It is said the moment
+           «continue» is picked, which is when it becomes true. -->
+      ${continues ? b2`<ok-inline-feedback tone="info" icon="git-branch-outline"
+            >${this.t("ui.approvalContinueHint", { path: `steps.${step.id}.decision` })}</ok-inline-feedback
+          >` : A}
+      <span class="hint" data-field="approval-outputs"
+        >${this.t("ui.approvalOutputsHint", { paths: approvalOutputs(step).join(", ") })}</span
+      >
+    `;
+  }
   /** The `params` of a `command` or a `query` step: a name and a composed value per row. */
   renderParams(step, index) {
     const params = Object.entries(step.params ?? {});
@@ -4874,6 +5049,7 @@ var ErpFlowsEditor = class extends i3 {
       ["command", "ui.addCommand"],
       ["query", "ui.addQuery"],
       ["condition", "ui.addGuard"],
+      ["approval", "ui.addApproval"],
       ["delay", "ui.addDelay"],
       ["notify", "ui.addNotify"],
       ["http", "ui.addHttp"],
@@ -4969,6 +5145,7 @@ var ErpFlowsEditor = class extends i3 {
           <span class="title">${spec ? describeStep(spec, this.t) : step.kind}</span>
           ${step.outcome === "stops-here" ? b2`<span class="verdict">${this.t("ui.testStoppedIsWorking")}</span>` : A}
           ${step.outcome === "not-reached" ? b2`<span class="muted">${this.t("ui.testNotReached")}</span>` : A}
+          ${step.pauses ? b2`<span class="verdict">${this.t("ui.testPausesHere")}</span>` : A}
           ${step.condition?.uncertain ? b2`<span class="verdict">${this.t("ui.testUncertain")}</span>` : A}
           ${step.outcome === "stops-here" ? this.renderFailedClauses(step.condition) : A}
           ${step.values.map(
@@ -6267,6 +6444,8 @@ var ErpFlowsApprovals = class extends i3 {
     this.rows = [];
     this.error = "";
     this.busy = [];
+    this.comments = {};
+    this.unsubscribes = [];
   }
   static {
     this.styles = i`
@@ -6349,11 +6528,39 @@ var ErpFlowsApprovals = class extends i3 {
     .muted {
       color: var(--ok-muted, #6b6a63);
     }
+    .question {
+      font-weight: 600;
+      font-size: 1rem;
+      overflow-wrap: anywhere;
+    }
+    textarea {
+      font: inherit;
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 2.75rem;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-sm, 10px);
+      background: var(--ok-surface, #fff);
+      color: inherit;
+      resize: vertical;
+    }
   `;
   }
   connectedCallback() {
     super.connectedCallback();
     void this.load();
+    const subscribe = this.client?.subscribe;
+    if (typeof subscribe === "function") {
+      for (const event of [EVENT_APPROVAL_CREATED, EVENT_APPROVAL_EXPIRED]) {
+        this.unsubscribes.push(subscribe.call(this.client, event, () => void this.load()));
+      }
+    }
+  }
+  disconnectedCallback() {
+    for (const off of this.unsubscribes) off();
+    this.unsubscribes = [];
+    super.disconnectedCallback();
   }
   /** Public so the shell can refresh the tray after a run without remounting it. */
   async load() {
@@ -6387,11 +6594,15 @@ var ErpFlowsApprovals = class extends i3 {
     this.busy = [...this.busy, row.id];
     this.error = "";
     try {
-      await call.call(this.client?.flows, row.id);
+      const comment = (this.comments[row.id] ?? "").trim();
+      if (comment) await call.call(this.client?.flows, row.id, { comment });
+      else await call.call(this.client?.flows, row.id);
       this.rows = this.rows.filter((r6) => r6.id !== row.id);
+      const { [row.id]: _sent, ...rest } = this.comments;
+      this.comments = rest;
       this.announce();
     } catch (e4) {
-      this.error = e4?.message || this.t("ui.errGeneric");
+      this.error = this.refusal(e4);
     } finally {
       this.busy = this.busy.filter((id) => id !== row.id);
     }
@@ -6406,6 +6617,23 @@ var ErpFlowsApprovals = class extends i3 {
       hour: "2-digit",
       minute: "2-digit"
     });
+  }
+  /** The hub's refusal, in words the person can act on; its raw message when it is none of ours. */
+  refusal(e4) {
+    switch (errorCode(e4)) {
+      case APPROVAL_EXPIRED:
+        return this.t("ui.approvalErrExpired");
+      case APPROVAL_ALREADY_DECIDED:
+        return this.t("ui.approvalErrAlreadyDecided");
+      case APPROVAL_NOT_YOURS:
+        return this.t("ui.approvalErrNotYours");
+      default:
+        return e4?.message || this.t("ui.errGeneric");
+    }
+  }
+  /** `command` unless the row says `decision`: a row older than hub#950 is a model's proposal. */
+  kindOf(row) {
+    return row.kind === "decision" ? "decision" : "command";
   }
   /** The payload, as the thing that is about to be written — never trimmed to fit. */
   payload(row) {
@@ -6422,14 +6650,35 @@ var ErpFlowsApprovals = class extends i3 {
             >${this.error}</ok-inline-feedback
           >` : A}
       ${!this.rows.length ? b2`<span class="muted">${this.t("ui.approvalsEmpty")}</span>` : b2`<span class="muted">${this.t("ui.approvalsIntro")}</span>`}
-      ${this.rows.map(
-      (row) => b2`<div class="card" data-approval=${row.id}>
-          <span class="what">${this.t("ui.approvalWould", { command: row.command ?? "" })}</span>
-          ${row.reason ? b2`<span class="why">${row.reason}</span>` : A}
-          <pre>${this.payload(row)}</pre>
-          <span class="meta"
-            >${this.t("ui.approvalExpires", { when: this.when(row.expires_at) })}</span
-          >
+      ${this.rows.map((row) => {
+      const kind = this.kindOf(row);
+      const when = this.when(row.expires_at);
+      return b2`<div class="card" data-approval=${row.id} data-kind=${kind}>
+          ${kind === "decision" ? b2`<span class="question">${row.title ?? ""}</span>
+                ${row.summary ? b2`<span class="why">${row.summary}</span>` : A}
+                <span class="meta"
+                  >${row.assignee_role ? this.t("ui.approvalAskedRole", { role: row.assignee_role }) : this.t("ui.approvalAskedAdmins")}</span
+                >` : b2`<span class="what">${this.t("ui.approvalWould", { command: row.command ?? "" })}</span>
+                ${row.reason ? b2`<span class="why">${row.reason}</span>` : A}
+                <pre>${this.payload(row)}</pre>`}
+          <!-- What waiting costs, and what a no costs — in the words of the policies the flow
+               chose. A model's proposal has neither: expiring it simply never runs it. -->
+          ${kind === "decision" ? b2`<span class="meta"
+                  >${this.t(`ui.approvalExpires_${policy(row.on_expire, "reject")}`, { when })}</span
+                >
+                <span class="meta"
+                  >${this.t(`ui.approvalOnReject_${policy(row.on_reject, "cancel")}`)}</span
+                >` : b2`<span class="meta">${this.t("ui.approvalExpires", { when })}</span>`}
+          <textarea
+            data-field="comment"
+            rows="1"
+            aria-label=${this.t("ui.approvalComment")}
+            placeholder=${this.t("ui.approvalComment")}
+            .value=${this.comments[row.id] ?? ""}
+            @input=${(e4) => {
+        this.comments = { ...this.comments, [row.id]: e4.target.value };
+      }}
+          ></textarea>
           <div class="actions">
             <button
               type="button"
@@ -6451,8 +6700,8 @@ var ErpFlowsApprovals = class extends i3 {
               ${this.t("ui.approvalReject")}
             </button>
           </div>
-        </div>`
-    )}
+        </div>`;
+    })}
     </div>`;
   }
 };
@@ -6471,6 +6720,12 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsApprovals.prototype, "busy", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApprovals.prototype, "comments", 2);
+function policy(value, fallback) {
+  return value && /^[a-z_]+$/.test(value) ? value : fallback;
+}
 define("erp-flows-approvals", ErpFlowsApprovals);
 
 // modules/flows/ui/components/erp-flows-dead-letter/erp-flows-dead-letter.ts
@@ -6984,7 +7239,8 @@ function schemaFacts(schema) {
       "http",
       "ai",
       "notify",
-      "query"
+      "query",
+      "approval"
     ],
     triggerKinds: enumAt(schema, ["$defs", "trigger", "properties", "kind", "enum"]) ?? [
       "event",
@@ -7240,6 +7496,23 @@ var es_default = {
     queryLimit: "Como mucho estas filas",
     queryLimitHint: "Entre 1 y {max}. El hub rechaza m\xE1s en vez de recortar la consulta sin avisar.",
     queryOutputsHint: "Los pasos siguientes pueden usar {paths}. Si no encuentra nada, la automatizaci\xF3n sigue con found = false: a\xF1ade una condici\xF3n sobre ello para parar ah\xED.",
+    approvalTitle: "La pregunta",
+    approvalTitleHint: "Esto es lo que leer\xE1 la persona. Se rellena en el momento en que se hace la pregunta: editar la automatizaci\xF3n despu\xE9s no cambia una pregunta que ya est\xE1 esperando.",
+    approvalSummary: "Detalles (opcional)",
+    approvalAssignee: "Qui\xE9n tiene que contestar",
+    approvalAssigneeAdmins: "Quien administra el hub",
+    approvalAssigneeHint: "Un rol, nunca una persona: la gente se va, los roles se quedan. Quien administra el hub siempre puede contestar, as\xED que una pregunta nunca se queda atascada.",
+    approvalExpiresIn: "Cu\xE1nto esperar la respuesta",
+    approvalExpiresInHint: "Como mucho 30 d\xEDas. Cuando se acaba el tiempo la automatizaci\xF3n hace lo que elijas abajo: nunca se queda esperando para siempre.",
+    approvalOnReject: "Si dicen que no",
+    approvalOnReject_cancel: "Parar la automatizaci\xF3n aqu\xED",
+    approvalOnReject_continue: "Seguir con los pasos siguientes",
+    approvalOnExpire: "Si nadie contesta a tiempo",
+    approvalOnExpire_reject: "Contarlo como un no",
+    approvalOnExpire_cancel: "Parar la automatizaci\xF3n aqu\xED",
+    approvalOnExpire_continue: "Seguir con los pasos siguientes",
+    approvalContinueHint: "Seguir significa que los pasos siguientes se ejecutan sea cual sea la respuesta. A\xF1ade una condici\xF3n sobre {path} (approved, rejected o expired) justo despu\xE9s de este paso para hacer algo distinto seg\xFAn la respuesta.",
+    approvalOutputsHint: "Los pasos siguientes pueden usar {paths}, solo si la automatizaci\xF3n sigue despu\xE9s de este paso.",
     paramName: "Nombre",
     paramValue: "Valor",
     insertField: "Insertar un dato",
@@ -7311,6 +7584,10 @@ var es_default = {
     ranStep: "Un paso \xAB{kind}\xBB",
     ranQueryFound: "Encontr\xF3 {count}",
     ranQueryNothing: "No encontr\xF3 nada, y sigui\xF3",
+    ranApprovalApproved: "Alguien dijo que s\xED",
+    ranApprovalRejected: "Alguien dijo que no",
+    ranApprovalExpired: "Nadie contest\xF3 a tiempo",
+    ranApprovalWaiting: "Esperando a que alguien conteste",
     runNow: "Ejecutar ahora",
     runStarted: "Est\xE1 en marcha. Su resultado aparece aqu\xED en un momento.",
     loadMore: "Ver m\xE1s antiguas",
@@ -7368,6 +7645,7 @@ var es_default = {
     addHttp: "Llamar a otro sistema",
     addAi: "Ped\xEDrselo al asistente",
     addQuery: "Consultar algo",
+    addApproval: "Preguntar antes a alguien",
     stepHttp: "Llama a {host} ({method})",
     stepHttpEmpty: "Elige a qu\xE9 direcci\xF3n llama este paso",
     stepHttpTemplatedHost: "Llama a la direcci\xF3n que digan los datos ({method})",
@@ -7380,6 +7658,9 @@ var es_default = {
     stepQuery: "Consulta {query}",
     stepQueryCount: "Cuenta {query}",
     stepQueryEmpty: "Elige qu\xE9 consultar",
+    stepApproval: "Pregunta a {role}: \xAB{title}\xBB",
+    stepApprovalAdmins: "Pregunta a quien administra el hub: \xAB{title}\xBB",
+    stepApprovalEmpty: "Escribe la pregunta que alguien tiene que contestar",
     httpMethod: "M\xE9todo",
     httpUrl: "Direcci\xF3n",
     httpGrantHint: "Este paso te pedir\xE1 permiso para llamar a {pattern}",
@@ -7430,6 +7711,15 @@ var es_default = {
     approvalExpires: "Si no haces nada, esto caduca el {when} y no se ejecuta.",
     approvalApprove: "Aprobar",
     approvalReject: "No",
+    approvalAskedRole: "Preguntado a: {role}. Quien administra el hub tambi\xE9n puede contestar.",
+    approvalAskedAdmins: "Preguntado a quien administra el hub.",
+    approvalExpires_reject: "Si nadie contesta antes del {when}, cuenta como un no.",
+    approvalExpires_cancel: "Si nadie contesta antes del {when}, la automatizaci\xF3n se para aqu\xED.",
+    approvalExpires_continue: "Si nadie contesta antes del {when}, la automatizaci\xF3n sigue igualmente.",
+    approvalComment: "A\xF1adir una nota (opcional)",
+    approvalErrExpired: "Demasiado tarde: esta caduc\xF3 antes de que contestaras. No se ha hecho nada.",
+    approvalErrAlreadyDecided: "Alguien ya contest\xF3 a esta. No se ha hecho nada dos veces.",
+    approvalErrNotYours: "Esta pregunta se hizo a otro rol y no puedes contestarla t\xFA. No se ha hecho nada.",
     tabTest: "Probar",
     testRun: "Probar",
     testNothingHappened: "Nada de esto es real. No se env\xEDa ning\xFAn mensaje, no se cobra nada y no se apunta nada: esto es solo lo que HAR\xCDA tu automatizaci\xF3n.",
@@ -7439,6 +7729,7 @@ var es_default = {
     testBlank: "saldr\xEDa vac\xEDo",
     testHidden: "s\xED hay un valor, pero aqu\xED no se ense\xF1a",
     testUnknown: "sale de un paso anterior, as\xED que no se sabe hasta que se ejecute",
+    testPausesHere: "Espera aqu\xED a que alguien conteste. Probar no contesta por nadie: las tres salidas siguen siendo posibles.",
     testStoppedIsWorking: "Se parar\xEDa aqu\xED, y eso es la automatizaci\xF3n funcionando: no hay un segundo camino.",
     testNotReached: "No llegar\xEDa hasta aqu\xED.",
     testTriggerBlocked: "Ni siquiera arrancar\xEDa: lo que ha pasado no encaja con lo que pediste.",
@@ -7765,6 +8056,23 @@ var en_default = {
     queryLimit: "At most this many rows",
     queryLimitHint: "Between 1 and {max}. The hub refuses more instead of quietly cutting the read short.",
     queryOutputsHint: "The next steps can use {paths}. If nothing is found the automation carries on with found = false \u2014 add a condition on it to stop there.",
+    approvalTitle: "The question",
+    approvalTitleHint: "This is what the person will read. It is filled in the moment the question is asked \u2014 editing the automation afterwards does not change a question already waiting.",
+    approvalSummary: "Details (optional)",
+    approvalAssignee: "Who has to answer",
+    approvalAssigneeAdmins: "Whoever manages the hub",
+    approvalAssigneeHint: "A role, never a person: people leave, roles stay. Whoever manages the hub can always answer, so a question never gets stuck.",
+    approvalExpiresIn: "How long to wait for an answer",
+    approvalExpiresInHint: "At most 30 days. When the time runs out the automation does what you choose below \u2014 it never stays waiting forever.",
+    approvalOnReject: "If they say no",
+    approvalOnReject_cancel: "Stop the automation here",
+    approvalOnReject_continue: "Carry on with the next steps",
+    approvalOnExpire: "If nobody answers in time",
+    approvalOnExpire_reject: "Count it as a no",
+    approvalOnExpire_cancel: "Stop the automation here",
+    approvalOnExpire_continue: "Carry on with the next steps",
+    approvalContinueHint: "Carrying on means the next steps run whatever the answer was. Add a condition on {path} (approved, rejected or expired) right after this step to do different things for each answer.",
+    approvalOutputsHint: "The next steps can use {paths} \u2014 only if the automation carries on past this step.",
     paramName: "Name",
     paramValue: "Value",
     insertField: "Insert a field",
@@ -7836,6 +8144,10 @@ var en_default = {
     ranStep: "A \u201C{kind}\u201D step",
     ranQueryFound: "Found {count}",
     ranQueryNothing: "Found nothing, and carried on",
+    ranApprovalApproved: "Somebody said yes",
+    ranApprovalRejected: "Somebody said no",
+    ranApprovalExpired: "Nobody answered in time",
+    ranApprovalWaiting: "Waiting for somebody to answer",
     runNow: "Run it now",
     runStarted: "It is running. Its result appears here in a moment.",
     loadMore: "Show older",
@@ -7893,6 +8205,7 @@ var en_default = {
     addHttp: "Call another system",
     addAi: "Ask the assistant",
     addQuery: "Look something up",
+    addApproval: "Ask somebody first",
     stepHttp: "Calls {host} ({method})",
     stepHttpEmpty: "Pick the address this step calls",
     stepHttpTemplatedHost: "Calls whatever address the data says ({method})",
@@ -7905,6 +8218,9 @@ var en_default = {
     stepQuery: "Looks up {query}",
     stepQueryCount: "Counts {query}",
     stepQueryEmpty: "Pick what to look up",
+    stepApproval: "Asks {role}: \u201C{title}\u201D",
+    stepApprovalAdmins: "Asks whoever manages the hub: \u201C{title}\u201D",
+    stepApprovalEmpty: "Write the question somebody has to answer",
     httpMethod: "Method",
     httpUrl: "Address",
     httpGrantHint: "This step will ask you to allow calls to {pattern}",
@@ -7955,6 +8271,15 @@ var en_default = {
     approvalExpires: "If you do nothing, this expires on {when} and never runs.",
     approvalApprove: "Approve",
     approvalReject: "No",
+    approvalAskedRole: "Asked of: {role}. Whoever manages the hub can answer too.",
+    approvalAskedAdmins: "Asked of whoever manages the hub.",
+    approvalExpires_reject: "If nobody answers by {when}, it counts as a no.",
+    approvalExpires_cancel: "If nobody answers by {when}, the automation stops here.",
+    approvalExpires_continue: "If nobody answers by {when}, the automation carries on anyway.",
+    approvalComment: "Add a note (optional)",
+    approvalErrExpired: "Too late: this one expired before you answered. Nothing was done.",
+    approvalErrAlreadyDecided: "Somebody already answered this one. Nothing was done twice.",
+    approvalErrNotYours: "This question was asked of another role, and you cannot answer it. Nothing was done.",
     tabTest: "Try it",
     testRun: "Try it",
     testNothingHappened: "Nothing here is real. No message is sent, nothing is charged and nothing is written down \u2014 this is only what your automation WOULD do.",
@@ -7964,6 +8289,7 @@ var en_default = {
     testBlank: "would arrive empty",
     testHidden: "there is a value, and it is not shown here",
     testUnknown: "comes from an earlier step, so it is only known once it has run",
+    testPausesHere: "Waits here for somebody to answer. Testing does not answer for them: all three outcomes are still possible.",
     testStoppedIsWorking: "It would stop here, and that is the automation working: there is no second path.",
     testNotReached: "It would not get this far.",
     testTriggerBlocked: "It would not even start: what happened does not match what you asked for.",

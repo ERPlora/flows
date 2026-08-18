@@ -66,6 +66,19 @@ const COMPOSED_KEYS = [
   // `ui.notifyChannel_${email|whatsapp}` — and NOT sms, which has no transport
   'ui.notifyChannel_email',
   'ui.notifyChannel_whatsapp',
+  // `ui.approvalOnReject_${cancel|continue}` / `ui.approvalOnExpire_${reject|cancel|continue}` —
+  // the two policies of an approval step (hub#950), and what the tray says each one costs
+  'ui.approvalOnReject_cancel',
+  'ui.approvalOnReject_continue',
+  'ui.approvalOnExpire_reject',
+  'ui.approvalOnExpire_cancel',
+  'ui.approvalOnExpire_continue',
+  'ui.approvalExpires_reject',
+  'ui.approvalExpires_cancel',
+  'ui.approvalExpires_continue',
+  // `ui.queryResult_${first|count}` — and NOT rows, which the mapping language cannot read
+  'ui.queryResult_first',
+  'ui.queryResult_count',
   // the plural helper's `${base}One`
   'ui.delayDaysOne',
   'ui.delayHoursOne',

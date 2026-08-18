@@ -460,6 +460,158 @@ describe('the query step — the deterministic read (hub#954, flows#30)', () => 
   });
 });
 
+describe('the approval step — the pause (hub#950, flows#31)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const open = async (el: ErpFlowsEditor): Promise<Element> => {
+    (el.renderRoot.querySelector('[data-node="ok"] button.open') as HTMLButtonElement).click();
+    await el.updateComplete;
+    return el.renderRoot.querySelector('[data-node="ok"] .panel')!;
+  };
+
+  const approvalFlow = (over: Record<string, unknown> = {}) =>
+    flowWith([
+      {
+        id: 'ok',
+        kind: 'approval',
+        title: 'Approve the purchase?',
+        summary: '',
+        assignee: { role: 'manager' },
+        expires_in: 259200,
+        on_expire: 'reject',
+        on_reject: 'cancel',
+        ...over,
+      },
+    ]);
+
+  it('is on the palette and is born with the kernel defaults and NO assignee', async () => {
+    const el = await mount(flowWith([]));
+    (el.renderRoot.querySelector('.adders button[data-add="approval"]') as HTMLButtonElement).click();
+    await el.updateComplete;
+    expect(el.document.steps[0]).toMatchObject({
+      kind: 'approval',
+      title: '',
+      expires_in: 259200,
+      on_expire: 'reject',
+      on_reject: 'cancel',
+    });
+    expect(el.document.steps[0].assignee).toBeUndefined();
+  });
+
+  it('draws the question, who is asked, how long it waits and the two policies', async () => {
+    const el = await mount(approvalFlow());
+    const panel = await open(el);
+    expect(panel.querySelector('erp-flows-value[data-field="title"]')).toBeTruthy();
+    expect(panel.querySelector('erp-flows-value[data-field="summary"]')).toBeTruthy();
+    expect(panel.querySelector('[data-field="assignee-role"]')).toBeTruthy();
+    expect(panel.querySelector('select[data-field="expires-in"]')).toBeTruthy();
+    expect(panel.querySelector('select[data-field="on-reject"]')).toBeTruthy();
+    expect(panel.querySelector('select[data-field="on-expire"]')).toBeTruthy();
+    // No command, no payload: this step executes nothing, and the kernel refuses both by name.
+    expect(panel.querySelector('[data-field="command"]')).toBeNull();
+    expect(panel.querySelector('[data-field="payload"]')).toBeNull();
+  });
+
+  it('asks for a ROLE, never a person, and says the admins can always answer', async () => {
+    // hub#950: `assignee` is `{role}` and nothing else. A role that runs out of people would leave
+    // the question undecidable — which is why whoever administers the hub can always answer, and
+    // the panel says so next to the box.
+    const el = await mount(approvalFlow());
+    const panel = await open(el);
+    const roles = Array.from(panel.querySelectorAll('datalist[data-field="roles"] option')).map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+    expect(roles).toEqual(expect.arrayContaining(['admin', 'manager', 'employee']));
+    expect(panel.querySelector('[data-field="assignee-user"]')).toBeNull();
+    expect(panel.textContent).toContain('ui.approvalAssigneeHint');
+  });
+
+  it('writes the role as {role}, and DROPS assignee when the box is cleared', async () => {
+    const el = await mount(approvalFlow({ assignee: undefined }));
+    const panel = await open(el);
+    const input = panel.querySelector('[data-field="assignee-role"]') as HTMLInputElement;
+    input.value = ' employee ';
+    input.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.document.steps[0].assignee).toEqual({ role: 'employee' });
+    input.value = '';
+    input.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    // Absent, not `{role: ''}`: the kernel refuses an empty role and reads absence as «the admins».
+    expect('assignee' in el.document.steps[0]).toBe(false);
+  });
+
+  it('offers the wait as days and weeks, never as a number of seconds, capped at 30 days', async () => {
+    const el = await mount(approvalFlow());
+    const panel = await open(el);
+    const select = panel.querySelector('select[data-field="expires-in"]') as HTMLSelectElement;
+    const values = Array.from(select.querySelectorAll('option')).map((o) => Number(o.value));
+    expect(values).toContain(259200);
+    expect(values).toContain(604800);
+    expect(Math.max(...values)).toBe(2592000);
+    select.value = '604800';
+    select.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.document.steps[0].expires_in).toBe(604800);
+  });
+
+  it('keeps a wait the presets do not have, so a hand-written document reopens as written', async () => {
+    const el = await mount(approvalFlow({ expires_in: 5400 }));
+    const panel = await open(el);
+    const select = panel.querySelector('select[data-field="expires-in"]') as HTMLSelectElement;
+    expect(Array.from(select.querySelectorAll('option')).some((o) => o.value === '5400')).toBe(true);
+    expect(el.document.steps[0].expires_in).toBe(5400);
+  });
+
+  it('offers exactly the policies the kernel knows, with the restrictive ones selected', async () => {
+    const el = await mount(approvalFlow());
+    const panel = await open(el);
+    const values = (sel: string) =>
+      Array.from(panel.querySelectorAll(`select[data-field="${sel}"] option`)).map((o) => (o as HTMLOptionElement).value);
+    expect(values('on-reject')).toEqual(['cancel', 'continue']);
+    expect(values('on-expire')).toEqual(['reject', 'cancel', 'continue']);
+    const onReject = panel.querySelector('select[data-field="on-reject"]') as HTMLSelectElement;
+    onReject.value = 'continue';
+    onReject.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.document.steps[0].on_reject).toBe('continue');
+    // The pattern the policies exist for: continue + a guard on the decision = the three branches.
+    expect(panel.textContent).toContain('ui.approvalContinueHint');
+  });
+
+  it('SAYS the question is fixed the moment it is asked — editing later changes nothing live', async () => {
+    const el = await mount(approvalFlow());
+    const panel = await open(el);
+    expect(panel.textContent).toContain('ui.approvalTitleHint');
+    expect(panel.textContent).toContain('steps.ok.decision');
+  });
+
+  it('asks for NO permission on the permissions tab', async () => {
+    const el = await mount(approvalFlow());
+    el.tab = 'permissions';
+    await el.updateComplete;
+    expect(el.renderRoot.textContent).toContain('ui.grantsNone');
+  });
+
+  it('«Probar» says the run WAITS here and decides nothing on anybody\'s behalf', async () => {
+    const el = await mount(
+      flowWith([
+        { id: 'ok', kind: 'approval', title: 'Go?', on_reject: 'continue' },
+        { id: 'g', kind: 'condition', when: { 'steps.ok.decision': { eq: 'approved' } } },
+      ]),
+    );
+    el.tab = 'test';
+    await el.updateComplete;
+    const step = el.renderRoot.querySelector('[data-node-outcome="ok"]')!;
+    expect(step.textContent).toContain('ui.testPausesHere');
+    const guard = el.renderRoot.querySelector('[data-node-outcome="g"]')!;
+    expect(guard.getAttribute('data-outcome')).toBe('would-run');
+    expect(guard.textContent).toContain('ui.testUncertain');
+  });
+});
+
 describe('the notify step (flows#3)', () => {
   beforeEach(() => {
     document.body.replaceChildren();

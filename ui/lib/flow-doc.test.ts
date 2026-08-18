@@ -18,6 +18,11 @@ import {
   httpPatternFor,
   MAX_QUERY_ROWS,
   queryOutputs,
+  MAX_APPROVAL_TTL_SECONDS,
+  DEFAULT_APPROVAL_TTL_SECONDS,
+  EXPIRY_POLICIES,
+  REJECT_POLICIES,
+  approvalOutputs,
 } from './flow-doc';
 
 describe('the document a flow is', () => {
@@ -198,7 +203,7 @@ describe('what the spine can draw', () => {
     // Until flows#3 the last three opened read-only, which meant the owner could see the step and
     // not fix it. Every kind is editable now; anything else is still a document from a newer
     // editor and must open untouched rather than be rewritten without it.
-    for (const kind of ['command', 'condition', 'delay', 'http', 'ai', 'notify', 'query']) {
+    for (const kind of ['command', 'condition', 'delay', 'http', 'ai', 'notify', 'query', 'approval']) {
       expect(isSpineKind(kind), kind).toBe(true);
     }
     expect(isSpineKind('whatever-comes-next')).toBe(false);
@@ -296,6 +301,59 @@ describe('the `query` step — the deterministic read (hub#954, flows#30)', () =
     expect(queryOutputs({ id: 'week', kind: 'query', query: 'sales.summary', result: 'count' })).toEqual([
       'steps.week.found',
       'steps.week.count',
+    ]);
+  });
+});
+
+describe('the `approval` step — the pause (hub#950, flows#31)', () => {
+  it('is a kind this editor draws and edits', () => {
+    expect(isSpineKind('approval')).toBe(true);
+  });
+
+  it('is born with only keys the kernel whitelists, and the kernel defaults, and NO assignee', () => {
+    // `def.rs`: `id, kind, title, summary, assignee, expires_in, on_expire, on_reject`. The
+    // defaults are the kernel's own — 72 h, `reject` on expiry, `cancel` on a no — written out
+    // loud so the panel shows what will really happen. `assignee` is ABSENT, which the kernel
+    // reads as «whoever administers the hub»: the one answer that cannot name a role nobody holds.
+    const step = addStep(emptyDoc(), 'approval').steps[0];
+    const allowed = ['id', 'kind', 'title', 'summary', 'assignee', 'expires_in', 'on_expire', 'on_reject'];
+    expect(Object.keys(step).filter((k) => !allowed.includes(k))).toEqual([]);
+    expect(step.title).toBe('');
+    expect(step.assignee).toBeUndefined();
+    expect(step.expires_in).toBe(DEFAULT_APPROVAL_TTL_SECONDS);
+    expect(step.on_expire).toBe('reject');
+    expect(step.on_reject).toBe('cancel');
+    // Never `command`/`payload`: this step executes nothing, and the kernel refuses both by name.
+    expect(step.command).toBeUndefined();
+    expect(step.payload).toBeUndefined();
+  });
+
+  it('mirrors the kernel ceilings and vocabularies', () => {
+    expect(DEFAULT_APPROVAL_TTL_SECONDS).toBe(259200);
+    expect(MAX_APPROVAL_TTL_SECONDS).toBe(2592000);
+    expect([...EXPIRY_POLICIES]).toEqual(['reject', 'cancel', 'continue']);
+    expect([...REJECT_POLICIES]).toEqual(['cancel', 'continue']);
+  });
+
+  it('needs NO grant: asking a person is not reaching a capability', () => {
+    // The grant belongs to the step that WRITES afterwards. A permissions tab that listed
+    // something for a question would teach that permissions are about questions.
+    const doc = readDoc({
+      schema_version: 1,
+      steps: [
+        { id: 'ok', kind: 'approval', title: 'Approve?', assignee: { role: 'manager' } },
+        { id: 'do', kind: 'command', command: 'tasks.tasks.create', params: {} },
+      ],
+    });
+    expect(requiredGrants(doc)).toEqual([{ kind: 'command', value: 'tasks.tasks.create' }]);
+  });
+
+  it('names what a later step can read out of it — the decision and who made it', () => {
+    expect(approvalOutputs({ id: 'ok', kind: 'approval', title: 'x' })).toEqual([
+      'steps.ok.decision',
+      'steps.ok.decided_by',
+      'steps.ok.decided_at',
+      'steps.ok.comment',
     ]);
   });
 });

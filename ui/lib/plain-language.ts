@@ -177,6 +177,17 @@ export function describeStep(step: Step, t: Translator): string {
       // behind: a row's fields, or only a number. No `result` is the kernel's `first`.
       return t(step.result === 'count' ? 'ui.stepQueryCount' : 'ui.stepQuery', { query });
     }
+    case 'approval': {
+      const title = typeof step.title === 'string' ? step.title.trim() : '';
+      if (!title) return t('ui.stepApprovalEmpty');
+      // WHO is asked is the one thing that matters on the card next to the question: a role, or
+      // — no assignee — whoever administers the hub. Never an empty role.
+      const role = step.assignee?.role?.trim() ?? '';
+      const question = shorten(inWords(title));
+      return role
+        ? t('ui.stepApproval', { title: question, role })
+        : t('ui.stepApprovalAdmins', { title: question });
+    }
     default:
       // Not dead code: it is what keeps a document written by a NEWER editor openable, instead of
       // silently rewritten without the step this one could not draw.
@@ -266,6 +277,15 @@ export function describeRunStep(row: RunStepRow, t: Translator, spec?: Step): st
   if (row.kind === 'query') {
     const output = row.output as { found?: boolean; count?: number } | undefined;
     return output?.found ? t('ui.ranQueryFound', { count: output.count ?? 0 }) : t('ui.ranQueryNothing');
+  }
+  // Three terminal answers and one open state. `expired` is a DECIDED status in the kernel
+  // (hub#972): the question is closed, not still hanging.
+  if (row.kind === 'approval') {
+    const decision = (row.output as { decision?: string } | undefined)?.decision;
+    if (decision === 'approved') return t('ui.ranApprovalApproved');
+    if (decision === 'rejected') return t('ui.ranApprovalRejected');
+    if (decision === 'expired') return t('ui.ranApprovalExpired');
+    return t('ui.ranApprovalWaiting');
   }
   return t('ui.ranStep', { kind: row.kind ?? '' });
 }

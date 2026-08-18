@@ -8,13 +8,18 @@ import '../erp-flows-value/erp-flows-value';
 import '../erp-flows-field-picker/erp-flows-field-picker';
 import type { ErpFlowsValue } from '../erp-flows-value/erp-flows-value';
 import {
+  DEFAULT_APPROVAL_TTL_SECONDS,
+  EXPIRY_POLICIES,
   HTTP_METHODS,
+  MAX_APPROVAL_TTL_SECONDS,
   MAX_ITERS_CAP,
   MAX_QUERY_ROWS,
   MAX_TIMEOUT_SECONDS,
   NOTIFY_CHANNELS,
   OPERATORS,
   QUERY_RESULTS,
+  REJECT_POLICIES,
+  approvalOutputs,
   queryOutputs,
   addStep,
   emptyDoc,
@@ -36,9 +41,11 @@ import type {
   Condition,
   FlowDoc,
   Grant,
+  ExpiryPolicy,
   Operator,
   QueryResult,
   Recipient,
+  RejectPolicy,
   Step,
   StepKind,
   Trigger,
@@ -115,6 +122,13 @@ function guardRows(when: Condition | undefined): GuardRow[] {
  * `max_iters` of 50 and a `timeout` of 90 instead of trimming them, so without this the owner
  * meets an error code on a field whose real limit nothing on screen ever mentioned.
  */
+/**
+ * The roles every hub has (`crates/runtime/src/hub_users.rs::BASE_ROLES`), offered — not imposed —
+ * for `approval.assignee`. Mirrored because the module SDK has no door to `GET /api/hub/roles`,
+ * and a module may not fetch the hub's REST on its own; a role a module declares is still typed.
+ */
+const BASE_ROLES = ['admin', 'manager', 'employee'] as const;
+
 function clamp(value: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, Math.round(value)));
@@ -1332,6 +1346,7 @@ export class ErpFlowsEditor extends LitElement {
     if (step.kind === 'ai') return this.renderAiPanel(step, index);
     if (step.kind === 'notify') return this.renderNotifyPanel(step, index);
     if (step.kind === 'query') return this.renderQueryPanel(step, index);
+    if (step.kind === 'approval') return this.renderApprovalPanel(step, index);
     return this.renderCommandPanel(step, index);
   }
 
@@ -2004,6 +2019,148 @@ export class ErpFlowsEditor extends LitElement {
     `;
   }
 
+  /**
+   * **The `approval` step** — the pause (hub#950, flows#31). Until it existed a flow could only
+   * stop and wait for a person by putting an `ai` step in the way: a metered, non-deterministic
+   * call to a model to resolve a yes/no. Now it asks without one.
+   *
+   * What this panel has to get right is what the market got wrong. Power Automate's *Start and
+   * wait for an approval* kills the run at ~30 days and leaves the approval orphaned in the
+   * Action Center — the #1 complaint of its forums — so the wait here is EXPLICIT and capped, and
+   * what happens when it runs out is a choice the owner makes on this screen. And v1 is linear:
+   * the two policies are what replaces branching, so they are explained where they are set.
+   */
+  private renderApprovalPanel(step: Step, index: number) {
+    const role = step.assignee?.role ?? '';
+    const expiresIn = Number(step.expires_in ?? DEFAULT_APPROVAL_TTL_SECONDS);
+    // Drawn as «3 days / 1 week», never as a number of seconds. A wait the presets do not have
+    // (a hand-written document) is kept and offered as itself: reopening must not rewrite it.
+    const presets = [3600, 14400, 86400, 259200, 604800, 1209600, MAX_APPROVAL_TTL_SECONDS];
+    const waits = presets.includes(expiresIn) ? presets : [...presets, expiresIn].sort((a, b) => a - b);
+    const onReject = String(step.on_reject ?? 'cancel');
+    const onExpire = String(step.on_expire ?? 'reject');
+    const continues = onReject === 'continue' || onExpire === 'continue';
+    return html`
+      ${this.renderValue({
+        field: 'title',
+        label: this.t('ui.approvalTitle'),
+        value: step.title ?? '',
+        template: true,
+        onChange: (title) => this.setDoc(patchStep(this.document, index, { title: String(title) })),
+      })}
+      <!-- Templated when the request is CREATED, not when the tray is read: editing the flow
+           later does not change a question already asked. Said here, where the text is typed. -->
+      <span class="hint">${this.t('ui.approvalTitleHint')}</span>
+      ${this.renderValue({
+        field: 'summary',
+        label: this.t('ui.approvalSummary'),
+        value: step.summary ?? '',
+        template: true,
+        onChange: (summary) =>
+          this.setDoc(patchStep(this.document, index, { summary: String(summary) })),
+      })}
+
+      <div class="field">
+        <label for="ar-${step.id}">${this.t('ui.approvalAssignee')}</label>
+        <!-- A ROLE, and there is no box in which a person can be named — that absence is the
+             guarantee (hub#950): a document that could say «Marta» stops working the day Marta
+             leaves. The base roles are offered; a role a module declares can still be typed. -->
+        <input
+          id="ar-${step.id}"
+          data-field="assignee-role"
+          type="text"
+          list="roles-${step.id}"
+          placeholder=${this.t('ui.approvalAssigneeAdmins')}
+          .value=${role}
+          @change=${(e: Event) => {
+            const next = (e.target as HTMLInputElement).value.trim();
+            // Absent, never `{role: ''}`: the kernel refuses an empty role and reads absence as
+            // «whoever administers the hub» — the one role that always has somebody.
+            const { assignee: _dropped, ...rest } = this.document.steps[index];
+            const patched = next ? { ...rest, assignee: { role: next } } : rest;
+            this.setDoc({
+              ...this.document,
+              steps: this.document.steps.map((s, i) => (i === index ? (patched as Step) : s)),
+            });
+          }}
+        />
+        <datalist id="roles-${step.id}" data-field="roles">
+          ${BASE_ROLES.map((r) => html`<option value=${r}></option>`)}
+        </datalist>
+        <span class="hint">${this.t('ui.approvalAssigneeHint')}</span>
+      </div>
+
+      <div class="field">
+        <label for="ae-${step.id}">${this.t('ui.approvalExpiresIn')}</label>
+        <select
+          id="ae-${step.id}"
+          data-field="expires-in"
+          .value=${String(expiresIn)}
+          @change=${(e: Event) =>
+            this.setDoc(
+              patchStep(this.document, index, {
+                expires_in: clamp(
+                  Number((e.target as HTMLSelectElement).value),
+                  1,
+                  MAX_APPROVAL_TTL_SECONDS,
+                  DEFAULT_APPROVAL_TTL_SECONDS,
+                ),
+              }),
+            )}
+        >
+          ${waits.map((w) => option(String(w), describeDelay(w, this.t), String(expiresIn)))}
+        </select>
+        <span class="hint">${this.t('ui.approvalExpiresInHint')}</span>
+      </div>
+
+      <div class="param-row">
+        <div class="field">
+          <label for="aj-${step.id}">${this.t('ui.approvalOnReject')}</label>
+          <select
+            id="aj-${step.id}"
+            data-field="on-reject"
+            .value=${onReject}
+            @change=${(e: Event) =>
+              this.setDoc(
+                patchStep(this.document, index, {
+                  on_reject: (e.target as HTMLSelectElement).value as RejectPolicy,
+                }),
+              )}
+          >
+            ${REJECT_POLICIES.map((p) => option(p, this.t(`ui.approvalOnReject_${p}`), onReject))}
+          </select>
+        </div>
+        <div class="field">
+          <label for="ax-${step.id}">${this.t('ui.approvalOnExpire')}</label>
+          <select
+            id="ax-${step.id}"
+            data-field="on-expire"
+            .value=${onExpire}
+            @change=${(e: Event) =>
+              this.setDoc(
+                patchStep(this.document, index, {
+                  on_expire: (e.target as HTMLSelectElement).value as ExpiryPolicy,
+                }),
+              )}
+          >
+            ${EXPIRY_POLICIES.map((p) => option(p, this.t(`ui.approvalOnExpire_${p}`), onExpire))}
+          </select>
+        </div>
+      </div>
+      <!-- v1 is LINEAR and this pair is what replaces branching: continue + a guard on the
+           decision composes approved / rejected / expired without a fork. It is said the moment
+           «continue» is picked, which is when it becomes true. -->
+      ${continues
+        ? html`<ok-inline-feedback tone="info" icon="git-branch-outline"
+            >${this.t('ui.approvalContinueHint', { path: `steps.${step.id}.decision` })}</ok-inline-feedback
+          >`
+        : nothing}
+      <span class="hint" data-field="approval-outputs"
+        >${this.t('ui.approvalOutputsHint', { paths: approvalOutputs(step).join(', ') })}</span
+      >
+    `;
+  }
+
   /** The `params` of a `command` or a `query` step: a name and a composed value per row. */
   private renderParams(step: Step, index: number) {
     const params = Object.entries(step.params ?? {});
@@ -2080,6 +2237,7 @@ export class ErpFlowsEditor extends LitElement {
               ['command', 'ui.addCommand'],
               ['query', 'ui.addQuery'],
               ['condition', 'ui.addGuard'],
+              ['approval', 'ui.addApproval'],
               ['delay', 'ui.addDelay'],
               ['notify', 'ui.addNotify'],
               ['http', 'ui.addHttp'],
@@ -2199,6 +2357,7 @@ export class ErpFlowsEditor extends LitElement {
           ${step.outcome === 'not-reached'
             ? html`<span class="muted">${this.t('ui.testNotReached')}</span>`
             : nothing}
+          ${step.pauses ? html`<span class="verdict">${this.t('ui.testPausesHere')}</span>` : nothing}
           ${step.condition?.uncertain
             ? html`<span class="verdict">${this.t('ui.testUncertain')}</span>`
             : nothing}
