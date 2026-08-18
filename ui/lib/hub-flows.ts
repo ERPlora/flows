@@ -82,26 +82,53 @@ export interface SecretInfo {
 }
 
 /**
- * One proposal an `ai` step made under `policy: manual`, waiting for a person.
+ * One row of the tray — **one table, two kinds** (hub#950).
  *
- * Without a screen for these, a `policy: manual` step leaves proposals hanging where nobody sees
- * them — the run sits in `waiting_approval` until its 72-hour TTL quietly expires it.
+ * `command` is a proposal an `ai` step made under `policy: manual`: a WRITE, with its payload
+ * stored verbatim, and approving RUNS it. `decision` is the generic `approval` step: a question in
+ * words, with no command and no payload, and approving runs **nothing** — it records an answer and
+ * lets the run carry on. A row written before the `kind` column existed is a `command`.
+ *
+ * Without a screen for these, both leave the run parked in `waiting_approval` until the TTL
+ * quietly expires it, and what the owner experiences is an automation that did nothing.
  */
 export interface Approval {
   id: string;
   run_id?: string;
   flow_id?: string;
   step_id?: string;
+  /** `command` | `decision`. Absent = `command` (a row older than hub#950). */
+  kind?: string;
   command?: string;
   payload?: Record<string, unknown>;
   reason?: string;
+  /** The question, for a `decision`. Already templated: editing the flow does not change it. */
+  title?: string;
+  summary?: string;
+  /** The role that was asked. `''` = whoever administers the hub. */
+  assignee_role?: string;
+  /** What the person wrote when deciding (`POST …/approve|reject` with `{comment}`). */
+  comment?: string;
   status?: string;
   decided_by?: string;
   decided_at?: string;
   expires_at?: string;
+  /** What the RUN does when the timer decides (`reject` | `cancel` | `continue`). */
+  on_expire?: string;
+  /** What the RUN does on a no (`cancel` | `continue`). */
+  on_reject?: string;
   error?: string;
   created_at?: string;
 }
+
+/** The refusals a decision can meet — the row STAYS on all three. `not_yours` is a 403 (hub#950). */
+export const APPROVAL_EXPIRED = 'flow.approval_expired';
+export const APPROVAL_ALREADY_DECIDED = 'flow.approval_already_decided';
+export const APPROVAL_NOT_YOURS = 'flow.approval_not_yours';
+
+/** The ephemeral WS facts the kernel emits so a tray lights up without polling. */
+export const EVENT_APPROVAL_CREATED = 'flow.approval.created';
+export const EVENT_APPROVAL_EXPIRED = 'flow.approval.expired';
 
 /** The frozen §9 method list, as this module uses it. */
 export interface FlowsApi {
@@ -211,6 +238,12 @@ export interface ModuleClient {
   locale?: string;
   t?(catalog: Record<string, unknown>, key: string, params?: Record<string, unknown>): string;
   formatMoney?(amount: unknown): string;
+  /**
+   * The live event bus of the shell's client, inherited by the scoped one. Optional because the
+   * preview client of `erplora dev` has none — and a tray that cannot subscribe still works, it
+   * just refreshes when it is opened.
+   */
+  subscribe?(event: string, cb: (payload: unknown) => void): () => void;
 }
 
 /** What the shell sets on the element (`ModuleView.vue`). */

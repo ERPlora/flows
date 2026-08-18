@@ -136,6 +136,7 @@ describe('the contract is read off the LIVE schema, not remembered', () => {
     // The mirror has to keep up with the kernel: a fallback that still said «six kinds» would
     // call a draft with a `query` step (hub#954) invalid on a hub that runs it.
     expect(facts.stepKinds).toContain('query');
+    expect(facts.stepKinds).toContain('approval');
     expect(facts.operators).toContain('eq');
     expect(facts.toolsIsObject).toBe(true);
   });

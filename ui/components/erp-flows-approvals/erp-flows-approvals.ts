@@ -3,11 +3,20 @@ import { property, state } from 'lit/decorators.js';
 import { define } from '@erplora/outfitkit/define';
 import '@erplora/outfitkit/ok-inline-feedback';
 import '@erplora/outfitkit/ok-status-pill';
+import {
+  APPROVAL_ALREADY_DECIDED,
+  APPROVAL_EXPIRED,
+  APPROVAL_NOT_YOURS,
+  EVENT_APPROVAL_CREATED,
+  EVENT_APPROVAL_EXPIRED,
+  errorCode,
+} from '../../lib/hub-flows';
 import type { Approval, ModuleClient } from '../../lib/hub-flows';
 import type { Translator } from '../../lib/plain-language';
 
 /**
- * **The approval tray** — the screen without which `policy: manual` is a dead end.
+ * **The approval tray** — the screen without which `policy: manual` is a dead end, and since
+ * hub#950 the screen where the `approval` step's QUESTION lands too.
  *
  * An `ai` step whose policy is `manual` does not write anything: it turns the model's proposal
  * into a row of `_flow_approvals` and the turn ENDS, with the run parked in `waiting_approval`.
@@ -15,15 +24,24 @@ import type { Translator } from '../../lib/plain-language';
  * those rows, a proposal sits there until its 72-hour TTL expires it, and what the owner
  * experiences is an automation that did nothing and never said why.
  *
- * Three things this screen has to get right, all of them about not lying:
+ * **One tray, two kinds** (hub#950). A `command` row is what the model proposed — the command and
+ * its payload, verbatim, and approving RUNS it. A `decision` row is a question in words from an
+ * `approval` step — a title and a summary, no command and no payload, and approving runs
+ * NOTHING: it records the answer and the run carries on to the step that does the work.
  *
- * - **It shows what would RUN.** The command and its payload, verbatim. «A step is waiting for
- *   approval» is not something a person can judge; `customers.notes.add` with the note in it is.
- * - **A refusal keeps the row.** `flow.approval_already_decided` and `flow.approval_expired` are
- *   real answers from the hub. Removing the row on a failed approve would tell somebody they
+ * Four things this screen has to get right, all of them about not lying:
+ *
+ * - **It shows what would RUN, or what is ASKED.** `customers.notes.add` with the note in it, or
+ *   «Approve the purchase from Casa Pepe?» with its amount. «A step is waiting» is not something
+ *   a person can judge.
+ * - **A refusal keeps the row.** `flow.approval_already_decided`, `flow.approval_expired` and
+ *   `flow.approval_not_yours` (403: authenticated, but not the role that was asked) are real
+ *   answers from the hub. Removing the row on a failed approve would tell somebody they
  *   authorised a write that never happened.
- * - **It says when the proposal dies.** Expiry is a decision made by a timer; a tray that does not
- *   mention it lets that decision arrive as a surprise.
+ * - **It says what waiting costs, and what a no costs.** Expiry is a decision made by a timer,
+ *   and `on_expire`/`on_reject` say what that decision means for the run.
+ * - **It refreshes on its own.** The kernel announces a new and an expired request over the WS;
+ *   a tray open all night must stop showing a question that can no longer be answered.
  *
  * Approving re-checks the grant AT THAT MOMENT and runs exactly what was proposed — the model is
  * not consulted again. So this screen is the last gate, and it is a real one.
@@ -109,6 +127,23 @@ export class ErpFlowsApprovals extends LitElement {
     .muted {
       color: var(--ok-muted, #6b6a63);
     }
+    .question {
+      font-weight: 600;
+      font-size: 1rem;
+      overflow-wrap: anywhere;
+    }
+    textarea {
+      font: inherit;
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 2.75rem;
+      padding: 0.45rem 0.6rem;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-sm, 10px);
+      background: var(--ok-surface, #fff);
+      color: inherit;
+      resize: vertical;
+    }
   `;
 
   @property({ attribute: false }) client: ModuleClient | null = null;
@@ -122,9 +157,29 @@ export class ErpFlowsApprovals extends LitElement {
   /** Ids being decided right now, so a double tap cannot send the decision twice. */
   @state() private busy: string[] = [];
 
+  /** What is typed under each row before it is decided. Sent WITH the decision, never alone. */
+  @state() private comments: Record<string, string> = {};
+
+  private unsubscribes: (() => void)[] = [];
+
   connectedCallback(): void {
     super.connectedCallback();
     void this.load();
+    // The kernel emits both facts as ephemeral WS events (hub#950/hub#972). Without them a tray
+    // open all night keeps showing a question that can no longer be answered, and misses one asked
+    // at 8:00 until somebody reloads. A client with no bus (the dev preview) simply polls on open.
+    const subscribe = this.client?.subscribe;
+    if (typeof subscribe === 'function') {
+      for (const event of [EVENT_APPROVAL_CREATED, EVENT_APPROVAL_EXPIRED]) {
+        this.unsubscribes.push(subscribe.call(this.client, event, () => void this.load()));
+      }
+    }
+  }
+
+  disconnectedCallback(): void {
+    for (const off of this.unsubscribes) off();
+    this.unsubscribes = [];
+    super.disconnectedCallback();
   }
 
   /** Public so the shell can refresh the tray after a run without remounting it. */
@@ -164,14 +219,20 @@ export class ErpFlowsApprovals extends LitElement {
     this.busy = [...this.busy, row.id];
     this.error = '';
     try {
-      await call.call(this.client?.flows, row.id);
+      // The body is OPTIONAL and only travels when there is something in it: without a comment
+      // the call is exactly what it was before hub#950, so an older hub answers as it always did.
+      const comment = (this.comments[row.id] ?? '').trim();
+      if (comment) await call.call(this.client?.flows, row.id, { comment });
+      else await call.call(this.client?.flows, row.id);
       this.rows = this.rows.filter((r) => r.id !== row.id);
+      const { [row.id]: _sent, ...rest } = this.comments;
+      this.comments = rest;
       this.announce();
     } catch (e) {
-      // The row STAYS. `flow.approval_already_decided` and `flow.approval_expired` both mean the
-      // write did not happen — dropping the row would say the opposite on the only screen that
-      // reports it.
-      this.error = (e as Error)?.message || this.t('ui.errGeneric');
+      // The row STAYS. All three codes mean the write did not happen — dropping the row would say
+      // the opposite on the only screen that reports it. And each is said in words: `not_yours` is
+      // a 403 the person can act on (find who was asked), which an opaque code is not.
+      this.error = this.refusal(e);
     } finally {
       this.busy = this.busy.filter((id) => id !== row.id);
     }
@@ -187,6 +248,25 @@ export class ErpFlowsApprovals extends LitElement {
       hour: '2-digit',
       minute: '2-digit',
     });
+  }
+
+  /** The hub's refusal, in words the person can act on; its raw message when it is none of ours. */
+  private refusal(e: unknown): string {
+    switch (errorCode(e)) {
+      case APPROVAL_EXPIRED:
+        return this.t('ui.approvalErrExpired');
+      case APPROVAL_ALREADY_DECIDED:
+        return this.t('ui.approvalErrAlreadyDecided');
+      case APPROVAL_NOT_YOURS:
+        return this.t('ui.approvalErrNotYours');
+      default:
+        return (e as Error)?.message || this.t('ui.errGeneric');
+    }
+  }
+
+  /** `command` unless the row says `decision`: a row older than hub#950 is a model's proposal. */
+  private kindOf(row: Approval): 'command' | 'decision' {
+    return row.kind === 'decision' ? 'decision' : 'command';
   }
 
   /** The payload, as the thing that is about to be written — never trimmed to fit. */
@@ -209,14 +289,41 @@ export class ErpFlowsApprovals extends LitElement {
       ${!this.rows.length
         ? html`<span class="muted">${this.t('ui.approvalsEmpty')}</span>`
         : html`<span class="muted">${this.t('ui.approvalsIntro')}</span>`}
-      ${this.rows.map(
-        (row) => html`<div class="card" data-approval=${row.id}>
-          <span class="what">${this.t('ui.approvalWould', { command: row.command ?? '' })}</span>
-          ${row.reason ? html`<span class="why">${row.reason}</span>` : nothing}
-          <pre>${this.payload(row)}</pre>
-          <span class="meta"
-            >${this.t('ui.approvalExpires', { when: this.when(row.expires_at) })}</span
-          >
+      ${this.rows.map((row) => {
+        const kind = this.kindOf(row);
+        const when = this.when(row.expires_at);
+        return html`<div class="card" data-approval=${row.id} data-kind=${kind}>
+          ${kind === 'decision'
+            ? html`<span class="question">${row.title ?? ''}</span>
+                ${row.summary ? html`<span class="why">${row.summary}</span>` : nothing}
+                <span class="meta"
+                  >${row.assignee_role
+                    ? this.t('ui.approvalAskedRole', { role: row.assignee_role })
+                    : this.t('ui.approvalAskedAdmins')}</span
+                >`
+            : html`<span class="what">${this.t('ui.approvalWould', { command: row.command ?? '' })}</span>
+                ${row.reason ? html`<span class="why">${row.reason}</span>` : nothing}
+                <pre>${this.payload(row)}</pre>`}
+          <!-- What waiting costs, and what a no costs — in the words of the policies the flow
+               chose. A model's proposal has neither: expiring it simply never runs it. -->
+          ${kind === 'decision'
+            ? html`<span class="meta"
+                  >${this.t(`ui.approvalExpires_${policy(row.on_expire, 'reject')}`, { when })}</span
+                >
+                <span class="meta"
+                  >${this.t(`ui.approvalOnReject_${policy(row.on_reject, 'cancel')}`)}</span
+                >`
+            : html`<span class="meta">${this.t('ui.approvalExpires', { when })}</span>`}
+          <textarea
+            data-field="comment"
+            rows="1"
+            aria-label=${this.t('ui.approvalComment')}
+            placeholder=${this.t('ui.approvalComment')}
+            .value=${this.comments[row.id] ?? ''}
+            @input=${(e: Event) => {
+              this.comments = { ...this.comments, [row.id]: (e.target as HTMLTextAreaElement).value };
+            }}
+          ></textarea>
           <div class="actions">
             <button
               type="button"
@@ -238,10 +345,15 @@ export class ErpFlowsApprovals extends LitElement {
               ${this.t('ui.approvalReject')}
             </button>
           </div>
-        </div>`,
-      )}
+        </div>`;
+      })}
     </div>`;
   }
+}
+
+/** A policy the row carries, or the kernel's default when the row predates the column. */
+function policy(value: string | undefined, fallback: string): string {
+  return value && /^[a-z_]+$/.test(value) ? value : fallback;
 }
 
 define('erp-flows-approvals', ErpFlowsApprovals);

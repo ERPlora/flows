@@ -318,6 +318,32 @@ describe('«probar»: what this flow WOULD do, with nothing actually happening',
     expect(out.steps[1].condition?.uncertain).toBe(true);
   });
 
+  it('says an approval step WAITS for a person and decides nothing on their behalf (flows#31)', () => {
+    // «Probar» must not invent a yes. The honest thing is: the question, as it would be asked
+    // (title and summary resolved), a mark that the run pauses here, and the steps after it
+    // shown as they are — with a guard on the decision UNCERTAIN, since all three outcomes are
+    // still possible.
+    const out = simulate(
+      doc([
+        { id: 'ok', kind: 'approval', title: 'Approve {{input.total}} €?', summary: 'From {{input.who}}' },
+        { id: 'g', kind: 'condition', when: { 'steps.ok.decision': { eq: 'approved' } } },
+        { id: 'do', kind: 'command', command: 'tasks.tasks.create', params: {} },
+      ]),
+      { total: '120', who: 'Marta' },
+    );
+    expect(out.steps[0].outcome).toBe('would-run');
+    expect(out.steps[0].pauses).toBe(true);
+    expect(out.steps[0].values).toEqual([
+      { label: 'title', text: 'Approve 120 €?', blank: false, redacted: false },
+      { label: 'summary', text: 'From Marta', blank: false, redacted: false },
+    ]);
+    expect(out.steps[1].outcome).toBe('would-run');
+    expect(out.steps[1].condition?.uncertain).toBe(true);
+    expect(out.steps[2].outcome).toBe('would-run');
+    // No other kind pauses.
+    expect(out.steps[2].pauses).toBeUndefined();
+  });
+
   it('reads a later step as unknown rather than pretending to know its output', () => {
     // `steps.s1.id` is real in the kernel and unknowable here: nothing ran. Calling it a blank
     // would report a bug that is not there.

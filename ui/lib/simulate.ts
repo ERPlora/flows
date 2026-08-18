@@ -340,6 +340,12 @@ export interface SimulatedStep {
   values: SimulatedValue[];
   /** For a guard: the clauses that did not hold, and whether the verdict is trustworthy. */
   condition?: ConditionResult;
+  /**
+   * An `approval` step (hub#950): the run PARKS here until a person answers. The preview decides
+   * nothing on their behalf — every step after it is shown as it would be, and a guard on the
+   * decision is uncertain, because all three outcomes are still possible.
+   */
+  pauses?: boolean;
 }
 
 export interface Simulation {
@@ -418,6 +424,11 @@ function stepValues(step: Step, scope: unknown): SimulatedValue[] {
     add('prompt', step.prompt ?? '');
   } else if (step.kind === 'notify') {
     for (const [key, value] of Object.entries(step.vars ?? {})) add(key, value);
+  } else if (step.kind === 'approval') {
+    // The question as it would be ASKED: the kernel templates title and summary when it creates
+    // the request, so this is exactly what the tray would show.
+    add('title', step.title ?? '');
+    if (typeof step.summary === 'string' && step.summary !== '') add('summary', step.summary);
   }
   return out;
 }
@@ -468,6 +479,7 @@ export function simulate(doc: FlowDoc, input: Record<string, unknown>): Simulati
       kind: step.kind,
       outcome: 'would-run',
       values: stepValues(step, scope),
+      ...(step.kind === 'approval' ? { pauses: true } : {}),
     });
   }
 
