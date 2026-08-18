@@ -1,5 +1,6 @@
 {
   "name": "Automations",
+  "description": "Automate repetitive work without writing code: appointment reminders, low-stock alerts and messages to customers that go out on their own.",
   "navigation": {
     "automations": {
       "label": "Automations"
@@ -109,6 +110,14 @@
     "commandHint": "The name of a command in this hub, for example sales.sale.create. You will be asked to allow it before it can run.",
     "paramsTitle": "With this information",
     "addParam": "Add information",
+    "queryLabel": "What to look up",
+    "queryHint": "The name of a read in this hub, for example inventory.stock.low. It has to exist here, and you will be asked to allow it before it runs. Nothing is changed by looking something up.",
+    "queryResult": "What to keep",
+    "queryResult_first": "The first row it finds, field by field",
+    "queryResult_count": "Only how many there are",
+    "queryLimit": "At most this many rows",
+    "queryLimitHint": "Between 1 and {max}. The hub refuses more instead of quietly cutting the read short.",
+    "queryOutputsHint": "The next steps can use {paths}. If nothing is found the automation carries on with found = false — add a condition on it to stop there.",
     "paramName": "Name",
     "paramValue": "Value",
     "insertField": "Insert a field",
@@ -178,6 +187,8 @@
     "ranFailed": "Stopped: {reason}",
     "ranFailedUnknown": "no reason given",
     "ranStep": "A “{kind}” step",
+    "ranQueryFound": "Found {count}",
+    "ranQueryNothing": "Found nothing, and carried on",
     "runNow": "Run it now",
     "runStarted": "It is running. Its result appears here in a moment.",
     "loadMore": "Show older",
@@ -234,6 +245,7 @@
     "addNotify": "Send a message",
     "addHttp": "Call another system",
     "addAi": "Ask the assistant",
+    "addQuery": "Look something up",
     "stepHttp": "Calls {host} ({method})",
     "stepHttpEmpty": "Pick the address this step calls",
     "stepHttpTemplatedHost": "Calls whatever address the data says ({method})",
@@ -243,6 +255,9 @@
     "stepNotifyEmail": "Sends an email to the {field} on file",
     "stepNotifyWhatsapp": "Sends a WhatsApp to the {field} on file",
     "stepNotifyEmpty": "Pick who this message goes to",
+    "stepQuery": "Looks up {query}",
+    "stepQueryCount": "Counts {query}",
+    "stepQueryEmpty": "Pick what to look up",
     "httpMethod": "Method",
     "httpUrl": "Address",
     "httpGrantHint": "This step will ask you to allow calls to {pattern}",

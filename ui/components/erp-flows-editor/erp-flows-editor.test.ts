@@ -363,6 +363,103 @@ describe('the ai step (flows#3)', () => {
   });
 });
 
+describe('the query step — the deterministic read (hub#954, flows#30)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const open = async (el: ErpFlowsEditor): Promise<Element> => {
+    (el.renderRoot.querySelector('[data-node="w"] button.open') as HTMLButtonElement).click();
+    await el.updateComplete;
+    return el.renderRoot.querySelector('[data-node="w"] .panel')!;
+  };
+
+  const queryFlow = (over: Record<string, unknown> = {}) =>
+    flowWith([
+      { id: 'w', kind: 'query', query: 'sales.summary', params: { day: 'input.day' }, result: 'first', limit: 200, ...over },
+    ]);
+
+  it('is on the palette, next to the guard it is meant to be followed by', async () => {
+    // Until flows#30 the seventh kind opened READ-ONLY: the owner could see it and not fix it.
+    const el = await mount(flowWith([]));
+    const adders = Array.from(el.renderRoot.querySelectorAll('.adders button[data-add]')).map((b) =>
+      b.getAttribute('data-add'),
+    );
+    expect(adders).toContain('query');
+    expect(adders.indexOf('query')).toBeLessThan(adders.indexOf('condition'));
+    (el.renderRoot.querySelector('.adders button[data-add="query"]') as HTMLButtonElement).click();
+    await el.updateComplete;
+    expect(el.document.steps[0]).toMatchObject({ kind: 'query', query: '', result: 'first', limit: 200 });
+  });
+
+  it('draws the read, its params, what to keep and how many rows', async () => {
+    const el = await mount(queryFlow());
+    const panel = await open(el);
+    expect(panel.querySelector('input[data-field="query"]')).toBeTruthy();
+    expect(panel.querySelector('select[data-field="result"]')).toBeTruthy();
+    expect(panel.querySelector('input[data-field="limit"]')).toBeTruthy();
+    // The one existing param is drawn as a name + a composed value, like a command's.
+    expect(panel.querySelector('erp-flows-value')).toBeTruthy();
+    expect(panel.textContent).toContain('ui.queryHint');
+  });
+
+  it('offers `first` and `count`, and NEVER `rows`', async () => {
+    // The mapping language cannot index an array: `steps.w.rows.0.total` would resolve to nothing
+    // in silence, and the kernel refuses `result: "rows"` at save for that reason.
+    const el = await mount(queryFlow());
+    const panel = await open(el);
+    const options = Array.from(panel.querySelectorAll('select[data-field="result"] option')).map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+    expect(options).toEqual(['first', 'count']);
+  });
+
+  it('keeps the limit inside 1..200, which the hub refuses above rather than trims', async () => {
+    const el = await mount(queryFlow());
+    const panel = await open(el);
+    const input = panel.querySelector('input[data-field="limit"]') as HTMLInputElement;
+    input.value = '5000';
+    input.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.document.steps[0].limit).toBe(200);
+    input.value = '0';
+    input.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.document.steps[0].limit).toBe(1);
+  });
+
+  it('tells the owner what the next step can read out of it — found and count, no rows', async () => {
+    const el = await mount(queryFlow());
+    const panel = await open(el);
+    const text = panel.textContent ?? '';
+    expect(text).toContain('steps.w.found');
+    expect(text).toContain('steps.w.count');
+    expect(text).not.toContain('rows');
+  });
+
+  it('writes the read name and asks for its grant on the permissions tab', async () => {
+    const el = await mount(queryFlow({ query: '' }));
+    const panel = await open(el);
+    const input = panel.querySelector('input[data-field="query"]') as HTMLInputElement;
+    input.value = ' inventory.stock.low ';
+    input.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.document.steps[0].query).toBe('inventory.stock.low');
+    el.tab = 'permissions';
+    await el.updateComplete;
+    expect(el.renderRoot.textContent).toContain('inventory.stock.low');
+  });
+
+  it('adds a param without inventing a key the kernel refuses', async () => {
+    const el = await mount(queryFlow());
+    const panel = await open(el);
+    (panel.querySelector('button[data-act="add-param"]') as HTMLButtonElement).click();
+    await el.updateComplete;
+    const allowed = ['id', 'kind', 'query', 'params', 'result', 'limit'];
+    expect(Object.keys(el.document.steps[0]).filter((k) => !allowed.includes(k))).toEqual([]);
+  });
+});
+
 describe('the notify step (flows#3)', () => {
   beforeEach(() => {
     document.body.replaceChildren();

@@ -2135,6 +2135,11 @@ function describeStep(step, t3) {
       const key2 = step.channel === "whatsapp" ? "ui.stepNotifyWhatsapp" : "ui.stepNotifyEmail";
       return t3(key2, { field: humaniseField(String(field)) });
     }
+    case "query": {
+      const query = typeof step.query === "string" ? step.query.trim() : "";
+      if (!query) return t3("ui.stepQueryEmpty");
+      return t3(step.result === "count" ? "ui.stepQueryCount" : "ui.stepQuery", { query });
+    }
     default:
       return t3("ui.stepUnsupported", { kind: step.kind });
   }
@@ -2191,6 +2196,10 @@ function describeRunStep(row, t3, spec) {
   if (row.kind === "command") {
     const command = typeof spec?.command === "string" ? spec.command : "";
     return command ? t3("ui.ranCommand", { command }) : t3("ui.ranCommandUnnamed");
+  }
+  if (row.kind === "query") {
+    const output = row.output;
+    return output?.found ? t3("ui.ranQueryFound", { count: output.count ?? 0 }) : t3("ui.ranQueryNothing");
   }
   return t3("ui.ranStep", { kind: row.kind ?? "" });
 }
@@ -2473,8 +2482,11 @@ var STEP_KEYS = {
   delay: ["id", "kind", "seconds", "until"],
   http: ["id", "kind", "method", "url", "headers", "body", "timeout"],
   ai: ["id", "kind", "prompt", "tools", "policy", "max_iters"],
-  notify: ["id", "kind", "channel", "to", "template", "vars"]
+  notify: ["id", "kind", "channel", "to", "template", "vars"],
+  query: ["id", "kind", "query", "params", "result", "limit"]
 };
+var QUERY_RESULTS = ["first", "count"];
+var MAX_QUERY_ROWS = 200;
 var HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 var NOTIFY_CHANNELS = ["email", "whatsapp"];
 var MAX_ITERS_CAP = 10;
@@ -2513,6 +2525,9 @@ function blankStep(id, kind) {
   }
   if (kind === "notify") {
     return { id, kind, channel: "email", to: { query: "", params: {}, field: "" }, vars: {} };
+  }
+  if (kind === "query") {
+    return { id, kind, query: "", params: {}, result: "first", limit: MAX_QUERY_ROWS };
   }
   return { id, kind, command: "", params: {} };
 }
@@ -2612,6 +2627,11 @@ function requiredGrants(doc) {
         for (const query of step.tools?.queries ?? []) need("query", query);
         for (const command of step.tools?.commands ?? []) need("command", command);
         break;
+      // The SAME grant kind an ai tool asks for (hub#954 added no permission surface): what
+      // changed is that reading no longer needs a model in between, not who may read.
+      case "query":
+        need("query", step.query);
+        break;
       // TWO grants, never one. The channel is what it costs (Meta bills every WhatsApp, an email is
       // free); the recipient is who gets written to. Allowing one says nothing about the other.
       case "notify": {
@@ -2666,6 +2686,10 @@ function mergeGrants(live, add, revoke) {
     out.push({ kind: g3.kind, value: g3.value });
   }
   return out;
+}
+function queryOutputs(step) {
+  const base = [`steps.${step.id}.found`, `steps.${step.id}.count`];
+  return step.result === "count" ? base : [...base, `steps.${step.id}.<field>`];
 }
 
 // modules/flows/ui/lib/trigger-catalog.ts
@@ -2936,6 +2960,10 @@ function conditionResult(when, scope) {
         uncertain = true;
         continue;
       }
+      if (actual === UNKNOWN) {
+        uncertain = true;
+        continue;
+      }
       if (!evalOp(operator, actual, expected)) failed.push({ path, op: operator, expected });
     }
   }
@@ -2981,7 +3009,7 @@ function stepValues(step, scope) {
     }
     out.push({ label, text, blank, redacted, ...unknown ? { unknown } : {} });
   };
-  if (step.kind === "command") {
+  if (step.kind === "command" || step.kind === "query") {
     for (const [key2, value] of Object.entries(step.params ?? {})) add(key2, value);
   } else if (step.kind === "http") {
     add("url", step.url ?? "");
@@ -4156,6 +4184,7 @@ var ErpFlowsEditor = class extends i3 {
     if (step.kind === "http") return this.renderHttpPanel(step, index);
     if (step.kind === "ai") return this.renderAiPanel(step, index);
     if (step.kind === "notify") return this.renderNotifyPanel(step, index);
+    if (step.kind === "query") return this.renderQueryPanel(step, index);
     return this.renderCommandPanel(step, index);
   }
   /**
@@ -4689,8 +4718,6 @@ var ErpFlowsEditor = class extends i3 {
     `;
   }
   renderCommandPanel(step, index) {
-    const params = Object.entries(step.params ?? {});
-    const setParams = (entries) => this.setDoc(patchStep(this.document, index, { params: Object.fromEntries(entries) }));
     return b2`
       <div class="field">
         <label for="c-${step.id}">${this.t("ui.commandLabel")}</label>
@@ -4704,6 +4731,88 @@ var ErpFlowsEditor = class extends i3 {
         />
         <span class="hint">${this.t("ui.commandHint")}</span>
       </div>
+      ${this.renderParams(step, index)}
+    `;
+  }
+  /**
+   * **The `query` step** — the deterministic read (hub#954, flows#30). Until it existed a flow
+   * could only read by putting an `ai` step in the way: a metered, non-deterministic call to a
+   * model to answer «is there any stock left». Now it reads without one.
+   *
+   * Three things the hub checks and refuses are drawn here so the refusal never reaches the
+   * owner as an error code: the read must EXIST (404 at save — typed here, because there is no
+   * door in the module SDK that lists a hub's queries, exactly as `command` is typed), `result`
+   * is `first`/`count` and never `rows`, and `limit` is 1..200 — clamped in the box, since the
+   * kernel refuses above the ceiling rather than trimming.
+   */
+  renderQueryPanel(step, index) {
+    const result = String(step.result ?? "first");
+    return b2`
+      <div class="field">
+        <label for="q-${step.id}">${this.t("ui.queryLabel")}</label>
+        <input
+          id="q-${step.id}"
+          data-field="query"
+          type="text"
+          .value=${String(step.query ?? "")}
+          @change=${(e4) => this.setDoc(
+      patchStep(this.document, index, { query: e4.target.value.trim() })
+    )}
+        />
+        <span class="hint">${this.t("ui.queryHint")}</span>
+      </div>
+      ${this.renderParams(step, index)}
+
+      <div class="param-row">
+        <div class="field">
+          <label for="qr-${step.id}">${this.t("ui.queryResult")}</label>
+          <select
+            id="qr-${step.id}"
+            data-field="result"
+            .value=${result}
+            @change=${(e4) => this.setDoc(
+      patchStep(this.document, index, {
+        result: e4.target.value
+      })
+    )}
+          >
+            <!-- Two options and no "rows": the mapping language cannot index an array, so a
+                 step that kept a list would leave behind something no later step could read. -->
+            ${QUERY_RESULTS.map((r6) => option(r6, this.t(`ui.queryResult_${r6}`), result))}
+          </select>
+        </div>
+        <div class="field">
+          <label for="ql-${step.id}">${this.t("ui.queryLimit")}</label>
+          <input
+            id="ql-${step.id}"
+            data-field="limit"
+            type="number"
+            min="1"
+            max=${MAX_QUERY_ROWS}
+            .value=${String(step.limit ?? MAX_QUERY_ROWS)}
+            @change=${(e4) => this.setDoc(
+      patchStep(this.document, index, {
+        // The kernel REFUSES above the ceiling rather than trimming
+        // (flow.limit_out_of_range). Clamping here keeps that refusal off the owner's screen.
+        limit: clamp(Number(e4.target.value), 1, MAX_QUERY_ROWS, MAX_QUERY_ROWS)
+      })
+    )}
+          />
+          <span class="hint">${this.t("ui.queryLimitHint", { max: MAX_QUERY_ROWS })}</span>
+        </div>
+      </div>
+      <!-- What the NEXT step can read. Zero rows is not a failure: the run carries on with
+           found = false, and a guard on it is how «warn me IF there is low stock» is written. -->
+      <span class="hint" data-field="query-outputs"
+        >${this.t("ui.queryOutputsHint", { paths: queryOutputs(step).join(", ") })}</span
+      >
+    `;
+  }
+  /** The `params` of a `command` or a `query` step: a name and a composed value per row. */
+  renderParams(step, index) {
+    const params = Object.entries(step.params ?? {});
+    const setParams = (entries) => this.setDoc(patchStep(this.document, index, { params: Object.fromEntries(entries) }));
+    return b2`
       <span class="eyebrow">${this.t("ui.paramsTitle")}</span>
       ${params.map(
       ([key2, value], i4) => b2`<div class="param-row">
@@ -4740,7 +4849,7 @@ var ErpFlowsEditor = class extends i3 {
         </div>`
     )}
       <div class="adders" style="margin-left:0">
-        <button type="button" @click=${() => setParams([...params, ["", ""]])}>
+        <button type="button" data-act="add-param" @click=${() => setParams([...params, ["", ""]])}>
           ${this.t("ui.addParam")}
         </button>
       </div>
@@ -4756,11 +4865,14 @@ var ErpFlowsEditor = class extends i3 {
           ${this.document.steps.map((step, i4) => this.renderStepNode(step, i4))}
         </ion-reorder-group>
         ${this.document.steps.length === 0 ? b2`<div class="node"><span class="hint">${this.t("ui.noSteps")}</span></div>` : A}
-        <!-- Order is by how often a shop owner reaches for one, not by the kernel's enum. The ai one is
-             last because it is the one that costs money and the one that needs the most reading. -->
+        <!-- Order is by how often a shop owner reaches for one, not by the kernel's enum. The read
+             sits right before the guard because that is the pair it is used in (query → condition
+             on found); the ai one is last because it is the one that costs money and the one that
+             needs the most reading. -->
         <div class="adders">
           ${[
       ["command", "ui.addCommand"],
+      ["query", "ui.addQuery"],
       ["condition", "ui.addGuard"],
       ["delay", "ui.addDelay"],
       ["notify", "ui.addNotify"],
@@ -6871,7 +6983,8 @@ function schemaFacts(schema) {
       "delay",
       "http",
       "ai",
-      "notify"
+      "notify",
+      "query"
     ],
     triggerKinds: enumAt(schema, ["$defs", "trigger", "properties", "kind", "enum"]) ?? [
       "event",
@@ -7009,6 +7122,7 @@ function draftGaps(doc, known) {
 // modules/flows/locales/es.json
 var es_default = {
   name: "Automatizaciones",
+  description: "Automatiza el trabajo repetitivo sin programar: recordatorios de citas, avisos de stock bajo y mensajes a clientes que salen solos.",
   navigation: {
     automations: {
       label: "Automatizaciones"
@@ -7118,6 +7232,14 @@ var es_default = {
     commandHint: "El nombre de un comando de este hub, por ejemplo sales.sale.create. Antes de que pueda ejecutarse se te pedir\xE1 que lo autorices.",
     paramsTitle: "Con esta informaci\xF3n",
     addParam: "A\xF1adir informaci\xF3n",
+    queryLabel: "Qu\xE9 consultar",
+    queryHint: "El nombre de una consulta de este hub, por ejemplo inventory.stock.low. Tiene que existir aqu\xED, y antes de que se ejecute se te pedir\xE1 que la autorices. Consultar no cambia nada.",
+    queryResult: "Qu\xE9 guardar",
+    queryResult_first: "La primera fila que encuentre, campo a campo",
+    queryResult_count: "Solo cu\xE1ntas hay",
+    queryLimit: "Como mucho estas filas",
+    queryLimitHint: "Entre 1 y {max}. El hub rechaza m\xE1s en vez de recortar la consulta sin avisar.",
+    queryOutputsHint: "Los pasos siguientes pueden usar {paths}. Si no encuentra nada, la automatizaci\xF3n sigue con found = false: a\xF1ade una condici\xF3n sobre ello para parar ah\xED.",
     paramName: "Nombre",
     paramValue: "Valor",
     insertField: "Insertar un dato",
@@ -7187,6 +7309,8 @@ var es_default = {
     ranFailed: "Se par\xF3: {reason}",
     ranFailedUnknown: "sin motivo indicado",
     ranStep: "Un paso \xAB{kind}\xBB",
+    ranQueryFound: "Encontr\xF3 {count}",
+    ranQueryNothing: "No encontr\xF3 nada, y sigui\xF3",
     runNow: "Ejecutar ahora",
     runStarted: "Est\xE1 en marcha. Su resultado aparece aqu\xED en un momento.",
     loadMore: "Ver m\xE1s antiguas",
@@ -7243,6 +7367,7 @@ var es_default = {
     addNotify: "Enviar un mensaje",
     addHttp: "Llamar a otro sistema",
     addAi: "Ped\xEDrselo al asistente",
+    addQuery: "Consultar algo",
     stepHttp: "Llama a {host} ({method})",
     stepHttpEmpty: "Elige a qu\xE9 direcci\xF3n llama este paso",
     stepHttpTemplatedHost: "Llama a la direcci\xF3n que digan los datos ({method})",
@@ -7252,6 +7377,9 @@ var es_default = {
     stepNotifyEmail: "Env\xEDa un email al {field} de la ficha",
     stepNotifyWhatsapp: "Env\xEDa un WhatsApp al {field} de la ficha",
     stepNotifyEmpty: "Elige a qui\xE9n va este mensaje",
+    stepQuery: "Consulta {query}",
+    stepQueryCount: "Cuenta {query}",
+    stepQueryEmpty: "Elige qu\xE9 consultar",
     httpMethod: "M\xE9todo",
     httpUrl: "Direcci\xF3n",
     httpGrantHint: "Este paso te pedir\xE1 permiso para llamar a {pattern}",
@@ -7519,6 +7647,7 @@ var es_default = {
 // modules/flows/locales/en.json
 var en_default = {
   name: "Automations",
+  description: "Automate repetitive work without writing code: appointment reminders, low-stock alerts and messages to customers that go out on their own.",
   navigation: {
     automations: {
       label: "Automations"
@@ -7628,6 +7757,14 @@ var en_default = {
     commandHint: "The name of a command in this hub, for example sales.sale.create. You will be asked to allow it before it can run.",
     paramsTitle: "With this information",
     addParam: "Add information",
+    queryLabel: "What to look up",
+    queryHint: "The name of a read in this hub, for example inventory.stock.low. It has to exist here, and you will be asked to allow it before it runs. Nothing is changed by looking something up.",
+    queryResult: "What to keep",
+    queryResult_first: "The first row it finds, field by field",
+    queryResult_count: "Only how many there are",
+    queryLimit: "At most this many rows",
+    queryLimitHint: "Between 1 and {max}. The hub refuses more instead of quietly cutting the read short.",
+    queryOutputsHint: "The next steps can use {paths}. If nothing is found the automation carries on with found = false \u2014 add a condition on it to stop there.",
     paramName: "Name",
     paramValue: "Value",
     insertField: "Insert a field",
@@ -7697,6 +7834,8 @@ var en_default = {
     ranFailed: "Stopped: {reason}",
     ranFailedUnknown: "no reason given",
     ranStep: "A \u201C{kind}\u201D step",
+    ranQueryFound: "Found {count}",
+    ranQueryNothing: "Found nothing, and carried on",
     runNow: "Run it now",
     runStarted: "It is running. Its result appears here in a moment.",
     loadMore: "Show older",
@@ -7753,6 +7892,7 @@ var en_default = {
     addNotify: "Send a message",
     addHttp: "Call another system",
     addAi: "Ask the assistant",
+    addQuery: "Look something up",
     stepHttp: "Calls {host} ({method})",
     stepHttpEmpty: "Pick the address this step calls",
     stepHttpTemplatedHost: "Calls whatever address the data says ({method})",
@@ -7762,6 +7902,9 @@ var en_default = {
     stepNotifyEmail: "Sends an email to the {field} on file",
     stepNotifyWhatsapp: "Sends a WhatsApp to the {field} on file",
     stepNotifyEmpty: "Pick who this message goes to",
+    stepQuery: "Looks up {query}",
+    stepQueryCount: "Counts {query}",
+    stepQueryEmpty: "Pick what to look up",
     httpMethod: "Method",
     httpUrl: "Address",
     httpGrantHint: "This step will ask you to allow calls to {pattern}",

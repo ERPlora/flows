@@ -10,9 +10,12 @@ import type { ErpFlowsValue } from '../erp-flows-value/erp-flows-value';
 import {
   HTTP_METHODS,
   MAX_ITERS_CAP,
+  MAX_QUERY_ROWS,
   MAX_TIMEOUT_SECONDS,
   NOTIFY_CHANNELS,
   OPERATORS,
+  QUERY_RESULTS,
+  queryOutputs,
   addStep,
   emptyDoc,
   missingGrants,
@@ -34,6 +37,7 @@ import type {
   FlowDoc,
   Grant,
   Operator,
+  QueryResult,
   Recipient,
   Step,
   StepKind,
@@ -1327,6 +1331,7 @@ export class ErpFlowsEditor extends LitElement {
     if (step.kind === 'http') return this.renderHttpPanel(step, index);
     if (step.kind === 'ai') return this.renderAiPanel(step, index);
     if (step.kind === 'notify') return this.renderNotifyPanel(step, index);
+    if (step.kind === 'query') return this.renderQueryPanel(step, index);
     return this.renderCommandPanel(step, index);
   }
 
@@ -1903,9 +1908,6 @@ export class ErpFlowsEditor extends LitElement {
   }
 
   private renderCommandPanel(step: Step, index: number) {
-    const params = Object.entries(step.params ?? {});
-    const setParams = (entries: [string, unknown][]): void =>
-      this.setDoc(patchStep(this.document, index, { params: Object.fromEntries(entries) }));
     return html`
       <div class="field">
         <label for="c-${step.id}">${this.t('ui.commandLabel')}</label>
@@ -1920,6 +1922,94 @@ export class ErpFlowsEditor extends LitElement {
         />
         <span class="hint">${this.t('ui.commandHint')}</span>
       </div>
+      ${this.renderParams(step, index)}
+    `;
+  }
+
+  /**
+   * **The `query` step** — the deterministic read (hub#954, flows#30). Until it existed a flow
+   * could only read by putting an `ai` step in the way: a metered, non-deterministic call to a
+   * model to answer «is there any stock left». Now it reads without one.
+   *
+   * Three things the hub checks and refuses are drawn here so the refusal never reaches the
+   * owner as an error code: the read must EXIST (404 at save — typed here, because there is no
+   * door in the module SDK that lists a hub's queries, exactly as `command` is typed), `result`
+   * is `first`/`count` and never `rows`, and `limit` is 1..200 — clamped in the box, since the
+   * kernel refuses above the ceiling rather than trimming.
+   */
+  private renderQueryPanel(step: Step, index: number) {
+    const result = String(step.result ?? 'first');
+    return html`
+      <div class="field">
+        <label for="q-${step.id}">${this.t('ui.queryLabel')}</label>
+        <input
+          id="q-${step.id}"
+          data-field="query"
+          type="text"
+          .value=${String(step.query ?? '')}
+          @change=${(e: Event) =>
+            this.setDoc(
+              patchStep(this.document, index, { query: (e.target as HTMLInputElement).value.trim() }),
+            )}
+        />
+        <span class="hint">${this.t('ui.queryHint')}</span>
+      </div>
+      ${this.renderParams(step, index)}
+
+      <div class="param-row">
+        <div class="field">
+          <label for="qr-${step.id}">${this.t('ui.queryResult')}</label>
+          <select
+            id="qr-${step.id}"
+            data-field="result"
+            .value=${result}
+            @change=${(e: Event) =>
+              this.setDoc(
+                patchStep(this.document, index, {
+                  result: (e.target as HTMLSelectElement).value as QueryResult,
+                }),
+              )}
+          >
+            <!-- Two options and no "rows": the mapping language cannot index an array, so a
+                 step that kept a list would leave behind something no later step could read. -->
+            ${QUERY_RESULTS.map((r) => option(r, this.t(`ui.queryResult_${r}`), result))}
+          </select>
+        </div>
+        <div class="field">
+          <label for="ql-${step.id}">${this.t('ui.queryLimit')}</label>
+          <input
+            id="ql-${step.id}"
+            data-field="limit"
+            type="number"
+            min="1"
+            max=${MAX_QUERY_ROWS}
+            .value=${String(step.limit ?? MAX_QUERY_ROWS)}
+            @change=${(e: Event) =>
+              this.setDoc(
+                patchStep(this.document, index, {
+                  // The kernel REFUSES above the ceiling rather than trimming
+                  // (flow.limit_out_of_range). Clamping here keeps that refusal off the owner's screen.
+                  limit: clamp(Number((e.target as HTMLInputElement).value), 1, MAX_QUERY_ROWS, MAX_QUERY_ROWS),
+                }),
+              )}
+          />
+          <span class="hint">${this.t('ui.queryLimitHint', { max: MAX_QUERY_ROWS })}</span>
+        </div>
+      </div>
+      <!-- What the NEXT step can read. Zero rows is not a failure: the run carries on with
+           found = false, and a guard on it is how «warn me IF there is low stock» is written. -->
+      <span class="hint" data-field="query-outputs"
+        >${this.t('ui.queryOutputsHint', { paths: queryOutputs(step).join(', ') })}</span
+      >
+    `;
+  }
+
+  /** The `params` of a `command` or a `query` step: a name and a composed value per row. */
+  private renderParams(step: Step, index: number) {
+    const params = Object.entries(step.params ?? {});
+    const setParams = (entries: [string, unknown][]): void =>
+      this.setDoc(patchStep(this.document, index, { params: Object.fromEntries(entries) }));
+    return html`
       <span class="eyebrow">${this.t('ui.paramsTitle')}</span>
       ${params.map(
         ([key, value], i) => html`<div class="param-row">
@@ -1958,7 +2048,7 @@ export class ErpFlowsEditor extends LitElement {
         </div>`,
       )}
       <div class="adders" style="margin-left:0">
-        <button type="button" @click=${() => setParams([...params, ['', '']])}>
+        <button type="button" data-act="add-param" @click=${() => setParams([...params, ['', '']])}>
           ${this.t('ui.addParam')}
         </button>
       </div>
@@ -1980,12 +2070,15 @@ export class ErpFlowsEditor extends LitElement {
         ${this.document.steps.length === 0
           ? html`<div class="node"><span class="hint">${this.t('ui.noSteps')}</span></div>`
           : nothing}
-        <!-- Order is by how often a shop owner reaches for one, not by the kernel's enum. The ai one is
-             last because it is the one that costs money and the one that needs the most reading. -->
+        <!-- Order is by how often a shop owner reaches for one, not by the kernel's enum. The read
+             sits right before the guard because that is the pair it is used in (query → condition
+             on found); the ai one is last because it is the one that costs money and the one that
+             needs the most reading. -->
         <div class="adders">
           ${(
             [
               ['command', 'ui.addCommand'],
+              ['query', 'ui.addQuery'],
               ['condition', 'ui.addGuard'],
               ['delay', 'ui.addDelay'],
               ['notify', 'ui.addNotify'],
