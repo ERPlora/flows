@@ -55,7 +55,13 @@ function fakeClient(overrides: { events?: Record<string, unknown> } = {}) {
       dead: vi.fn(async () => [dead()]),
       deadCount: vi.fn(async () => ({ count: 1 })),
       retry: vi.fn(async () => ({ id: 'e1a2b3c4', status: 'pending' })),
-      discard: vi.fn(async () => ({ id: 'e1a2b3c4', status: 'discarded' })),
+      // The hub answers with the stamp it WROTE (hub#955): who, and the reason as stored.
+      discard: vi.fn(async (_id: string, reason?: string) => ({
+        id: 'e1a2b3c4',
+        status: 'discarded',
+        discarded_by: 'hub_user:1',
+        discard_reason: (reason ?? '').trim(),
+      })),
       retryAll: vi.fn(async () => ({ retried: 2 })),
       trace: vi.fn(async () => ({ event: {}, runs: [], caused: [] })),
       ...overrides.events,
@@ -84,6 +90,14 @@ async function click(el: ErpFlowsDeadLetter, target: Element | null | undefined)
   target!.dispatchEvent(
     new MouseEvent('click', { bubbles: true, composed: true, cancelable: true }),
   );
+  await settle(el);
+}
+
+/** Typing, as a person does it: the value lands in the field and the field says so. */
+async function type(el: ErpFlowsDeadLetter, target: Element | null | undefined, value: string) {
+  expect(target, 'there is nowhere to write the reason').toBeTruthy();
+  (target as HTMLInputElement).value = value;
+  target!.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
   await settle(el);
 }
 
@@ -147,14 +161,94 @@ describe('the «needs your attention» tray: events that never happened', () => 
     expect(all(el, '[data-dead]')).toHaveLength(0);
   });
 
-  it('says what discarding records — and what it does NOT record', async () => {
-    // hub#955: the hub stores who and when, and no reason. Asking the owner «why?» and dropping
-    // the answer would be worse than not asking — it manufactures a paper trail that is not there.
-    const el = await mount();
+  it('asks WHY before closing, and sends it — the half of the stamp only a person knows', async () => {
+    // hub#955 added `discard_reason`: the hub takes who and when from the session and the clock,
+    // and the reason is the one thing it cannot know. Six months later «alguien lo cerró» is
+    // exactly the half that did not need storing.
+    const client = fakeClient();
+    const el = await mount(client);
 
     await click(el, q(el, '[data-act="discard"]'));
+    await type(el, q(el, '[data-field="discard-reason"]'), 'duplicada: la registré a mano');
+    await click(el, q(el, '[data-act="discard-confirm"]'));
 
-    expect(text(el)).toContain('ui.deadDiscardNoReason');
+    expect(client.events.discard).toHaveBeenCalledWith(
+      'e1a2b3c4',
+      'duplicada: la registré a mano',
+    );
+  });
+
+  it('does not turn closing into an essay: with the field empty it sends no reason at all', async () => {
+    // A queue that demands a written justification to close one row is a queue nobody drains, and
+    // an unexplained discard is still a legitimate decision. Optional means the call is unchanged.
+    const client = fakeClient();
+    const el = await mount(client);
+
+    await click(el, q(el, '[data-act="discard"]'));
+    await click(el, q(el, '[data-act="discard-confirm"]'));
+
+    expect(client.events.discard).toHaveBeenCalledWith('e1a2b3c4');
+    expect(all(el, '[data-dead]')).toHaveLength(0);
+  });
+
+  it('offers the reasons people actually write, one tap each', async () => {
+    // Counter tablet, one hand, no keyboard: the three answers that cover most closures are a tap,
+    // and the free text stays for the fourth. Same pattern as a POS void reason code.
+    const client = fakeClient();
+    const el = await mount(client);
+
+    await click(el, q(el, '[data-act="discard"]'));
+    const presets = all(el, '[data-act="reason-preset"]');
+    expect(presets.length, 'no shortcut means everyone types').toBeGreaterThan(1);
+
+    await click(el, presets[0]);
+    await click(el, q(el, '[data-act="discard-confirm"]'));
+
+    const [, sent] = (client.events.discard as unknown as { mock: { calls: string[][] } }).mock
+      .calls[0];
+    expect(sent, 'the tap has to fill the field it stands for').toBeTruthy();
+  });
+
+  it('shows the reason AS THE HUB STORED IT, never as it was typed', async () => {
+    // The runtime trims and caps it (`clamp_discard_reason`, 500 chars). Echoing the typed string
+    // would show a record the row does not hold — the exact drift an audit trail exists to prevent.
+    const client = fakeClient({
+      events: {
+        discard: vi.fn(async () => ({
+          id: 'e1a2b3c4',
+          status: 'discarded',
+          discarded_by: 'hub_user:1',
+          discard_reason: 'duplicada',
+        })),
+      },
+    });
+    const el = await mount(client);
+
+    await click(el, q(el, '[data-act="discard"]'));
+    await type(el, q(el, '[data-field="discard-reason"]'), '   duplicada   ');
+    await click(el, q(el, '[data-act="discard-confirm"]'));
+
+    // It stays on screen after the row leaves the tray: closing something is also a record.
+    const closed = q(el, '[data-discarded="e1a2b3c4"]');
+    expect(closed, 'a closure with no trace on screen is a closure nobody can check').toBeTruthy();
+    expect(closed!.textContent).toContain('duplicada');
+    expect(closed!.textContent).toContain('sale.completed');
+  });
+
+  it('on a hub that does not keep the reason, SAYS it was not kept', async () => {
+    // A hub older than hub#955 ignores the body and answers without the field. Rendering the typed
+    // sentence anyway would show the owner a record that was never written.
+    const client = fakeClient({
+      events: { discard: vi.fn(async () => ({ id: 'e1a2b3c4', status: 'discarded' })) },
+    });
+    const el = await mount(client);
+
+    await click(el, q(el, '[data-act="discard"]'));
+    await type(el, q(el, '[data-field="discard-reason"]'), 'duplicada');
+    await click(el, q(el, '[data-act="discard-confirm"]'));
+
+    expect(text(el)).toContain('ui.deadDiscardReasonNotKept');
+    expect(text(el)).not.toContain('duplicada');
   });
 
   it('keeps the row when the hub REFUSES the retry, and shows why', async () => {

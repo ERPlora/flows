@@ -2,9 +2,30 @@ import { LitElement, html, css, nothing } from 'lit';
 import { property, state } from 'lit/decorators.js';
 import { define } from '@erplora/outfitkit/define';
 import '@erplora/outfitkit/ok-inline-feedback';
-import { errorCode, type DeadEvent, type ModuleClient } from '../../lib/hub-flows';
+import {
+  errorCode,
+  type DeadEvent,
+  type DiscardResult,
+  type ModuleClient,
+} from '../../lib/hub-flows';
 import { classify } from '../../lib/run-trouble';
 import type { Translator } from '../../lib/plain-language';
+
+/**
+ * How much of a reason the hub keeps (`outbox::MAX_DISCARD_REASON`). Written into the field so the
+ * cut happens under the finger that types it, instead of silently in the row afterwards.
+ */
+const MAX_REASON = 500;
+
+/**
+ * The three answers that cover almost every closure, as one tap each.
+ *
+ * The market's own shape: a POS void, a refund, a cancelled order everywhere (Square, Toast,
+ * Lightspeed, Odoo) is closed with a **reason code from a short list, plus optional free text** —
+ * never with free text alone, because free text alone on a counter tablet means the field is left
+ * empty. The list is short on purpose: a dropdown of fifteen is slower than typing.
+ */
+const REASON_PRESETS = ['ui.deadReasonDuplicate', 'ui.deadReasonHandled', 'ui.deadReasonObsolete'];
 
 /**
  * **«Necesita atención» — the work that did NOT happen** (flows#20, on hub#953's surface).
@@ -23,9 +44,10 @@ import type { Translator } from '../../lib/plain-language';
  * - **A refusal keeps the row.** Removing it on a failed retry would tell the owner their invoice
  *   was re-sent when nothing moved — the one outcome a recovery tray must never produce.
  * - **Discarding is confirmed, and honest about what it records.** It is irreversible: the row
- *   stops counting, the relay never picks it up again. The hub stores WHO and WHEN and nothing
- *   else, so this screen does not ask «why?» to throw the answer away — the missing column is
- *   hub#955, not a thing to fake here.
+ *   stops counting, the relay never picks it up again. The hub takes WHO from the session and WHEN
+ *   from the clock, and since hub#955 it also keeps **WHY** — the one part of the stamp nobody but
+ *   the person closing the row can supply. So this screen asks for it (optional, one tap for the
+ *   three answers people actually write) and then shows it back **as stored**, never as typed.
  * - **The technical text is not the headline.** The kernel's own codes get a sentence and a next
  *   step (`run-trouble.ts`); a refusal from the module that ran — «no hay stock suficiente» — is
  *   left exactly as it is, because that sentence is the actionable one. Either way the raw string
@@ -148,6 +170,39 @@ export class ErpFlowsDeadLetter extends LitElement {
     .muted {
       color: var(--ok-muted, #6b6a63);
     }
+    /* The confirmation grows a field, so it stops being a row of buttons and becomes a block. */
+    .confirm {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .presets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+    /* One tap, and still a finger-sized target: these are the reason, not decoration. */
+    button[data-act='reason-preset'] {
+      font-size: 0.85rem;
+      padding: 0 0.75rem;
+    }
+    input[data-field='discard-reason'] {
+      font: inherit;
+      min-height: 2.75rem;
+      padding: 0 0.75rem;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-sm, 10px);
+      background: var(--ok-surface, #fff);
+      color: inherit;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .closed {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      margin-top: 0.75rem;
+    }
   `;
 
   @property({ attribute: false }) client: ModuleClient | null = null;
@@ -163,6 +218,18 @@ export class ErpFlowsDeadLetter extends LitElement {
 
   /** The row whose discard has been asked for and not yet confirmed. */
   @state() private confirming = '';
+
+  /** What is written in the «why» box of the row being confirmed. Cleared with the confirmation. */
+  @state() private reason = '';
+
+  /**
+   * What was closed here, and with which reason **the hub actually stored** — the row leaves the
+   * tray the moment it is discarded, and a closure that vanishes without a trace is one nobody can
+   * check five minutes later. The hub keeps the full record (`discarded_at`, `discarded_by`,
+   * `discard_reason`, ninety days); this is the near end of it, on the screen where the decision
+   * was taken.
+   */
+  @state() private closed: { id: string; event: string; reason: string; kept: boolean }[] = [];
 
   /** Ids in flight, so a double tap cannot send the same gesture twice. */
   @state() private busy: string[] = [];
@@ -233,15 +300,38 @@ export class ErpFlowsDeadLetter extends LitElement {
     }
   }
 
+  /**
+   * Closes the row for good, with the reason if one was written.
+   *
+   * The empty box sends **no reason argument at all**, so an unexplained discard is the same single
+   * call it always was: demanding an essay to close a row is how a recovery queue stops being
+   * drained, and a queue nobody drains hides the next real failure.
+   */
   private async discard(row: DeadEvent): Promise<void> {
     const call = this.client?.events?.discard;
     if (typeof call !== 'function' || this.busy.includes(row.id)) return;
+    const written = this.reason.trim();
     this.busy = [...this.busy, row.id];
     this.error = '';
     try {
-      await call.call(this.client?.events, row.id);
+      const stamp: DiscardResult | undefined = written
+        ? await call.call(this.client?.events, row.id, written)
+        : await call.call(this.client?.events, row.id);
+      // What goes on screen is what the ROW holds, never what was typed: the runtime trims and caps
+      // it, and a hub older than hub#955 keeps nothing at all and says so by omitting the field.
+      const kept = typeof stamp?.discard_reason === 'string' || !written;
+      this.closed = [
+        {
+          id: row.id,
+          event: row.event_name,
+          reason: kept ? (stamp?.discard_reason ?? '') : '',
+          kept,
+        },
+        ...this.closed,
+      ];
       this.rows = this.rows.filter((r) => r.id !== row.id);
       this.confirming = '';
+      this.reason = '';
       this.announce();
     } catch (e) {
       this.error = this.refusal(e);
@@ -353,28 +443,56 @@ export class ErpFlowsDeadLetter extends LitElement {
           </details>`
         : nothing}
       ${this.confirming === row.id
-        ? html`<div class="actions" data-confirm=${row.id}>
+        ? html`<div class="confirm" data-confirm=${row.id}>
             <span class="why">${this.t('ui.deadDiscardConfirm')}</span>
-            <!-- Said out loud, because it is what the hub really keeps: who and when, and no
-                 reason (hub#955). Asking for one and dropping it would be worse than not asking. -->
-            <span class="why muted">${this.t('ui.deadDiscardNoReason')}</span>
-            <button
-              type="button"
-              data-act="discard-confirm"
-              ?disabled=${busy}
-              @click=${() => void this.discard(row)}
-            >
-              ${this.t('ui.deadDiscardDo')}
-            </button>
-            <button
-              type="button"
-              data-act="discard-cancel"
-              @click=${() => {
-                this.confirming = '';
+            <!-- Said out loud, because it is what the hub really keeps (hub#955): who and when come
+                 from inside, the reason is the only half a person has to supply — and it is
+                 optional, because a queue that demands an essay to close a row is not drained. -->
+            <span class="why muted">${this.t('ui.deadDiscardReasonHint')}</span>
+            <div class="presets">
+              ${REASON_PRESETS.map(
+                (key) => html`<button
+                  type="button"
+                  data-act="reason-preset"
+                  @click=${() => {
+                    this.reason = this.t(key);
+                  }}
+                >
+                  ${this.t(key)}
+                </button>`,
+              )}
+            </div>
+            <input
+              type="text"
+              data-field="discard-reason"
+              maxlength=${MAX_REASON}
+              .value=${this.reason}
+              aria-label=${this.t('ui.deadDiscardReasonLabel')}
+              placeholder=${this.t('ui.deadDiscardReasonPlaceholder')}
+              @input=${(e: Event) => {
+                this.reason = (e.target as HTMLInputElement).value;
               }}
-            >
-              ${this.t('ui.cancel')}
-            </button>
+            />
+            <div class="actions">
+              <button
+                type="button"
+                data-act="discard-confirm"
+                ?disabled=${busy}
+                @click=${() => void this.discard(row)}
+              >
+                ${this.t('ui.deadDiscardDo')}
+              </button>
+              <button
+                type="button"
+                data-act="discard-cancel"
+                @click=${() => {
+                  this.confirming = '';
+                  this.reason = '';
+                }}
+              >
+                ${this.t('ui.cancel')}
+              </button>
+            </div>
           </div>`
         : html`<div class="actions">
             ${canRetry
@@ -397,6 +515,32 @@ export class ErpFlowsDeadLetter extends LitElement {
               ${this.t('ui.deadDiscard')}
             </button>
           </div>`}
+    </div>`;
+  }
+
+  /**
+   * **What was closed here, and why the row now says so** — the record that used to disappear.
+   *
+   * A discarded event leaves the tray at once (it is no longer something to decide), and until this
+   * the only trace left on screen was the row's absence. The hub keeps the whole stamp for ninety
+   * days and there is no read that lists discarded rows, so this is the one place the decision is
+   * visible right after it is taken — with the reason **as the hub stored it**, and with a plain
+   * sentence when the hub is too old to have stored anything.
+   */
+  private renderClosed() {
+    if (!this.closed.length) return nothing;
+    return html`<div class="closed">
+      <h3 class="section">${this.t('ui.deadClosedTitle')}</h3>
+      <span class="muted">${this.t('ui.deadClosedIntro')}</span>
+      ${this.closed.map(
+        (row) => html`<span class="why muted" data-discarded=${row.id}>
+          ${!row.kept
+            ? this.t('ui.deadDiscardReasonNotKept', { event: row.event })
+            : row.reason
+              ? this.t('ui.deadClosedWith', { event: row.event, reason: row.reason })
+              : this.t('ui.deadClosedNoReason', { event: row.event })}
+        </span>`,
+      )}
     </div>`;
   }
 
@@ -439,7 +583,7 @@ export class ErpFlowsDeadLetter extends LitElement {
       ${this.rows.length
         ? html`<span class="muted">${this.t('ui.deadIntro')}</span>`
         : html`<span class="muted">${this.t('ui.deadEmpty')}</span>`}
-      ${this.rows.map((row) => this.renderRow(row))}
+      ${this.rows.map((row) => this.renderRow(row))} ${this.renderClosed()}
     </div>`;
   }
 }

@@ -195,6 +195,22 @@ export interface DeadEvent {
   retryable?: boolean;
 }
 
+/**
+ * The stamp `POST /api/hub/events/{id}/discard` writes back (hub#955).
+ *
+ * `discard_reason` is the reason **as stored** — trimmed and capped at 500 characters by the
+ * runtime, `''` when none was given. A hub older than hub#955 leaves the field out altogether, so
+ * a screen that renders it has to tell «kept, and empty» from «this hub does not keep it»: showing
+ * the typed sentence in the second case would display a record that was never written.
+ */
+export interface DiscardResult {
+  id: string;
+  status?: string;
+  /** `hub_user:<id>` — the resolved session, never anything the caller sent. */
+  discarded_by?: string;
+  discard_reason?: string;
+}
+
 export interface EventsApi {
   shape(name: string, opts?: { limit?: number }): Promise<EventShape>;
   /**
@@ -212,8 +228,13 @@ export interface EventsApi {
   deadCount?(): Promise<{ count: number }>;
   /** Rejects with `flow.release_revoked` when the retry can never work — never a quiet success. */
   retry?(id: string): Promise<unknown>;
-  /** Closes the row for good. The hub records WHO and WHEN; there is no reason field (hub#955). */
-  discard?(id: string): Promise<unknown>;
+  /**
+   * Closes the row for good. The hub takes WHO from the session and WHEN from the clock; the
+   * **reason** is the one part of the stamp only the person closing the row knows, so it is the
+   * only thing the body carries (hub#955). Optional on purpose: a queue that demands a written
+   * justification to close a row is a queue nobody drains.
+   */
+  discard?(id: string, reason?: string): Promise<DiscardResult>;
   retryAll?(): Promise<{ retried: number }>;
   trace?(id: string): Promise<unknown>;
 }
