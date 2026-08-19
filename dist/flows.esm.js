@@ -6729,6 +6729,8 @@ function policy(value, fallback) {
 define("erp-flows-approvals", ErpFlowsApprovals);
 
 // modules/flows/ui/components/erp-flows-dead-letter/erp-flows-dead-letter.ts
+var MAX_REASON = 500;
+var REASON_PRESETS = ["ui.deadReasonDuplicate", "ui.deadReasonHandled", "ui.deadReasonObsolete"];
 var ErpFlowsDeadLetter = class extends i3 {
   constructor() {
     super(...arguments);
@@ -6738,6 +6740,8 @@ var ErpFlowsDeadLetter = class extends i3 {
     this.status = "ready";
     this.error = "";
     this.confirming = "";
+    this.reason = "";
+    this.closed = [];
     this.busy = [];
     this.notice = "";
   }
@@ -6855,6 +6859,39 @@ var ErpFlowsDeadLetter = class extends i3 {
     .muted {
       color: var(--ok-muted, #6b6a63);
     }
+    /* The confirmation grows a field, so it stops being a row of buttons and becomes a block. */
+    .confirm {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .presets {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+    }
+    /* One tap, and still a finger-sized target: these are the reason, not decoration. */
+    button[data-act='reason-preset'] {
+      font-size: 0.85rem;
+      padding: 0 0.75rem;
+    }
+    input[data-field='discard-reason'] {
+      font: inherit;
+      min-height: 2.75rem;
+      padding: 0 0.75rem;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-sm, 10px);
+      background: var(--ok-surface, #fff);
+      color: inherit;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .closed {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      margin-top: 0.75rem;
+    }
   `;
   }
   connectedCallback() {
@@ -6910,15 +6947,34 @@ var ErpFlowsDeadLetter = class extends i3 {
       this.busy = this.busy.filter((id) => id !== row.id);
     }
   }
+  /**
+   * Closes the row for good, with the reason if one was written.
+   *
+   * The empty box sends **no reason argument at all**, so an unexplained discard is the same single
+   * call it always was: demanding an essay to close a row is how a recovery queue stops being
+   * drained, and a queue nobody drains hides the next real failure.
+   */
   async discard(row) {
     const call = this.client?.events?.discard;
     if (typeof call !== "function" || this.busy.includes(row.id)) return;
+    const written = this.reason.trim();
     this.busy = [...this.busy, row.id];
     this.error = "";
     try {
-      await call.call(this.client?.events, row.id);
+      const stamp = written ? await call.call(this.client?.events, row.id, written) : await call.call(this.client?.events, row.id);
+      const kept = typeof stamp?.discard_reason === "string" || !written;
+      this.closed = [
+        {
+          id: row.id,
+          event: row.event_name,
+          reason: kept ? stamp?.discard_reason ?? "" : "",
+          kept
+        },
+        ...this.closed
+      ];
       this.rows = this.rows.filter((r6) => r6.id !== row.id);
       this.confirming = "";
+      this.reason = "";
       this.announce();
     } catch (e4) {
       this.error = this.refusal(e4);
@@ -7012,28 +7068,56 @@ var ErpFlowsDeadLetter = class extends i3 {
             <summary>${this.t("ui.troubleTechnical")}</summary>
             <pre>${trouble.technical}</pre>
           </details>` : A}
-      ${this.confirming === row.id ? b2`<div class="actions" data-confirm=${row.id}>
+      ${this.confirming === row.id ? b2`<div class="confirm" data-confirm=${row.id}>
             <span class="why">${this.t("ui.deadDiscardConfirm")}</span>
-            <!-- Said out loud, because it is what the hub really keeps: who and when, and no
-                 reason (hub#955). Asking for one and dropping it would be worse than not asking. -->
-            <span class="why muted">${this.t("ui.deadDiscardNoReason")}</span>
-            <button
-              type="button"
-              data-act="discard-confirm"
-              ?disabled=${busy}
-              @click=${() => void this.discard(row)}
-            >
-              ${this.t("ui.deadDiscardDo")}
-            </button>
-            <button
-              type="button"
-              data-act="discard-cancel"
-              @click=${() => {
-      this.confirming = "";
+            <!-- Said out loud, because it is what the hub really keeps (hub#955): who and when come
+                 from inside, the reason is the only half a person has to supply — and it is
+                 optional, because a queue that demands an essay to close a row is not drained. -->
+            <span class="why muted">${this.t("ui.deadDiscardReasonHint")}</span>
+            <div class="presets">
+              ${REASON_PRESETS.map(
+      (key2) => b2`<button
+                  type="button"
+                  data-act="reason-preset"
+                  @click=${() => {
+        this.reason = this.t(key2);
+      }}
+                >
+                  ${this.t(key2)}
+                </button>`
+    )}
+            </div>
+            <input
+              type="text"
+              data-field="discard-reason"
+              maxlength=${MAX_REASON}
+              .value=${this.reason}
+              aria-label=${this.t("ui.deadDiscardReasonLabel")}
+              placeholder=${this.t("ui.deadDiscardReasonPlaceholder")}
+              @input=${(e4) => {
+      this.reason = e4.target.value;
     }}
-            >
-              ${this.t("ui.cancel")}
-            </button>
+            />
+            <div class="actions">
+              <button
+                type="button"
+                data-act="discard-confirm"
+                ?disabled=${busy}
+                @click=${() => void this.discard(row)}
+              >
+                ${this.t("ui.deadDiscardDo")}
+              </button>
+              <button
+                type="button"
+                data-act="discard-cancel"
+                @click=${() => {
+      this.confirming = "";
+      this.reason = "";
+    }}
+              >
+                ${this.t("ui.cancel")}
+              </button>
+            </div>
           </div>` : b2`<div class="actions">
             ${canRetry ? b2`<button
                   type="button"
@@ -7053,6 +7137,27 @@ var ErpFlowsDeadLetter = class extends i3 {
               ${this.t("ui.deadDiscard")}
             </button>
           </div>`}
+    </div>`;
+  }
+  /**
+   * **What was closed here, and why the row now says so** — the record that used to disappear.
+   *
+   * A discarded event leaves the tray at once (it is no longer something to decide), and until this
+   * the only trace left on screen was the row's absence. The hub keeps the whole stamp for ninety
+   * days and there is no read that lists discarded rows, so this is the one place the decision is
+   * visible right after it is taken — with the reason **as the hub stored it**, and with a plain
+   * sentence when the hub is too old to have stored anything.
+   */
+  renderClosed() {
+    if (!this.closed.length) return A;
+    return b2`<div class="closed">
+      <h3 class="section">${this.t("ui.deadClosedTitle")}</h3>
+      <span class="muted">${this.t("ui.deadClosedIntro")}</span>
+      ${this.closed.map(
+      (row) => b2`<span class="why muted" data-discarded=${row.id}>
+          ${!row.kept ? this.t("ui.deadDiscardReasonNotKept", { event: row.event }) : row.reason ? this.t("ui.deadClosedWith", { event: row.event, reason: row.reason }) : this.t("ui.deadClosedNoReason", { event: row.event })}
+        </span>`
+    )}
     </div>`;
   }
   render() {
@@ -7088,7 +7193,7 @@ var ErpFlowsDeadLetter = class extends i3 {
           >` : A}
       ${this.notice ? b2`<span class="muted">${this.notice}</span>` : A}
       ${this.rows.length ? b2`<span class="muted">${this.t("ui.deadIntro")}</span>` : b2`<span class="muted">${this.t("ui.deadEmpty")}</span>`}
-      ${this.rows.map((row) => this.renderRow(row))}
+      ${this.rows.map((row) => this.renderRow(row))} ${this.renderClosed()}
     </div>`;
   }
 };
@@ -7110,6 +7215,12 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsDeadLetter.prototype, "confirming", 2);
+__decorateClass([
+  r5()
+], ErpFlowsDeadLetter.prototype, "reason", 2);
+__decorateClass([
+  r5()
+], ErpFlowsDeadLetter.prototype, "closed", 2);
 __decorateClass([
   r5()
 ], ErpFlowsDeadLetter.prototype, "busy", 2);
@@ -7775,7 +7886,17 @@ var es_default = {
     deadRetriedAll: "{count} reenviados. Si la causa sigue ah\xED, volver\xE1n.",
     deadDiscard: "Cerrarlo",
     deadDiscardConfirm: "\xBFCerrarlo para siempre? Deja de contar y ya nadie volver\xE1 a enviarlo.",
-    deadDiscardNoReason: "Guardamos qui\xE9n lo cerr\xF3 y cu\xE1ndo. Todav\xEDa no hay d\xF3nde apuntar por qu\xE9.",
+    deadDiscardReasonHint: "Qui\xE9n lo cerr\xF3 y cu\xE1ndo ya los guardamos. El porqu\xE9 es lo \xFAnico que solo sabes t\xFA: es opcional, pero es lo que hace que esto se entienda dentro de seis meses.",
+    deadDiscardReasonLabel: "\xBFPor qu\xE9 lo cierras?",
+    deadDiscardReasonPlaceholder: "Opcional \u2014 p. ej. la factura se registr\xF3 a mano",
+    deadReasonDuplicate: "Duplicado",
+    deadReasonHandled: "Ya resuelto a mano",
+    deadReasonObsolete: "Ya no aplica",
+    deadDiscardReasonNotKept: "{event} queda cerrado, pero este hub es m\xE1s antiguo que el campo del motivo, as\xED que ha guardado qui\xE9n y cu\xE1ndo, y no por qu\xE9. Actualizarlo es lo que lo enciende.",
+    deadClosedTitle: "Cerrados ahora mismo",
+    deadClosedIntro: "El hub guarda qui\xE9n cerr\xF3 cada uno, cu\xE1ndo y por qu\xE9 durante noventa d\xEDas.",
+    deadClosedWith: "{event} \u2014 cerrado: \xAB{reason}\xBB",
+    deadClosedNoReason: "{event} \u2014 cerrado, sin motivo apuntado.",
     deadDiscardDo: "S\xED, cerrarlo",
     runTook: "tard\xF3 {seconds}s"
   },
@@ -8335,7 +8456,17 @@ var en_default = {
     deadRetriedAll: "{count} sent again. If the cause is still there they will come back.",
     deadDiscard: "Close it",
     deadDiscardConfirm: "Close this for good? It stops counting and nothing will ever send it again.",
-    deadDiscardNoReason: "We record who closed it and when. There is nowhere to write down why yet.",
+    deadDiscardReasonHint: "We already record who closed it and when. Why is the part only you know \u2014 it is optional, but it is what makes this readable in six months.",
+    deadDiscardReasonLabel: "Why are you closing it?",
+    deadDiscardReasonPlaceholder: "Optional \u2014 e.g. the invoice was registered by hand",
+    deadReasonDuplicate: "Duplicate",
+    deadReasonHandled: "Already sorted out by hand",
+    deadReasonObsolete: "No longer applies",
+    deadDiscardReasonNotKept: "{event} is closed, but this hub is older than the reason field, so it kept who and when and not why. Updating it is what turns that on.",
+    deadClosedTitle: "Closed just now",
+    deadClosedIntro: "The hub keeps who closed each one, when and why for ninety days.",
+    deadClosedWith: "{event} \u2014 closed: \xAB{reason}\xBB",
+    deadClosedNoReason: "{event} \u2014 closed, with no reason written down.",
     deadDiscardDo: "Yes, close it",
     runTook: "took {seconds}s"
   },
