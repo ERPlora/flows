@@ -5,13 +5,16 @@ import { ErpFlowsApp } from '../erp-flows-app/erp-flows-app';
 import { TEMPLATES, templateById } from '../../lib/templates';
 import en from '../../../locales/en.json';
 
-/** The shell's translator, reduced to the lookup a test needs (`{param}` is not exercised here). */
-const t = (key: string): string => {
+/** The shell's translator, reduced to the lookup a test needs, `{param}` included. */
+const t = (key: string, params?: Record<string, unknown>): string => {
   let cur: unknown = en;
   for (const part of key.split('.')) {
     cur = cur && typeof cur === 'object' ? (cur as Record<string, unknown>)[part] : undefined;
   }
-  return typeof cur === 'string' ? cur : key;
+  const found = typeof cur === 'string' ? cur : key;
+  return params
+    ? found.replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? ''))
+    : found;
 };
 
 /** A hub that knows every event a template asks about. */
@@ -255,5 +258,61 @@ describe('the gallery takes the width it is given (flows#40)', () => {
     const body = rule(ErpFlowsApp.styles as { cssText: string }, '.body');
     expect(head).toContain('0.75rem');
     expect(body).toContain('0.75rem');
+  });
+});
+
+/**
+ * **«Falta un módulo» is not an answer** (flows#38).
+ *
+ * On a hub built from the Restaurant template — seventeen apps, no `tasks` — the whole gallery
+ * came out grey with the same label on every card, naming nothing. The module id the witnesses
+ * compute (`tasks`) was known all along; it was the label that threw it away.
+ */
+describe('a template this hub cannot run says WHICH module it is missing (flows#38)', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  /** A hub that has never heard of the events of the given modules (their apps are not installed). */
+  const hubWithout = (...modules: string[]) =>
+    hub({
+      events: {
+        shape: vi.fn(async (name: string) =>
+          modules.some((m) => name.startsWith(`${m}.`))
+            ? notFound()
+            : { event_name: name, declared_by: ['x'], samples: 0, fields: [] },
+        ),
+      },
+    });
+
+  it('carries the readable module name on the grey card, not just «Needs a module»', async () => {
+    const el = await mount(hubWithout('tasks'));
+    const pill = card(el, 'no-show-followup')?.querySelector('ok-status-pill');
+    expect(pill?.getAttribute('label')).toContain(t('ui.mod_tasks'));
+    expect(pill?.getAttribute('label')).not.toBe(t('ui.tplUnavailable'));
+  });
+
+  it('lists every missing module when there is more than one', async () => {
+    // `no-show-followup` needs Appointments for its trigger and Tasks for its action: a hub with
+    // neither has to hear about both, or the owner installs one and the card stays grey.
+    const el = await mount(hubWithout('appointments', 'tasks'));
+    const label = card(el, 'no-show-followup')?.querySelector('ok-status-pill')?.getAttribute('label');
+    expect(label).toContain(t('ui.mod_appointments'));
+    expect(label).toContain(t('ui.mod_tasks'));
+  });
+
+  it('says it by name when the card is open, and that the screen needs a reload after installing', async () => {
+    // The panel is where the sentence fits; the card carries the badge. Installing happens in the
+    // marketplace, out of this screen's hands — what this screen owes the owner is the name and
+    // the fact that a reload brings the cards to life.
+    const el = await mount(hubWithout('tasks'));
+    el.open('no-show-followup');
+    await el.updateComplete;
+    // The warning carries the whole sentence — name and reload included: installing happens in the
+    // marketplace, and this screen owes the owner the fact that a reload is what brings the cards
+    // to life. (The permissions block below it shows `tasks.tasks.create` on purpose: a grant is
+    // named by its command. The missing-module sentence is the one that must speak in names.)
+    const warning = el.renderRoot.querySelector('#panel-no-show-followup ok-inline-feedback');
+    expect(warning?.textContent).toContain(t('ui.mod_tasks'));
+    expect(warning?.textContent).not.toContain(' tasks,');
+    expect(warning?.textContent).toContain(t('ui.tplNeedsModule', { modules: t('ui.mod_tasks') }));
   });
 });

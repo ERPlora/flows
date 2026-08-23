@@ -4,6 +4,7 @@ import {
   SECTORS,
   buildTemplate,
   missingModules,
+  moduleName,
   templateGrants,
 } from './templates';
 import { isSpineKind, readDoc } from './flow-doc';
@@ -173,6 +174,32 @@ describe('what a template needs from this hub', () => {
   // out the whole gallery for the first second of every visit.
   it('does not call a witness missing while its answer is still unknown', () => {
     expect(missingModules(TEMPLATES[0], {})).toEqual([]);
+  });
+
+  // flows#38: the grey card used to say «Falta un módulo» — true, and useless: on a hub without
+  // `tasks` that was nine grey cards with no way to find out which of the seventeen installed apps
+  // was the one missing. The id the witnesses carry (`tasks`) is not a name the owner recognises;
+  // this is the dictionary that turns it into one.
+  it('can say every module any witness names by its READABLE name, in both languages', () => {
+    const ids = [...new Set(TEMPLATES.flatMap((tpl) => tpl.witnesses.map((w) => w.module)))];
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of ids) {
+      expect(lookup(en, moduleName(id, (k) => k)), `${id} (en)`).toBeTruthy();
+      expect(lookup(es, moduleName(id, (k) => k)), `${id} (es)`).toBeTruthy();
+    }
+  });
+
+  it('translates a module id into the name its own module goes by', () => {
+    // «Falta Tasks», not «Falta tasks»: the label has to carry the name on the marketplace card,
+    // which is the one place the owner can act on it.
+    expect(moduleName('tasks', t)).toBe(lookup(en, 'ui.mod_tasks'));
+    expect(moduleName('tasks', t)).not.toBe('tasks');
+  });
+
+  it('falls back to the raw id for a module this catalogue has never heard of', () => {
+    // A template from a newer module must not render an empty name — the id is worse than a
+    // translation, but it beats a blank.
+    expect(moduleName('not_a_module', t)).toBe('not_a_module');
   });
 });
 

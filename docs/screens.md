@@ -23,7 +23,8 @@ When there is nothing yet, the screen shows the **gallery**: ready-made automati
 sector (any business, hair and beauty, bars and restaurants). Read the sentence under each card —
 that is exactly what it will do — and press **Use this one**. It becomes yours, **created paused**,
 with the blanks it asked you to decide (an amount, a time, how long to wait) already holding a
-sensible guess. A card that needs a module this hub does not have says so and cannot be used.
+sensible guess. A card that needs a module this hub does not have **names it** — *Missing: Tasks* —
+and cannot be used until it is installed and this screen is reloaded.
 
 **New automation** starts from an empty one. **How does this work?** opens the built-in guide.
 
