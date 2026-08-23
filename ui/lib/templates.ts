@@ -454,3 +454,31 @@ export function missingModules(
   }
   return out;
 }
+
+/**
+ * The name the owner knows a module by, in place of the id the witnesses carry (flows#38).
+ *
+ * A grey card saying «Falta un módulo» is true and useless: the owner's next step is the
+ * marketplace, and there the thing is called by its name, never by `tasks`. The names are copied
+ * from each module's own catalogue (its localized `name`), not invented — the label has to match
+ * the marketplace card or it points at nothing.
+ *
+ * An id this dictionary has never heard of (a template from a newer module) falls back to the id
+ * itself: worse than a translation, better than a blank.
+ */
+const MODULE_LABELS: Readonly<Record<string, string>> = {
+  appointments: 'ui.mod_appointments',
+  cash_register: 'ui.mod_cash_register',
+  customers: 'ui.mod_customers',
+  reservations: 'ui.mod_reservations',
+  sales: 'ui.mod_sales',
+  staff: 'ui.mod_staff',
+  tasks: 'ui.mod_tasks',
+  verifactu: 'ui.mod_verifactu',
+  whatsapp_inbox: 'ui.mod_whatsapp_inbox',
+};
+
+export function moduleName(id: string, t: Translator): string {
+  const key = MODULE_LABELS[id];
+  return key ? t(key) : id;
+}

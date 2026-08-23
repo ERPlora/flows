@@ -7,6 +7,7 @@ import {
   SECTORS,
   buildTemplate,
   missingModules,
+  moduleName,
   templateById,
   templateGrants,
   templatesOf,
@@ -306,6 +307,9 @@ export class ErpFlowsGallery extends LitElement {
 
   private renderPanel(template: FlowTemplate) {
     const missing = missingModules(template, this.known);
+    // The name the marketplace sells it under, never the id: «Instala Tasks», not «Instala tasks»
+    // (flows#38). The label on the grey card and this sentence have to agree.
+    const missingNames = missing.map((id) => moduleName(id, this.t)).join(', ');
     const grants = templateGrants(template, this.t);
     return html`<div class="panel" id=${`panel-${template.id}`}>
       <p class="plain">${this.t(template.plainKey)}</p>
@@ -339,7 +343,10 @@ export class ErpFlowsGallery extends LitElement {
 
       ${missing.length
         ? html`<ok-inline-feedback tone="warning" icon="download-outline">
-            ${this.t('ui.tplNeedsModule', { modules: missing.join(', ') })}
+            ${this.t(
+              missing.length === 1 ? 'ui.tplNeedsModule' : 'ui.tplNeedsModules',
+              { modules: missingNames },
+            )}
           </ok-inline-feedback>`
         : nothing}
       ${this.error
@@ -383,7 +390,12 @@ export class ErpFlowsGallery extends LitElement {
           <span class="summary">${this.t(template.summaryKey)}</span>
         </span>
         ${missing.length
-          ? html`<ok-status-pill tone="neutral" label=${this.t('ui.tplUnavailable')}></ok-status-pill>`
+          ? html`<ok-status-pill
+              tone="neutral"
+              label=${this.t('ui.tplUnavailable', {
+                modules: missing.map((id) => moduleName(id, this.t)).join(', '),
+              })}
+            ></ok-status-pill>`
           : nothing}
       </button>
       ${open ? this.renderPanel(template) : nothing}
