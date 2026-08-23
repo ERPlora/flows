@@ -56,6 +56,8 @@
     "paused": "En pausa",
     "activate": "Activar",
     "pause": "Pausar",
+    "enableNoGrants": "Encendida, pero aún no tiene los permisos que pide ({commands}): no hará nada hasta que se los concedas en la pestaña Permisos.",
+    "enableUntested": "Todavía no la has probado: en la pestaña Probar puedes ver qué haría antes de que se dispare sola.",
     "neverRun": "No se ha ejecutado nunca",
     "lastRun": "Última vez: {when}",
     "noAccessTitle": "Este editor necesita tu permiso",

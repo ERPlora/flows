@@ -703,7 +703,19 @@ export class ErpFlowsEditor extends LitElement {
 
   @state() name = '';
 
-  @state() enabled = true;
+  /**
+   * The switch, and the one decision on this screen that acts on the business the moment it is
+   * taken. A flow that does not exist yet starts **off** — the same promise the gallery makes two
+   * taps earlier («pasa a ser tuya, apagada»), and the order this module is built around: look at
+   * it, try it, grant it, and only then turn it on (flows#39).
+   */
+  @state() enabled = false;
+
+  /** The owner has looked at what this flow would do (the «Probar» tab) during this visit. */
+  @state() private tested = false;
+
+  /** What the owner should know about the LAST time the switch was flipped on. Empty = nothing. */
+  @state() private enableWarning = '';
 
   /**
    * Which tab is showing. A **property**, not internal state: a flow created from a template opens
@@ -761,9 +773,13 @@ export class ErpFlowsEditor extends LitElement {
     if (changed.has('flow')) {
       this.document = this.flow ? readDoc(this.flow.definition) : emptyDoc();
       this.name = this.flow?.name ?? '';
-      this.enabled = this.flow?.enabled ?? true;
+      // `?? false` is the whole of flows#39: a flow that does not exist yet is born OFF, and the
+      // switch is the owner's explicit yes rather than a state the new automation inherited.
+      this.enabled = this.flow?.enabled ?? false;
       this.error = '';
       this.notice = '';
+      this.enableWarning = '';
+      this.tested = false;
       this.runs = [];
       this.grants = [];
       void this.loadGrants();
@@ -802,6 +818,10 @@ export class ErpFlowsEditor extends LitElement {
 
   updated(changed: Map<string, unknown>): void {
     if (changed.has('tab') && this.tab === 'history') void this.loadRuns();
+    // Opening «Probar» is the closest thing to a test this module can offer (it simulates; the
+    // kernel has no dry run), so it is what clears the «you have not looked at it yet» half of
+    // the switch's warning.
+    if (changed.has('tab') && this.tab === 'test') this.tested = true;
     if (this.openStep === 'trigger') void this.ensureEventCatalog();
     this.pinEventSelect();
   }
@@ -1026,6 +1046,31 @@ export class ErpFlowsEditor extends LitElement {
   private setTrigger(patch: Partial<Trigger>): void {
     this.setDoc(patchTrigger(this.document, { ...this.trigger, ...patch } as Trigger));
     void this.loadShape();
+  }
+
+  /**
+   * The switch is an explicit yes, and it deserves to be an INFORMED one (flows#39).
+   *
+   * Nothing is blocked: the owner can flip a flow on with holes in it if that is what they want.
+   * What the switch does is say, in the same breath, the two things that make «on» not mean
+   * «working»: permissions it asks for and does not hold, and the fact that nobody has looked at
+   * what it would do yet. A flow with no grants does nothing at all — silently — which is the one
+   * outcome this screen must not let read as success.
+   */
+  private onEnable(on: boolean): void {
+    this.enabled = on;
+    if (!on) {
+      this.enableWarning = '';
+      return;
+    }
+    const missing = missingGrants(this.document, this.grants);
+    const warnings: string[] = [];
+    if (missing.length)
+      warnings.push(
+        this.t('ui.enableNoGrants', { commands: missing.map((g) => g.value).join(', ') }),
+      );
+    if (!this.tested) warnings.push(this.t('ui.enableUntested'));
+    this.enableWarning = warnings.join(' ');
   }
 
   private openPicker(target: ErpFlowsValue, root: 'input' | 'event'): void {
@@ -2571,9 +2616,7 @@ export class ErpFlowsEditor extends LitElement {
         ></ok-status-pill>
         <ion-toggle
           .checked=${this.enabled}
-          @ionChange=${(e: Event) => {
-            this.enabled = !!(e.target as HTMLInputElement).checked;
-          }}
+          @ionChange=${(e: Event) => this.onEnable(!!(e.target as HTMLInputElement).checked)}
         ></ion-toggle>
         <!-- «Probar» sits with the switch on purpose: it is the thing to press BEFORE turning an
              automation on, and a button on another tab is one nobody presses first. -->
@@ -2619,6 +2662,11 @@ export class ErpFlowsEditor extends LitElement {
         ${this.notice
           ? html`<ok-inline-feedback tone="success" icon="checkmark-circle-outline"
               >${this.notice}</ok-inline-feedback
+            >`
+          : nothing}
+        ${this.enableWarning
+          ? html`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-enable-warning
+              >${this.enableWarning}</ok-inline-feedback
             >`
           : nothing}
         ${this.renderDraftBanner()}
