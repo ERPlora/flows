@@ -37,9 +37,11 @@ import type { Translator } from '../../lib/plain-language';
  * - **Hide the permissions until afterwards.** What it will ask for, and why, is on the panel
  *   BEFORE the flow exists (pm#134 point 3: this is where people get stuck).
  *
- * Layout is one fluid column of full-width cards, same as the editor's spine and for the same
- * reason: the assistant takes a third of the width at ≥768px, and a grid of fixed cards does not
- * survive that. Nothing here is narrower than a fingertip.
+ * Layout is a fluid grid of cards (flows#40): `auto-fill` with a 20rem card minimum, the recipe
+ * the hub's other card screens use, so the gallery takes the width the screen gives it — the same
+ * box the «Nueva automatización» bar above sits in — instead of a 44rem column that left 220px
+ * dead on each side at 1440 with the CTA orphaned in the corner. Below 480px it collapses to the
+ * one column a phone already had. Nothing here is narrower than a fingertip.
  */
 export class ErpFlowsGallery extends LitElement {
   static styles = css`
@@ -48,9 +50,10 @@ export class ErpFlowsGallery extends LitElement {
       color: var(--ok-text, var(--ion-text-color, #1c1b18));
       font-family: var(--ok-font, var(--ion-font-family, system-ui), sans-serif);
     }
+    /* Fluid, not capped: the gallery fills the box the screen hands it — the same box the
+       «Nueva automatización» bar sits in — so the cards and the CTA read as one screen. The old
+       44rem cap spent 704px of a 1144px host, 220px dead on each side (flows#40). */
     .wrap {
-      max-width: 44rem;
-      margin: 0 auto;
       display: flex;
       flex-direction: column;
       gap: 0.75rem;
@@ -63,6 +66,9 @@ export class ErpFlowsGallery extends LitElement {
     }
     .lede p {
       flex: 1 1 16rem;
+      /* The wrap is fluid now; a sentence still reads best under ~70 characters, so the lede
+         keeps a reading measure even on a 1440px screen. */
+      max-width: 46rem;
       margin: 0;
       color: var(--ok-muted, #6b6a63);
       font-size: 0.92rem;
@@ -87,10 +93,21 @@ export class ErpFlowsGallery extends LitElement {
       color: var(--ok-muted, #6b6a63);
       font-weight: 600;
     }
+    /* The workspace's own card recipe (kitchen's tickets, customers' cards): auto-fill with a
+       card minimum. 3 columns at 1440, 2 at 834, 1 at 390 — the cards get wider, never a wider
+       margin. */
     .cards {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+      gap: 0.75rem;
+    }
+    /* Below 480px the 20rem minimum no longer fits the container (a 320px screen leaves ~290px),
+       and an auto-fill that cannot fit pushes its track off the edge instead of wrapping. One
+       column is what a phone showed before this grid existed — the 390px design stays put. */
+    @media (max-width: 480px) {
+      .cards {
+        grid-template-columns: 1fr;
+      }
     }
     .card {
       background: var(--ok-surface, var(--ion-card-background, #fff));

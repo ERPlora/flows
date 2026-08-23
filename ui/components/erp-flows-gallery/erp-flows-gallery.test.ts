@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
-import type { ErpFlowsGallery } from './erp-flows-gallery';
+import { ErpFlowsGallery } from './erp-flows-gallery';
+import { ErpFlowsApp } from '../erp-flows-app/erp-flows-app';
 import { TEMPLATES, templateById } from '../../lib/templates';
 import en from '../../../locales/en.json';
 
@@ -201,5 +202,58 @@ describe('the way to the guide', () => {
     el.addEventListener('flows-open-guide', (e) => seen.push(e));
     (el.renderRoot.querySelector('[data-act="guide"]') as HTMLElement)?.click();
     expect(seen).toHaveLength(1);
+  });
+});
+
+/**
+ * **The width contract** (flows#40).
+ *
+ * happy-dom does no layout — the vitest config says so and points here: what these tests fix is
+ * the CONTRACT that makes the real-browser geometry true. The geometry itself (measured on the QA
+ * hub): at 1440 the gallery host gets 1144px and the old `.wrap { max-width: 44rem }` spent 704px
+ * of them, 220px dead on each side, while the «Nueva automatización» button floated on the far
+ * right of the 1144px bar above — an orphan 550px from the column that governed the screen.
+ */
+describe('the gallery takes the width it is given (flows#40)', () => {
+  /** One rule block of a component's static stylesheet, by its selector. */
+  const rule = (styles: { cssText: string }, selector: string): string => {
+    const at = styles.cssText.indexOf(`${selector} {`);
+    expect(at, `${selector} is not in the stylesheet at all`).toBeGreaterThanOrEqual(0);
+    const end = styles.cssText.indexOf('}', at);
+    return styles.cssText.slice(at, end);
+  };
+
+  it('lays the cards on a fluid auto-fill grid, not on a fixed 44rem column', () => {
+    // `repeat(auto-fill, minmax(…, 1fr))` is the workspace's own recipe (kitchen's tickets,
+    // customers' cards): 3 columns at 1440, 2 at 834, 1 at 390 — the same cards, no dead margins.
+    const cards = rule(ErpFlowsGallery.styles as { cssText: string }, '.cards');
+    expect(cards).toContain('display: grid');
+    expect(cards).toContain('grid-template-columns: repeat(auto-fill, minmax(');
+  });
+
+  it('does not cap the gallery to a 44rem column: the wrap is fluid', () => {
+    // The 704px strip with 220px dead on each side was `.wrap { max-width: 44rem }`. The wrap now
+    // fills the box the screen hands it, which is the same box the CTA bar sits in.
+    const wrap = rule(ErpFlowsGallery.styles as { cssText: string }, '.wrap');
+    expect(wrap).not.toContain('max-width');
+  });
+
+  it('keeps one column on a phone even if the card minimum stops fitting', () => {
+    // The guard kitchen's grid also carries: below 480px the auto-fill minimum (bigger than the
+    // remaining container on a 320px screen) would push the cards off the edge instead of
+    // wrapping. One column is the 390px design the issue said not to touch.
+    const cssText = (ErpFlowsGallery.styles as { cssText: string }).cssText;
+    expect(cssText).toMatch(/@media \(max-width: 480px\)[^}]*\.cards[^}]*grid-template-columns: 1fr/);
+  });
+
+  it('anchors the CTA to the same box as the cards: head and body share one gutter', () => {
+    // The «Nueva automatización» button lives in the app's `.head`, the gallery in its `.body`.
+    // They read as one screen only if both boxes are the same, and they are the same because both
+    // gutters are 0.75rem — this is the contract that keeps the CTA on the grid's right edge
+    // instead of 550px away from it.
+    const head = rule(ErpFlowsApp.styles as { cssText: string }, '.head');
+    const body = rule(ErpFlowsApp.styles as { cssText: string }, '.body');
+    expect(head).toContain('0.75rem');
+    expect(body).toContain('0.75rem');
   });
 });
