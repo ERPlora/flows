@@ -158,6 +158,21 @@ describe('the list of automations', () => {
     expect(editor).toBeTruthy();
     expect(editor.flow).toBeNull();
   });
+
+  it('opens that new one SWITCHED OFF, as the gallery promised it would arrive (flows#39)', async () => {
+    const el = await mount(fakeClient());
+    (el.renderRoot.querySelector('[data-act="new"]') as HTMLButtonElement).click();
+    await el.updateComplete;
+    const editor = el.renderRoot.querySelector('erp-flows-editor') as unknown as {
+      renderRoot?: ShadowRoot;
+    };
+    const toggle = editor?.renderRoot?.querySelector('ion-toggle') as unknown as
+      | { checked?: boolean }
+      | null;
+    // The editor lives in its own shadow root, but the promise — «pasa a ser tuya, apagada» — is
+    // this screen's, so this is where the whole chain gets pinned.
+    expect(toggle?.checked).toBe(false);
+  });
 });
 
 describe('the gallery is the way in (flows#1)', () => {

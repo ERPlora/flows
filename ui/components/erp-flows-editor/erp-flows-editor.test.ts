@@ -775,6 +775,140 @@ describe('saving', () => {
   });
 });
 
+/** The switch on a header, driven the way a finger drives it: the state lands on the element and
+ *  `ionChange` crosses the shadow boundary. */
+async function switchTo(el: ErpFlowsEditor, on: boolean): Promise<void> {
+  const toggle = el.renderRoot.querySelector('ion-toggle');
+  expect(toggle, 'the switch is not on the screen at all').toBeTruthy();
+  (toggle as unknown as { checked: boolean }).checked = on;
+  toggle!.dispatchEvent(new CustomEvent('ionChange'));
+  await el.updateComplete;
+  await Promise.resolve();
+  await el.updateComplete;
+}
+
+describe('a new automation is born OFF, exactly as the gallery promises (flows#39)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it('opens «Nueva automatización» with the switch off and the label that says so', async () => {
+    const el = await mount(null);
+    // The gallery two taps earlier says «pasa a ser tuya, apagada». An editor that opens with the
+    // switch already ON skips the whole «look at it, try it, then turn it on» order this module is
+    // built around: the owner changes the trigger to an event, presses Save, and the automation is
+    // live without ever having been read.
+    const toggle = el.renderRoot.querySelector('ion-toggle') as unknown as { checked?: boolean };
+    expect(toggle.checked).toBe(false);
+    expect(el.enabled).toBe(false);
+    expect(el.renderRoot.querySelector('ok-status-pill')?.getAttribute('label')).toBe('ui.paused');
+  });
+
+  it('saves it off when the switch was never touched', async () => {
+    const client = fakeClient();
+    const el = await mount(null, client);
+    await el.save();
+    expect(client.flows.create).toHaveBeenCalledTimes(1);
+    const body = client.flows.create.mock.calls[0][0] as { enabled: boolean };
+    expect(body.enabled).toBe(false);
+  });
+
+  it('keeps the state an existing automation already had', async () => {
+    // The fix is about what is BORN, not about what lives: an automation the owner switched on
+    // yesterday opens with the switch on, and saving it keeps it on.
+    const client = fakeClient();
+    const el = await mount(flowWith([{ id: 'a', kind: 'command', command: 'one' }]), client);
+    const toggle = el.renderRoot.querySelector('ion-toggle') as unknown as { checked?: boolean };
+    expect(toggle.checked).toBe(true);
+    await el.save();
+    const body = client.flows.update.mock.calls[0][1] as { enabled: boolean };
+    expect(body.enabled).toBe(true);
+  });
+
+  it('lands a recipe from the gallery off as well — the copy promised it', async () => {
+    // `use()` creates it `enabled: false`; this pins the editor's half of the promise, which is
+    // that opening that flow does not switch it on behind the owner's back.
+    const el = await mount({
+      id: 'from-gallery',
+      name: 'Call back no-shows',
+      enabled: false,
+      definition: {
+        schema_version: 1,
+        triggers: [{ kind: 'event', event: 'appointments.appointment.no_show' }],
+        steps: [{ id: 's1', kind: 'command', command: 'tasks.tasks.create' }],
+      },
+    });
+    const toggle = el.renderRoot.querySelector('ion-toggle') as unknown as { checked?: boolean };
+    expect(toggle.checked).toBe(false);
+  });
+
+  it('warns when it is switched on while it still holds no permissions', async () => {
+    const client = fakeClient();
+    const el = await mount(
+      {
+        id: 'f1',
+        name: 'Test',
+        enabled: false,
+        definition: {
+          schema_version: 1,
+          triggers: [{ kind: 'manual' }],
+          steps: [{ id: 'a', kind: 'command', command: 'one' }],
+        },
+      },
+      client,
+    );
+    await switchTo(el, true);
+    // A flow with no grants does nothing at all, silently. The switch is the owner's explicit
+    // gesture; the warning is what keeps «on» from reading as «working».
+    const warning = el.renderRoot.querySelector('[data-enable-warning]');
+    expect(warning).toBeTruthy();
+    expect(warning!.textContent).toContain('ui.enableNoGrants');
+    expect(el.enabled).toBe(true);
+  });
+
+  it('stays quiet when it is switched on with everything granted and looked at', async () => {
+    const client = fakeClient();
+    const el = await mount(
+      {
+        id: 'f1',
+        name: 'Test',
+        enabled: false,
+        definition: {
+          schema_version: 1,
+          triggers: [{ kind: 'manual' }],
+          steps: [{ id: 'a', kind: 'command', command: 'one' }],
+        },
+      },
+      client,
+    );
+    // Everything granted…
+    el.grants = [{ kind: 'command', value: 'one' }] as never;
+    // …and the owner has looked at what it would do (the Probar tab).
+    el.tab = 'test';
+    await el.updateComplete;
+    await switchTo(el, true);
+    expect(el.renderRoot.querySelector('[data-enable-warning]')).toBeNull();
+    expect(el.enabled).toBe(true);
+  });
+
+  it('takes the warning away when it is switched back off', async () => {
+    const el = await mount({
+      id: 'f1',
+      name: 'Test',
+      enabled: false,
+      definition: {
+        schema_version: 1,
+        triggers: [{ kind: 'manual' }],
+        steps: [{ id: 'a', kind: 'command', command: 'one' }],
+      },
+    });
+    await switchTo(el, true);
+    expect(el.renderRoot.querySelector('[data-enable-warning]')).toBeTruthy();
+    await switchTo(el, false);
+    expect(el.renderRoot.querySelector('[data-enable-warning]')).toBeNull();
+  });
+});
+
 describe('what it may do', () => {
   beforeEach(() => {
     document.body.replaceChildren();

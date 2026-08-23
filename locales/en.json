@@ -56,6 +56,8 @@
     "paused": "Paused",
     "activate": "Activate",
     "pause": "Pause",
+    "enableNoGrants": "On, but it does not hold the permissions it asks for yet ({commands}): it will do nothing until you grant them on the Permissions tab.",
+    "enableUntested": "You have not tried it yet: the Try it tab shows what it would do before it runs on its own.",
     "neverRun": "Never run",
     "lastRun": "Last run {when}",
     "noAccessTitle": "This editor needs your permission",
