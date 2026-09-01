@@ -86,7 +86,8 @@
       "id": "automations",
       "label": "Automations",
       "icon": "git-branch",
-      "component": "erp-flows-app"
+      "component": "erp-flows-app",
+      "permission": "flows.view_flow"
     }
   ],
   "ui": {
