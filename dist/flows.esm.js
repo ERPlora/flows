@@ -9,7 +9,7 @@ var __decorateClass = (decorators, target, key2, kind) => {
   return result;
 };
 
-// ../module-toolkit/node_modules/@lit-labs/ssr-dom-shim/lib/element-internals.js
+// @lit-labs/ssr-dom-shim/lib/element-internals.js
 var ElementInternalsShim = class ElementInternals {
   get shadowRoot() {
     return this.__host.__shadowRoot;
@@ -88,7 +88,7 @@ var ElementInternalsShim = class ElementInternals {
   }
 };
 
-// ../module-toolkit/node_modules/@lit-labs/ssr-dom-shim/lib/events.js
+// @lit-labs/ssr-dom-shim/lib/events.js
 var __classPrivateFieldSet = function(receiver, state, value, kind, f3) {
   if (kind === "m") throw new TypeError("Private method is not writable");
   if (kind === "a" && !f3) throw new TypeError("Private accessor was defined without a setter");
@@ -246,7 +246,7 @@ Object.defineProperties(CustomEventShim.prototype, {
 var EventShimWithRealType = EventShim;
 var CustomEventShimWithRealType = CustomEventShim;
 
-// ../module-toolkit/node_modules/@lit-labs/ssr-dom-shim/lib/css.js
+// @lit-labs/ssr-dom-shim/lib/css.js
 var _a2;
 var CSSRuleShim = (_a2 = class CSSRule {
   constructor() {
@@ -277,7 +277,7 @@ var CSSRuleShim = (_a2 = class CSSRule {
   }
 }, _a2.STYLE_RULE = 1, _a2.CHARSET_RULE = 2, _a2.IMPORT_RULE = 3, _a2.MEDIA_RULE = 4, _a2.FONT_FACE_RULE = 5, _a2.PAGE_RULE = 6, _a2.NAMESPACE_RULE = 10, _a2.KEYFRAMES_RULE = 7, _a2.KEYFRAME_RULE = 8, _a2.SUPPORTS_RULE = 12, _a2.COUNTER_STYLE_RULE = 11, _a2.FONT_FEATURE_VALUES_RULE = 14, _a2.MARGIN_RULE = 9, _a2);
 
-// ../module-toolkit/node_modules/@lit-labs/ssr-dom-shim/index.js
+// @lit-labs/ssr-dom-shim/index.js
 globalThis.Event ??= EventShimWithRealType;
 globalThis.CustomEvent ??= CustomEventShimWithRealType;
 var constructionToken = Symbol();
@@ -674,7 +674,7 @@ var CustomElementRegistryShimWithRealType = CustomElementRegistry;
 var customElements2 = new CustomElementRegistryShimWithRealType();
 var windowShim = new WindowShim(constructionToken);
 
-// ../module-toolkit/node_modules/@lit/reactive-element/node/css-tag.js
+// @lit/reactive-element/node/css-tag.js
 var t = globalThis;
 var e = t.ShadowRoot && (void 0 === t.ShadyCSS || t.ShadyCSS.nativeShadow) && "adoptedStyleSheets" in Document.prototype && "replace" in CSSStyleSheet.prototype;
 var s = Symbol();
@@ -719,7 +719,7 @@ var c = e || void 0 === t.CSSStyleSheet ? (t3) => t3 : (t3) => t3 instanceof CSS
   return r(e4);
 })(t3) : t3;
 
-// ../module-toolkit/node_modules/@lit/reactive-element/node/reactive-element.js
+// @lit/reactive-element/node/reactive-element.js
 var { is: h, defineProperty: r2, getOwnPropertyDescriptor: o2, getOwnPropertyNames: n2, getOwnPropertySymbols: a, getPrototypeOf: c2 } = Object;
 var l = globalThis;
 l.customElements ??= customElements2;
@@ -942,7 +942,7 @@ var g = class extends (globalThis.HTMLElement ?? HTMLElementShimWithRealType) {
 };
 g.elementStyles = [], g.shadowRootOptions = { mode: "open" }, g[f("elementProperties")] = /* @__PURE__ */ new Map(), g[f("finalized")] = /* @__PURE__ */ new Map(), u?.({ ReactiveElement: g }), (l.reactiveElementVersions ??= []).push("2.1.2");
 
-// node_modules/.pnpm/lit-html@3.3.3/node_modules/lit-html/lit-html.js
+// lit-html/lit-html.js
 var t2 = globalThis;
 var i2 = (t3) => t3;
 var s2 = t2.trustedTypes;
@@ -1196,7 +1196,7 @@ var D = (t3, i4, s4) => {
   return h3._$AI(t3), h3;
 };
 
-// node_modules/.pnpm/lit-element@4.2.2/node_modules/lit-element/lit-element.js
+// lit-element/lit-element.js
 var s3 = globalThis;
 var i3 = class extends g {
   constructor() {
@@ -1225,7 +1225,7 @@ var o4 = s3.litElementPolyfillSupport;
 o4?.({ LitElement: i3 });
 (s3.litElementVersions ??= []).push("4.2.2");
 
-// ../module-toolkit/node_modules/@lit/reactive-element/node/decorators/property.js
+// @lit/reactive-element/node/decorators/property.js
 var o5 = { attribute: true, type: String, converter: b, reflect: false, hasChanged: m };
 var r4 = (t3 = o5, e4, r6) => {
   const { kind: n5, metadata: i4 } = r6;
@@ -1255,19 +1255,19 @@ function n4(t3) {
   })(t3, e4, o6);
 }
 
-// ../module-toolkit/node_modules/@lit/reactive-element/node/decorators/state.js
+// @lit/reactive-element/node/decorators/state.js
 function r5(r6) {
   return n4({ ...r6, state: true, attribute: false });
 }
 
-// ../outfitkit/dist/define.js
+// @erplora/outfitkit/dist/define.js
 function define(tag, ctor) {
   if (typeof customElements !== "undefined" && !customElements.get(tag)) {
     customElements.define(tag, ctor);
   }
 }
 
-// ../outfitkit/dist/shared/icons.js
+// @erplora/outfitkit/dist/shared/icons.js
 var rawAdd = '<svg viewBox="0 0 512 512" width="1.2em" height="1.2em" ><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32" d="M256 112v288m144-144H112"/></svg>';
 var rawAlertCircle = '<svg viewBox="0 0 512 512" width="1.2em" height="1.2em" ><path fill="currentColor" d="M256 48C141.31 48 48 141.31 48 256s93.31 208 208 208s208-93.31 208-208S370.69 48 256 48m0 319.91a20 20 0 1 1 20-20a20 20 0 0 1-20 20m21.72-201.15l-5.74 122a16 16 0 0 1-32 0l-5.74-121.94v-.05a21.74 21.74 0 1 1 43.44 0Z"/></svg>';
 var rawAlertCircleOutline = '<svg viewBox="0 0 512 512" width="1.2em" height="1.2em" ><path fill="none" stroke="currentColor" stroke-miterlimit="10" stroke-width="32" d="M448 256c0-106-86-192-192-192S64 150 64 256s86 192 192 192s192-86 192-192Z"/><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="32" d="M250.26 166.05L256 288l5.73-121.95a5.74 5.74 0 0 0-5.79-6h0a5.74 5.74 0 0 0-5.68 6"/><path fill="currentColor" d="M256 367.91a20 20 0 1 1 20-20a20 20 0 0 1-20 20"/></svg>';
@@ -1415,7 +1415,7 @@ function okIcon(value) {
   return BY_NAME[value] ?? value;
 }
 
-// ../outfitkit/dist/ok-empty-state.js
+// @erplora/outfitkit/dist/ok-empty-state.js
 var __defProp2 = Object.defineProperty;
 var __decorateClass2 = (decorators, target, key2, kind) => {
   var result = void 0;
@@ -1515,7 +1515,7 @@ __decorateClass2([
 ], OkEmptyState.prototype, "message");
 define("ok-empty-state", OkEmptyState);
 
-// ../outfitkit/dist/ok-inline-feedback.js
+// @erplora/outfitkit/dist/ok-inline-feedback.js
 var __defProp3 = Object.defineProperty;
 var __decorateClass3 = (decorators, target, key2, kind) => {
   var result = void 0;
@@ -1732,7 +1732,7 @@ __decorateClass3([
 ], OkInlineFeedback.prototype, "hasActions");
 define("ok-inline-feedback", OkInlineFeedback);
 
-// ../outfitkit/dist/ok-status-pill.js
+// @erplora/outfitkit/dist/ok-status-pill.js
 var __defProp4 = Object.defineProperty;
 var __decorateClass4 = (decorators, target, key2, kind) => {
   var result = void 0;
@@ -1851,7 +1851,7 @@ __decorateClass4([
 ], OkStatusPill.prototype, "size");
 define("ok-status-pill", OkStatusPill);
 
-// modules/flows/ui/components/erp-flows-value/erp-flows-value.ts
+// ui/components/erp-flows-value/erp-flows-value.ts
 var ErpFlowsValue = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2060,7 +2060,7 @@ __decorateClass([
 ], ErpFlowsValue.prototype, "name", 2);
 define("erp-flows-value", ErpFlowsValue);
 
-// modules/flows/ui/lib/plain-language.ts
+// ui/lib/plain-language.ts
 var MINUTE = 60;
 var HOUR = 3600;
 var DAY = 86400;
@@ -2232,7 +2232,7 @@ function describeSample(field, t3) {
   return field.truncated ? `${text}\u2026` : text;
 }
 
-// modules/flows/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
+// ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
 var ErpFlowsFieldPicker = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2476,7 +2476,7 @@ __decorateClass([
 ], ErpFlowsFieldPicker.prototype, "t", 2);
 define("erp-flows-field-picker", ErpFlowsFieldPicker);
 
-// modules/flows/ui/lib/flow-doc.ts
+// ui/lib/flow-doc.ts
 var SCHEMA_VERSION = 1;
 var PATH_ROOTS = ["input", "steps", "event", "secret"];
 var OPERATORS = [
@@ -2725,7 +2725,7 @@ function approvalOutputs(step) {
   return ["decision", "decided_by", "decided_at", "comment"].map((f3) => `steps.${step.id}.${f3}`);
 }
 
-// modules/flows/ui/lib/trigger-catalog.ts
+// ui/lib/trigger-catalog.ts
 var TRIGGER_CATALOG = [
   { event: "sale.completed", labelKey: "ui.evSaleCompleted", module: "sales" },
   { event: "sale.voided", labelKey: "ui.evSaleVoided", module: "sales" },
@@ -2792,7 +2792,7 @@ function catalogEntry(event) {
   return TRIGGER_CATALOG.find((e4) => e4.event === event);
 }
 
-// modules/flows/ui/lib/event-catalog.ts
+// ui/lib/event-catalog.ts
 var BAD_CATALOG = "flows.bad_catalog";
 function toOption(row) {
   const event = typeof row?.name === "string" ? row.name.trim() : "";
@@ -2820,7 +2820,7 @@ async function loadEventCatalog(client) {
   return options.length ? { status: "ready", options } : { status: "empty" };
 }
 
-// modules/flows/ui/lib/simulate.ts
+// ui/lib/simulate.ts
 var REDACTED = "\0redacted\0";
 var REDACTED_MARK = "\u2022\u2022\u2022\u2022";
 var UNKNOWN = "\0unknown\0";
@@ -3105,7 +3105,7 @@ function simulate(doc, input) {
   };
 }
 
-// modules/flows/ui/lib/run-trouble.ts
+// ui/lib/run-trouble.ts
 var TABLE = {
   "flow.grant_denied": "permission",
   "flow.grant_kind_not_available": "permission",
@@ -3158,7 +3158,7 @@ function needsAttention(run2) {
   return run2.status === "failed";
 }
 
-// modules/flows/ui/lib/hub-flows.ts
+// ui/lib/hub-flows.ts
 var CAPABILITY_DENIED = "capability_denied";
 var APPROVAL_EXPIRED = "flow.approval_expired";
 var APPROVAL_ALREADY_DECIDED = "flow.approval_already_decided";
@@ -3179,7 +3179,7 @@ function errorCode(e4) {
   return typeof code === "string" ? code : "";
 }
 
-// modules/flows/ui/components/erp-flows-editor/erp-flows-editor.ts
+// ui/components/erp-flows-editor/erp-flows-editor.ts
 var TABS = ["editor", "test", "permissions", "history"];
 function stepSeconds(step) {
   const from = Date.parse(String(step.started_at ?? ""));
@@ -3226,7 +3226,9 @@ var ErpFlowsEditor = class extends i3 {
     this.draft = null;
     this.document = emptyDoc();
     this.name = "";
-    this.enabled = true;
+    this.enabled = false;
+    this.tested = false;
+    this.enableWarning = "";
     this.tab = "editor";
     this.openStep = null;
     this.grants = [];
@@ -3743,9 +3745,11 @@ var ErpFlowsEditor = class extends i3 {
     if (changed.has("flow")) {
       this.document = this.flow ? readDoc(this.flow.definition) : emptyDoc();
       this.name = this.flow?.name ?? "";
-      this.enabled = this.flow?.enabled ?? true;
+      this.enabled = this.flow?.enabled ?? false;
       this.error = "";
       this.notice = "";
+      this.enableWarning = "";
+      this.tested = false;
       this.runs = [];
       this.grants = [];
       void this.loadGrants();
@@ -3780,6 +3784,7 @@ var ErpFlowsEditor = class extends i3 {
   }
   updated(changed) {
     if (changed.has("tab") && this.tab === "history") void this.loadRuns();
+    if (changed.has("tab") && this.tab === "test") this.tested = true;
     if (this.openStep === "trigger") void this.ensureEventCatalog();
     this.pinEventSelect();
   }
@@ -3961,6 +3966,30 @@ var ErpFlowsEditor = class extends i3 {
   setTrigger(patch) {
     this.setDoc(patchTrigger(this.document, { ...this.trigger, ...patch }));
     void this.loadShape();
+  }
+  /**
+   * The switch is an explicit yes, and it deserves to be an INFORMED one (flows#39).
+   *
+   * Nothing is blocked: the owner can flip a flow on with holes in it if that is what they want.
+   * What the switch does is say, in the same breath, the two things that make «on» not mean
+   * «working»: permissions it asks for and does not hold, and the fact that nobody has looked at
+   * what it would do yet. A flow with no grants does nothing at all — silently — which is the one
+   * outcome this screen must not let read as success.
+   */
+  onEnable(on) {
+    this.enabled = on;
+    if (!on) {
+      this.enableWarning = "";
+      return;
+    }
+    const missing = missingGrants(this.document, this.grants);
+    const warnings = [];
+    if (missing.length)
+      warnings.push(
+        this.t("ui.enableNoGrants", { commands: missing.map((g3) => g3.value).join(", ") })
+      );
+    if (!this.tested) warnings.push(this.t("ui.enableUntested"));
+    this.enableWarning = warnings.join(" ");
   }
   openPicker(target, root) {
     this.pickerFor = target;
@@ -5327,9 +5356,7 @@ var ErpFlowsEditor = class extends i3 {
         ></ok-status-pill>
         <ion-toggle
           .checked=${this.enabled}
-          @ionChange=${(e4) => {
-      this.enabled = !!e4.target.checked;
-    }}
+          @ionChange=${(e4) => this.onEnable(!!e4.target.checked)}
         ></ion-toggle>
         <!-- «Probar» sits with the switch on purpose: it is the thing to press BEFORE turning an
              automation on, and a button on another tab is one nobody presses first. -->
@@ -5373,6 +5400,9 @@ var ErpFlowsEditor = class extends i3 {
         ${this.notice ? b2`<ok-inline-feedback tone="success" icon="checkmark-circle-outline"
               >${this.notice}</ok-inline-feedback
             >` : A}
+        ${this.enableWarning ? b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-enable-warning
+              >${this.enableWarning}</ok-inline-feedback
+            >` : A}
         ${this.renderDraftBanner()}
         ${this.tab === "editor" ? this.renderSpine() : this.tab === "test" ? this.renderPreview() : this.tab === "permissions" ? this.renderPermissions() : this.renderHistory()}
       </div>
@@ -5412,6 +5442,12 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "enabled", 2);
+__decorateClass([
+  r5()
+], ErpFlowsEditor.prototype, "tested", 2);
+__decorateClass([
+  r5()
+], ErpFlowsEditor.prototype, "enableWarning", 2);
 __decorateClass([
   n4({ attribute: false })
 ], ErpFlowsEditor.prototype, "tab", 2);
@@ -5459,7 +5495,7 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "pickerRoot", 2);
 define("erp-flows-editor", ErpFlowsEditor);
 
-// modules/flows/ui/lib/templates.ts
+// ui/lib/templates.ts
 var SECTORS = ["any", "beauty", "food"];
 var SCHEMA_VERSION2 = 1;
 function run(id, command, params) {
@@ -5806,8 +5842,23 @@ function missingModules(template, known) {
   }
   return out;
 }
+var MODULE_LABELS = {
+  appointments: "ui.mod_appointments",
+  cash_register: "ui.mod_cash_register",
+  customers: "ui.mod_customers",
+  reservations: "ui.mod_reservations",
+  sales: "ui.mod_sales",
+  staff: "ui.mod_staff",
+  tasks: "ui.mod_tasks",
+  verifactu: "ui.mod_verifactu",
+  whatsapp_inbox: "ui.mod_whatsapp_inbox"
+};
+function moduleName(id, t3) {
+  const key2 = MODULE_LABELS[id];
+  return key2 ? t3(key2) : id;
+}
 
-// modules/flows/ui/components/erp-flows-gallery/erp-flows-gallery.ts
+// ui/components/erp-flows-gallery/erp-flows-gallery.ts
 var ErpFlowsGallery = class extends i3 {
   constructor() {
     super(...arguments);
@@ -5825,9 +5876,10 @@ var ErpFlowsGallery = class extends i3 {
       color: var(--ok-text, var(--ion-text-color, #1c1b18));
       font-family: var(--ok-font, var(--ion-font-family, system-ui), sans-serif);
     }
+    /* Fluid, not capped: the gallery fills the box the screen hands it — the same box the
+       «Nueva automatización» bar sits in — so the cards and the CTA read as one screen. The old
+       44rem cap spent 704px of a 1144px host, 220px dead on each side (flows#40). */
     .wrap {
-      max-width: 44rem;
-      margin: 0 auto;
       display: flex;
       flex-direction: column;
       gap: 0.75rem;
@@ -5840,6 +5892,9 @@ var ErpFlowsGallery = class extends i3 {
     }
     .lede p {
       flex: 1 1 16rem;
+      /* The wrap is fluid now; a sentence still reads best under ~70 characters, so the lede
+         keeps a reading measure even on a 1440px screen. */
+      max-width: 46rem;
       margin: 0;
       color: var(--ok-muted, #6b6a63);
       font-size: 0.92rem;
@@ -5864,10 +5919,21 @@ var ErpFlowsGallery = class extends i3 {
       color: var(--ok-muted, #6b6a63);
       font-weight: 600;
     }
+    /* The workspace's own card recipe (kitchen's tickets, customers' cards): auto-fill with a
+       card minimum. 3 columns at 1440, 2 at 834, 1 at 390 — the cards get wider, never a wider
+       margin. */
     .cards {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+      gap: 0.75rem;
+    }
+    /* Below 480px the 20rem minimum no longer fits the container (a 320px screen leaves ~290px),
+       and an auto-fill that cannot fit pushes its track off the edge instead of wrapping. One
+       column is what a phone showed before this grid existed — the 390px design stays put. */
+    @media (max-width: 480px) {
+      .cards {
+        grid-template-columns: 1fr;
+      }
     }
     .card {
       background: var(--ok-surface, var(--ion-card-background, #fff));
@@ -6040,6 +6106,7 @@ var ErpFlowsGallery = class extends i3 {
   }
   renderPanel(template) {
     const missing = missingModules(template, this.known);
+    const missingNames = missing.map((id) => moduleName(id, this.t)).join(", ");
     const grants = templateGrants(template, this.t);
     return b2`<div class="panel" id=${`panel-${template.id}`}>
       <p class="plain">${this.t(template.plainKey)}</p>
@@ -6070,7 +6137,10 @@ var ErpFlowsGallery = class extends i3 {
       </div>
 
       ${missing.length ? b2`<ok-inline-feedback tone="warning" icon="download-outline">
-            ${this.t("ui.tplNeedsModule", { modules: missing.join(", ") })}
+            ${this.t(
+      missing.length === 1 ? "ui.tplNeedsModule" : "ui.tplNeedsModules",
+      { modules: missingNames }
+    )}
           </ok-inline-feedback>` : A}
       ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
             >${this.error}</ok-inline-feedback
@@ -6109,7 +6179,12 @@ var ErpFlowsGallery = class extends i3 {
           <span class="name">${this.t(template.nameKey)}</span>
           <span class="summary">${this.t(template.summaryKey)}</span>
         </span>
-        ${missing.length ? b2`<ok-status-pill tone="neutral" label=${this.t("ui.tplUnavailable")}></ok-status-pill>` : A}
+        ${missing.length ? b2`<ok-status-pill
+              tone="neutral"
+              label=${this.t("ui.tplUnavailable", {
+      modules: missing.map((id) => moduleName(id, this.t)).join(", ")
+    })}
+            ></ok-status-pill>` : A}
       </button>
       ${open ? this.renderPanel(template) : A}
     </div>`;
@@ -6161,7 +6236,7 @@ __decorateClass([
 ], ErpFlowsGallery.prototype, "error", 2);
 define("erp-flows-gallery", ErpFlowsGallery);
 
-// modules/flows/ui/components/erp-flows-guide/erp-flows-guide.ts
+// ui/components/erp-flows-guide/erp-flows-guide.ts
 var FIRST_STEPS = [
   "guide.firstPick",
   "guide.firstUse",
@@ -6435,7 +6510,7 @@ __decorateClass([
 ], ErpFlowsGuide.prototype, "t", 2);
 define("erp-flows-guide", ErpFlowsGuide);
 
-// modules/flows/ui/components/erp-flows-approvals/erp-flows-approvals.ts
+// ui/components/erp-flows-approvals/erp-flows-approvals.ts
 var ErpFlowsApprovals = class extends i3 {
   constructor() {
     super(...arguments);
@@ -6728,7 +6803,7 @@ function policy(value, fallback) {
 }
 define("erp-flows-approvals", ErpFlowsApprovals);
 
-// modules/flows/ui/components/erp-flows-dead-letter/erp-flows-dead-letter.ts
+// ui/components/erp-flows-dead-letter/erp-flows-dead-letter.ts
 var MAX_REASON = 500;
 var REASON_PRESETS = ["ui.deadReasonDuplicate", "ui.deadReasonHandled", "ui.deadReasonObsolete"];
 var ErpFlowsDeadLetter = class extends i3 {
@@ -7229,7 +7304,7 @@ __decorateClass([
 ], ErpFlowsDeadLetter.prototype, "notice", 2);
 define("erp-flows-dead-letter", ErpFlowsDeadLetter);
 
-// modules/flows/ui/lib/flow-list.ts
+// ui/lib/flow-list.ts
 var EMPTY_VIEW = { q: "", state: "all", trigger: "all", sort: "updated" };
 function triggerKindOf(flow) {
   return readDoc(flow.definition).triggers[0]?.kind ?? "manual";
@@ -7290,7 +7365,7 @@ function copyName(name, taken, t3) {
   return base;
 }
 
-// modules/flows/ui/lib/ai-draft.ts
+// ui/lib/ai-draft.ts
 var DRAFT_STEP_KINDS = ["command", "condition", "delay"];
 function readNotes(raw) {
   const value = typeof raw === "string" ? safeParse(raw) : raw;
@@ -7486,7 +7561,7 @@ function draftGaps(doc, known) {
   return out;
 }
 
-// modules/flows/locales/es.json
+// locales/es.json
 var es_default = {
   name: "Automatizaciones",
   description: "Automatiza el trabajo repetitivo sin programar: recordatorios de citas, avisos de stock bajo y mensajes a clientes que salen solos.",
@@ -7545,6 +7620,8 @@ var es_default = {
     paused: "En pausa",
     activate: "Activar",
     pause: "Pausar",
+    enableNoGrants: "Encendida, pero a\xFAn no tiene los permisos que pide ({commands}): no har\xE1 nada hasta que se los concedas en la pesta\xF1a Permisos.",
+    enableUntested: "Todav\xEDa no la has probado: en la pesta\xF1a Probar puedes ver qu\xE9 har\xEDa antes de que se dispare sola.",
     neverRun: "No se ha ejecutado nunca",
     lastRun: "\xDAltima vez: {when}",
     noAccessTitle: "Este editor necesita tu permiso",
@@ -7745,8 +7822,18 @@ var es_default = {
     tplNoBlanks: "No hay nada que rellenar. Est\xE1 lista tal cual.",
     tplGrantsTitle: "Lo que te va a pedir permiso para hacer",
     tplGrantsIntro: "Una automatizaci\xF3n funciona con sus propios permisos, nunca con los tuyos. Hasta que se los des, no hace nada.",
-    tplNeedsModule: "Esta necesita el m\xF3dulo {modules}, y este hub no lo tiene. Inst\xE1lalo desde el marketplace y funcionar\xE1.",
-    tplUnavailable: "Falta un m\xF3dulo",
+    tplNeedsModule: "Esta necesita el m\xF3dulo {modules}, y este hub no lo tiene. Inst\xE1lalo desde el marketplace, recarga esta pantalla y funcionar\xE1.",
+    tplNeedsModules: "Esta necesita los m\xF3dulos {modules}, y este hub no los tiene. Inst\xE1lalos desde el marketplace, recarga esta pantalla y funcionar\xE1.",
+    tplUnavailable: "Falta: {modules}",
+    mod_appointments: "Citas",
+    mod_cash_register: "Caja",
+    mod_customers: "Clientes",
+    mod_reservations: "Reservas",
+    mod_sales: "Ventas / TPV",
+    mod_staff: "Personal",
+    mod_tasks: "Tareas",
+    mod_verifactu: "VeriFactu",
+    mod_whatsapp_inbox: "Bandeja de WhatsApp",
     tplUse: "Usar esta",
     tplCreatedPaused: "Se crea en pausa. No pasa nada hasta que la enciendas.",
     tplYours: "Tus automatizaciones",
@@ -8056,7 +8143,7 @@ var es_default = {
   }
 };
 
-// modules/flows/locales/en.json
+// locales/en.json
 var en_default = {
   name: "Automations",
   description: "Automate repetitive work without writing code: appointment reminders, low-stock alerts and messages to customers that go out on their own.",
@@ -8115,6 +8202,8 @@ var en_default = {
     paused: "Paused",
     activate: "Activate",
     pause: "Pause",
+    enableNoGrants: "On, but it does not hold the permissions it asks for yet ({commands}): it will do nothing until you grant them on the Permissions tab.",
+    enableUntested: "You have not tried it yet: the Try it tab shows what it would do before it runs on its own.",
     neverRun: "Never run",
     lastRun: "Last run {when}",
     noAccessTitle: "This editor needs your permission",
@@ -8315,8 +8404,18 @@ var en_default = {
     tplNoBlanks: "Nothing to fill in. It is ready as it is.",
     tplGrantsTitle: "What it will ask you to allow",
     tplGrantsIntro: "An automation runs with its own permissions, never with yours. Until you allow these, it does nothing.",
-    tplNeedsModule: "This one needs the {modules} module, and this hub does not have it. Install it from the marketplace and it will work.",
-    tplUnavailable: "Needs a module",
+    tplNeedsModule: "This one needs the {modules} module, and this hub does not have it. Install it from the marketplace, reload this screen, and it will work.",
+    tplNeedsModules: "This one needs the {modules} modules, and this hub does not have them. Install them from the marketplace, reload this screen, and it will work.",
+    tplUnavailable: "Missing: {modules}",
+    mod_appointments: "Appointments",
+    mod_cash_register: "Cash Register",
+    mod_customers: "Customers",
+    mod_reservations: "Reservations",
+    mod_sales: "Sales & POS",
+    mod_staff: "Staff",
+    mod_tasks: "Tasks",
+    mod_verifactu: "VeriFactu",
+    mod_whatsapp_inbox: "WhatsApp Inbox",
     tplUse: "Use this one",
     tplCreatedPaused: "It is created paused. Nothing happens until you turn it on.",
     tplYours: "Your automations",
@@ -8626,7 +8725,7 @@ var en_default = {
   }
 };
 
-// modules/flows/ui/components/erp-flows-app/erp-flows-app.ts
+// ui/components/erp-flows-app/erp-flows-app.ts
 var CATALOG = { es: es_default, en: en_default };
 var ErpFlowsApp = class extends i3 {
   constructor() {
