@@ -2786,10 +2786,281 @@ var TRIGGER_CATALOG = [
   },
   { event: "tickets.ticket.created", labelKey: "ui.evTicketCreated", module: "tickets" },
   { event: "tasks.task.completed", labelKey: "ui.evTaskCompleted", module: "tasks" },
-  { event: "staff.time_off.created", labelKey: "ui.evStaffTimeOff", module: "staff" }
+  { event: "staff.time_off.created", labelKey: "ui.evStaffTimeOff", module: "staff" },
+  // Everything below is here because the phrase a composition would assemble is not the phrase a
+  // shop owner says (`event-phrasing.ts`, layer 1). «se completa una venta» is grammatical and
+  // nobody talks like that; «se cobra una venta» is what happens. The flagship of flows#41 —
+  // `inventory.low_stock_crossed` — is the first of them.
+  { event: "inventory.low_stock_crossed", labelKey: "ui.evLowStockCrossed", module: "inventory" },
+  {
+    event: "inventory.product.uncategorized",
+    labelKey: "ui.evProductUncategorized",
+    module: "inventory"
+  },
+  { event: "cash_register.movement_added", labelKey: "ui.evCashMovement", module: "cash_register" },
+  {
+    event: "cash_register.settings_updated",
+    labelKey: "ui.evCashSettings",
+    module: "cash_register"
+  },
+  { event: "kitchen.order.created", labelKey: "ui.evKitchenOrderCreated", module: "kitchen" },
+  { event: "kitchen.order.fired", labelKey: "ui.evOrderFired", module: "kitchen" },
+  { event: "order.fired", labelKey: "ui.evOrderFired", module: "sales" },
+  { event: "staff.member.deactivated", labelKey: "ui.evStaffDeactivated", module: "staff" },
+  { event: "kitchen.order.recalled", labelKey: "ui.evKitchenOrderRecalled", module: "kitchen" },
+  { event: "kitchen.item.recalled", labelKey: "ui.evKitchenItemRecalled", module: "kitchen" },
+  { event: "printing.print.due", labelKey: "ui.evPrintDue", module: "printing" },
+  // The two the hub's own runtime puts through the outbox: no module brings them, so `module` is
+  // the namespace they travel under. The «it comes with the X module» hint they would feed is only
+  // ever rendered for an event this hub does NOT have, which cannot happen for a core one.
+  { event: "flow.reminder.due", labelKey: "ui.evReminderDue", module: "flow" },
+  { event: "flow.release_revoked", labelKey: "ui.evFlowReleaseRevoked", module: "flow" },
+  { event: "host.notify", labelKey: "ui.evHostNotify", module: "host" },
+  { event: "host.print", labelKey: "ui.evHostPrint", module: "host" },
+  {
+    event: "reservations.reservations.unconfirmed_released",
+    labelKey: "ui.evUnconfirmedReleased",
+    module: "reservations"
+  },
+  { event: "taxes.rules.bulk_create.report", labelKey: "ui.evTaxRulesBulk", module: "taxes" },
+  {
+    event: "sales.sale.created_from_appointment",
+    labelKey: "ui.evSaleFromAppointment",
+    module: "sales"
+  },
+  { event: "staff.member.created", labelKey: "ui.evStaffMemberCreated", module: "staff" },
+  {
+    event: "verifactu.record.transmitted",
+    labelKey: "ui.evRecordTransmitted",
+    module: "verifactu"
+  },
+  { event: "verifactu.record.rejected", labelKey: "ui.evRecordRejected", module: "verifactu" },
+  {
+    event: "verifactu.record.accepted_with_errors",
+    labelKey: "ui.evRecordAcceptedWithErrors",
+    module: "verifactu"
+  },
+  {
+    event: "invoice_series.series.default_changed",
+    labelKey: "ui.evSeriesDefaultChanged",
+    module: "invoice_series"
+  },
+  { event: "modifiers.link.attached", labelKey: "ui.evModifierAttached", module: "modifiers" },
+  { event: "modifiers.link.detached", labelKey: "ui.evModifierDetached", module: "modifiers" },
+  { event: "tables.session.merged", labelKey: "ui.evTablesMerged", module: "tables" },
+  { event: "tables.session.split", labelKey: "ui.evTablesSplit", module: "tables" },
+  { event: "tables.session.transferred", labelKey: "ui.evTableTransferred", module: "tables" },
+  {
+    event: "online_booking.booking.no_show",
+    labelKey: "ui.evOnlineNoShow",
+    module: "online_booking"
+  },
+  { event: "customer.consent_granted", labelKey: "ui.evConsentGranted", module: "customers" },
+  { event: "customer.consent_withdrawn", labelKey: "ui.evConsentWithdrawn", module: "customers" }
 ];
 function catalogEntry(event) {
   return TRIGGER_CATALOG.find((e4) => e4.event === event);
+}
+
+// ui/lib/event-phrasing.ts
+var EVENT_FAMILIES = {
+  appointments: "ui.evfAppointments",
+  cart_checkout: "ui.evfCartCheckout",
+  cash_register: "ui.evfCashRegister",
+  combos: "ui.evfCombos",
+  customer: "ui.evfCustomers",
+  customers: "ui.evfCustomers",
+  flow: "ui.evfFlows",
+  flows: "ui.evfFlows",
+  host: "ui.evfHost",
+  inventory: "ui.evfInventory",
+  invoice: "ui.evfInvoice",
+  invoice_series: "ui.evfInvoiceSeries",
+  kitchen: "ui.evfKitchen",
+  modifiers: "ui.evfModifiers",
+  online_booking: "ui.evfOnlineBooking",
+  order: "ui.evfSales",
+  payment_gateways: "ui.evfPaymentGateways",
+  payments: "ui.evfPayments",
+  pricing: "ui.evfPricing",
+  printing: "ui.evfPrinting",
+  reservations: "ui.evfReservations",
+  sale: "ui.evfSales",
+  sales: "ui.evfSales",
+  schedules: "ui.evfSchedules",
+  services: "ui.evfServices",
+  staff: "ui.evfStaff",
+  tables: "ui.evfTables",
+  tasks: "ui.evfTasks",
+  taxes: "ui.evfTaxes",
+  tickets: "ui.evfTickets",
+  verifactu: "ui.evfVerifactu",
+  whatsapp_inbox: "ui.evfWhatsapp"
+};
+var EVENT_SUBJECTS = {
+  aeat: { key: "ui.evsAeat" },
+  alias: { key: "ui.evsTaxAlias" },
+  appointment: { key: "ui.evsAppointment" },
+  blocked_date: { key: "ui.evsBlockedDate" },
+  blocked_time: { key: "ui.evsBlockedTime" },
+  booking: { key: "ui.evsBooking" },
+  booking_request: { key: "ui.evsBookingRequest" },
+  business_hours: { key: "ui.evsBusinessHours", plural: true },
+  cart: { key: "ui.evsCart" },
+  carts: { key: "ui.evsCarts", plural: true },
+  chain: { key: "ui.evsChain" },
+  checkout: { key: "ui.evsCheckout" },
+  choice_group: { key: "ui.evsChoiceGroup" },
+  choice_option: { key: "ui.evsChoiceOption" },
+  combo: { key: "ui.evsCombo" },
+  comment: { key: "ui.evsComment" },
+  config: { key: "ui.evsConfig" },
+  contingency: { key: "ui.evsContingency" },
+  conversation: { key: "ui.evsConversation" },
+  customer: { key: "ui.evsCustomer" },
+  diagnostic: { key: "ui.evsDiagnostic" },
+  draft: { key: "ui.evsDraft" },
+  gateway: { key: "ui.evsGateway" },
+  group: { key: "ui.evsModifierGroup" },
+  invoice: { key: "ui.evsInvoice" },
+  item: { key: "ui.evsLine" },
+  member: { key: "ui.evsStaffMember" },
+  message: { key: "ui.evsMessage" },
+  number: { key: "ui.evsInvoiceNumber" },
+  option: { key: "ui.evsModifier" },
+  order: { key: "ui.evsOrder" },
+  override: { key: "ui.evsScheduleOverride" },
+  package: { key: "ui.evsPackage" },
+  payment: { key: "ui.evsPayment" },
+  price_item: { key: "ui.evsPrice" },
+  price_list: { key: "ui.evsPriceList" },
+  product: { key: "ui.evsProduct" },
+  project: { key: "ui.evsProject" },
+  record: { key: "ui.evsRecord" },
+  recurring: { key: "ui.evsRecurring" },
+  reminder: { key: "ui.evsReminder" },
+  request: { key: "ui.evsRequest" },
+  reservation: { key: "ui.evsReservation" },
+  role: { key: "ui.evsRole" },
+  routing: { key: "ui.evsRouting" },
+  rule: { key: "ui.evsRule" },
+  sale: { key: "ui.evsSale" },
+  schedule: { key: "ui.evsSchedule" },
+  series: { key: "ui.evsSeries" },
+  service: { key: "ui.evsService" },
+  session: { key: "ui.evsOpenTable" },
+  settings: { key: "ui.evsSettings", plural: true },
+  sla: { key: "ui.evsSla" },
+  slot: { key: "ui.evsSlot" },
+  special_day: { key: "ui.evsSpecialDay" },
+  station: { key: "ui.evsStation" },
+  table: { key: "ui.evsTable" },
+  task: { key: "ui.evsTask" },
+  template: { key: "ui.evsTemplate" },
+  ticket: { key: "ui.evsTicket" },
+  time_off: { key: "ui.evsTimeOff" },
+  timeslot: { key: "ui.evsTimeslot" },
+  transaction: { key: "ui.evsTransaction" },
+  waitlist: { key: "ui.evsWaitlist" },
+  zone: { key: "ui.evsZone" },
+  // Same word, different business object.
+  "cart_checkout.item": { key: "ui.evsCartLine" },
+  "cart_checkout.order": { key: "ui.evsOnlineOrder" },
+  "taxes.category": { key: "ui.evsTaxCategory" }
+};
+var EVENT_ACTIONS = {
+  abandoned: { key: "ui.evaAbandoned" },
+  added: { key: "ui.evaAdded" },
+  allocated: { key: "ui.evaAllocated" },
+  anonymized: { key: "ui.evaAnonymized" },
+  approved: { key: "ui.evaApproved" },
+  assigned: { key: "ui.evaAssigned" },
+  breached: { key: "ui.evaBreached" },
+  bumped: { key: "ui.evaBumped" },
+  cancelled: { key: "ui.evaCancelled" },
+  categorized: { key: "ui.evaCategorized" },
+  changed: { key: "ui.evaChanged" },
+  cleared: { key: "ui.evaCleared" },
+  closed: { key: "ui.evaClosed" },
+  completed: { key: "ui.evaCompleted" },
+  confirmed: { key: "ui.evaConfirmed" },
+  created: { key: "ui.evaCreated" },
+  deactivated: { key: "ui.evaDeactivated" },
+  deleted: { key: "ui.evaDeleted" },
+  due: { key: "ui.evaDue" },
+  expired: { key: "ui.evaExpired", pluralKey: "ui.evaExpiredPl" },
+  failed: { key: "ui.evaFailed" },
+  fired: { key: "ui.evaFired" },
+  fulfilled: { key: "ui.evaFulfilled" },
+  granted: { key: "ui.evaGranted" },
+  held: { key: "ui.evaHeld" },
+  hold_released: { key: "ui.evaHoldReleased" },
+  initiated: { key: "ui.evaInitiated" },
+  opened: { key: "ui.evaOpened" },
+  paid: { key: "ui.evaPaid" },
+  parked: { key: "ui.evaParked" },
+  processed: { key: "ui.evaProcessed" },
+  proposed: { key: "ui.evaProposed" },
+  queried: { key: "ui.evaQueried" },
+  received: { key: "ui.evaReceived" },
+  rectified: { key: "ui.evaRectified" },
+  recovered: { key: "ui.evaRecovered" },
+  redeemed: { key: "ui.evaRedeemed" },
+  refunded: { key: "ui.evaRefunded" },
+  rejected: { key: "ui.evaRejected" },
+  removed: { key: "ui.evaRemoved" },
+  reopened: { key: "ui.evaReopened" },
+  rescheduled: { key: "ui.evaRescheduled" },
+  resolved: { key: "ui.evaResolved" },
+  restored: { key: "ui.evaRestored" },
+  retried: { key: "ui.evaRetried" },
+  run: { key: "ui.evaRun" },
+  saved: { key: "ui.evaSaved", pluralKey: "ui.evaSavedPl" },
+  sent: { key: "ui.evaSent" },
+  served: { key: "ui.evaServed" },
+  settled: { key: "ui.evaSettled" },
+  started: { key: "ui.evaStarted" },
+  status_changed: { key: "ui.evaStatusChanged" },
+  succeeded: { key: "ui.evaSucceeded" },
+  terminated: { key: "ui.evaTerminated" },
+  transferred: { key: "ui.evaTransferred" },
+  uncategorized: { key: "ui.evaUncategorized" },
+  updated: { key: "ui.evaUpdated", pluralKey: "ui.evaUpdatedPl" },
+  validated: { key: "ui.evaValidated" }
+};
+var PHRASE_TEMPLATE = "ui.evtPhrase";
+function humanizeToken(token) {
+  const words = token.replace(/[._]+/g, " ").trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : "";
+}
+function splitEventName(event) {
+  const parts = event.split(".").filter(Boolean);
+  if (parts.length < 2) return null;
+  if (parts.length === 2) return { family: parts[0], subject: parts[0], action: parts[1] };
+  return { family: parts[0], subject: parts[1], action: parts.slice(2).join(".") };
+}
+function subjectOf(parts) {
+  return EVENT_SUBJECTS[`${parts.family}.${parts.subject}`] ?? EVENT_SUBJECTS[parts.subject];
+}
+function eventFamily(event, t3) {
+  const parts = splitEventName(event);
+  if (!parts) return "";
+  const key2 = EVENT_FAMILIES[parts.family];
+  return key2 ? t3(key2) : humanizeToken(parts.family);
+}
+function eventPhrase(event, t3) {
+  const curated = catalogEntry(event);
+  if (curated) return t3(curated.labelKey);
+  const parts = splitEventName(event);
+  if (!parts) return event ? humanizeToken(event) : "";
+  const subject = subjectOf(parts);
+  const action = EVENT_ACTIONS[parts.action];
+  if (subject && action) {
+    const verbKey = subject.plural ? action.pluralKey ?? action.key : action.key;
+    return t3(PHRASE_TEMPLATE, { subject: t3(subject.key), action: t3(verbKey) });
+  }
+  const tail = `${parts.subject} ${parts.action}`;
+  return humanizeToken(tail).toLowerCase();
 }
 
 // ui/lib/event-catalog.ts
@@ -2818,6 +3089,21 @@ async function loadEventCatalog(client) {
   if (!Array.isArray(rows)) return { status: "failed", code: BAD_CATALOG };
   const options = rows.map((row) => toOption(row)).filter((o6) => o6 !== null);
   return options.length ? { status: "ready", options } : { status: "empty" };
+}
+function groupByFamily(options, t3) {
+  const groups = [];
+  const byFamily = /* @__PURE__ */ new Map();
+  for (const option2 of options) {
+    const family = eventFamily(option2.event, t3);
+    let group = byFamily.get(family);
+    if (!group) {
+      group = { family, options: [] };
+      byFamily.set(family, group);
+      groups.push(group);
+    }
+    group.options.push(option2);
+  }
+  return groups;
 }
 
 // ui/lib/simulate.ts
@@ -3207,6 +3493,9 @@ function clamp(value, min, max, fallback) {
 }
 function option(value, label, current) {
   return b2`<option value=${value} ?selected=${value === current}>${label}</option>`;
+}
+function eventOption(value, label, current) {
+  return b2`<option value=${value} title=${value} ?selected=${value === current}>${label}</option>`;
 }
 function rowsToWhen(rows) {
   const out = {};
@@ -4001,9 +4290,9 @@ var ErpFlowsEditor = class extends i3 {
     this.pickerOpen = false;
     this.pickerFor = null;
   }
+  /** What the owner reads for an event: the hand-written phrase, or the composed one (flows#41). */
   eventLabel(event) {
-    const entry = event ? catalogEntry(event) : void 0;
-    return entry ? this.t(entry.labelKey) : event ?? "";
+    return event ? eventPhrase(event, this.t) : "";
   }
   // ── Rendering ───────────────────────────────────────────────────────────────────────────────
   /** `true` when the assistant left something unresolved on this node (`trigger`, or a step id). */
@@ -4140,8 +4429,18 @@ var ErpFlowsEditor = class extends i3 {
           @change=${(e4) => this.setTrigger({ event: e4.target.value })}
         >
           <option value="">—</option>
-          ${options.map(
-      (entry) => option(entry.event, entry.labelKey ? this.t(entry.labelKey) : entry.event, chosen)
+          <!--
+            Grouped by the module the event comes from (flows#41): a hub with everything installed
+            offers 196 of these, and «Cocina → llega un pedido a cocina» is how Zapier, Power
+            Automate and Odoo all let somebody find one. The order inside each group is still the
+            hub's.
+          -->
+          ${groupByFamily(options, this.t).map(
+      (group) => b2`<optgroup label=${group.family}>
+              ${group.options.map(
+        (entry) => eventOption(entry.event, this.eventLabel(entry.event), chosen)
+      )}
+            </optgroup>`
     )}
           <!--
             The saved event, kept on offer even when the catalogue has not arrived, or arrived
@@ -4150,7 +4449,7 @@ var ErpFlowsEditor = class extends i3 {
             trigger — the exact shape of the bug fixed in v0.1.6, only now with a network round trip
             widening the window.
           -->
-          ${chosen && !listed ? option(chosen, this.eventLabel(chosen), chosen) : A}
+          ${chosen && !listed ? eventOption(chosen, this.eventLabel(chosen), chosen) : A}
         </select>
         ${this.renderCatalogState()}
         <span class="hint">
@@ -7985,7 +8284,195 @@ var es_default = {
     deadClosedWith: "{event} \u2014 cerrado: \xAB{reason}\xBB",
     deadClosedNoReason: "{event} \u2014 cerrado, sin motivo apuntado.",
     deadDiscardDo: "S\xED, cerrarlo",
-    runTook: "tard\xF3 {seconds}s"
+    runTook: "tard\xF3 {seconds}s",
+    evtPhrase: "{action} {subject}",
+    evfAppointments: "Citas",
+    evfCartCheckout: "Carrito online",
+    evfCashRegister: "Caja",
+    evfCombos: "Combos",
+    evfCustomers: "Clientes",
+    evfFlows: "Automatizaciones",
+    evfHost: "Este dispositivo",
+    evfInventory: "Almac\xE9n",
+    evfInvoice: "Facturaci\xF3n",
+    evfInvoiceSeries: "Series de factura",
+    evfKitchen: "Cocina",
+    evfModifiers: "Modificadores",
+    evfOnlineBooking: "Reservas por internet",
+    evfPaymentGateways: "Pasarelas de pago",
+    evfPayments: "Cobros",
+    evfPricing: "Tarifas",
+    evfPrinting: "Impresi\xF3n",
+    evfReservations: "Reservas de mesa",
+    evfSales: "Ventas",
+    evfSchedules: "Horarios",
+    evfServices: "Servicios",
+    evfStaff: "Personal",
+    evfTables: "Mesas",
+    evfTasks: "Tareas",
+    evfTaxes: "Impuestos",
+    evfTickets: "Incidencias",
+    evfVerifactu: "VeriFactu",
+    evfWhatsapp: "WhatsApp",
+    evsAeat: "la AEAT",
+    evsAppointment: "una cita",
+    evsBlockedDate: "un d\xEDa bloqueado",
+    evsBlockedTime: "un hueco bloqueado",
+    evsBooking: "una reserva por internet",
+    evsBookingRequest: "una solicitud de reserva",
+    evsBusinessHours: "los horarios de apertura",
+    evsCart: "un carrito",
+    evsCartLine: "una l\xEDnea del carrito",
+    evsCarts: "los carritos",
+    evsChain: "la cadena de facturas",
+    evsCheckout: "un pago por internet",
+    evsChoiceGroup: "un grupo de elecci\xF3n",
+    evsChoiceOption: "una opci\xF3n de elecci\xF3n",
+    evsCombo: "un combo",
+    evsComment: "un comentario",
+    evsConfig: "la configuraci\xF3n",
+    evsContingency: "una contingencia",
+    evsConversation: "una conversaci\xF3n",
+    evsCustomer: "un cliente",
+    evsDiagnostic: "un diagn\xF3stico",
+    evsDraft: "un borrador de automatizaci\xF3n",
+    evsGateway: "una pasarela de pago",
+    evsInvoice: "una factura",
+    evsInvoiceNumber: "un n\xFAmero de factura",
+    evsLine: "una l\xEDnea",
+    evsMessage: "un mensaje",
+    evsModifier: "un modificador",
+    evsModifierGroup: "un grupo de modificadores",
+    evsOnlineOrder: "un pedido por internet",
+    evsOpenTable: "una mesa abierta",
+    evsOrder: "una comanda",
+    evsPackage: "un bono",
+    evsPayment: "un cobro",
+    evsPrice: "un precio",
+    evsPriceList: "una tarifa",
+    evsProduct: "un producto",
+    evsProject: "un proyecto",
+    evsRecord: "un registro VeriFactu",
+    evsRecurring: "una cita peri\xF3dica",
+    evsReminder: "un recordatorio",
+    evsRequest: "una solicitud",
+    evsReservation: "una reserva de mesa",
+    evsRole: "un rol",
+    evsRouting: "el enrutado a cocina",
+    evsRule: "una regla",
+    evsSale: "una venta",
+    evsSchedule: "un horario",
+    evsScheduleOverride: "una excepci\xF3n de horario",
+    evsSeries: "una serie de facturas",
+    evsService: "un servicio",
+    evsSettings: "los ajustes",
+    evsSla: "un SLA",
+    evsSlot: "un hueco",
+    evsSpecialDay: "un d\xEDa especial",
+    evsStaffMember: "una persona del equipo",
+    evsStation: "una estaci\xF3n de cocina",
+    evsTable: "una mesa",
+    evsTask: "una tarea",
+    evsTaxAlias: "un alias de impuesto",
+    evsTaxCategory: "una categor\xEDa de impuesto",
+    evsTemplate: "una plantilla",
+    evsTicket: "una incidencia",
+    evsTimeOff: "una solicitud de vacaciones",
+    evsTimeslot: "una franja horaria",
+    evsTransaction: "una transacci\xF3n de tarjeta",
+    evsWaitlist: "una entrada de la lista de espera",
+    evsZone: "una zona",
+    evaAbandoned: "se abandona",
+    evaAdded: "se a\xF1ade",
+    evaAllocated: "se reserva",
+    evaAnonymized: "se anonimiza",
+    evaApproved: "se aprueba",
+    evaAssigned: "se asigna",
+    evaBreached: "se incumple",
+    evaBumped: "se despacha",
+    evaCancelled: "se cancela",
+    evaCategorized: "se clasifica",
+    evaChanged: "cambia",
+    evaCleared: "se vac\xEDa",
+    evaClosed: "se cierra",
+    evaCompleted: "se completa",
+    evaConfirmed: "se confirma",
+    evaCreated: "se crea",
+    evaDeactivated: "se desactiva",
+    evaDeleted: "se borra",
+    evaDue: "le llega la hora a",
+    evaExpired: "caduca",
+    evaExpiredPl: "caducan",
+    evaFailed: "falla",
+    evaFired: "se lanza a cocina",
+    evaFulfilled: "se atiende",
+    evaGranted: "se concede",
+    evaHeld: "se retiene",
+    evaHoldReleased: "se libera la retenci\xF3n de",
+    evaInitiated: "se inicia",
+    evaOpened: "se abre",
+    evaPaid: "se paga",
+    evaParked: "se aparca",
+    evaProcessed: "se procesa",
+    evaProposed: "se propone",
+    evaQueried: "se consulta",
+    evaReceived: "llega",
+    evaRectified: "se rectifica",
+    evaRecovered: "se recupera",
+    evaRedeemed: "se canjea",
+    evaRefunded: "se devuelve",
+    evaRejected: "se rechaza",
+    evaRemoved: "se quita",
+    evaReopened: "se reabre",
+    evaRescheduled: "se cambia de hora",
+    evaResolved: "se resuelve",
+    evaRestored: "se restaura",
+    evaRetried: "se reintenta",
+    evaRun: "se ejecuta",
+    evaSaved: "se guarda",
+    evaSavedPl: "se guardan",
+    evaSent: "se env\xEDa",
+    evaServed: "se sirve",
+    evaSettled: "se liquida",
+    evaStarted: "empieza",
+    evaStatusChanged: "cambia de estado",
+    evaSucceeded: "sale bien",
+    evaTerminated: "causa baja",
+    evaTransferred: "se traspasa",
+    evaUncategorized: "se saca de su categor\xEDa",
+    evaUpdated: "se actualiza",
+    evaUpdatedPl: "se cambian",
+    evaValidated: "se valida",
+    evLowStockCrossed: "baja el stock de un producto por debajo del m\xEDnimo",
+    evProductUncategorized: "se saca un producto de su categor\xEDa",
+    evCashMovement: "se apunta un movimiento de caja",
+    evCashSettings: "se cambian los ajustes de caja",
+    evKitchenOrderCreated: "llega un pedido a cocina",
+    evKitchenOrderRecalled: "vuelve una comanda a cocina",
+    evKitchenItemRecalled: "vuelve una l\xEDnea a cocina",
+    evPrintDue: "hay algo que imprimir",
+    evReminderDue: "llega la hora de un recordatorio",
+    evFlowReleaseRevoked: "una automatizaci\xF3n pierde un permiso",
+    evHostNotify: "se avisa desde este dispositivo",
+    evHostPrint: "se manda algo a imprimir a este dispositivo",
+    evUnconfirmedReleased: "se liberan las reservas sin confirmar",
+    evTaxRulesBulk: "se importan reglas de impuestos en lote",
+    evSaleFromAppointment: "se crea una venta a partir de una cita",
+    evStaffMemberCreated: "entra alguien nuevo en el equipo",
+    evRecordTransmitted: "se env\xEDa una factura a Hacienda",
+    evRecordRejected: "Hacienda rechaza una factura",
+    evRecordAcceptedWithErrors: "Hacienda acepta una factura con errores",
+    evSeriesDefaultChanged: "una serie pasa a ser la predeterminada",
+    evModifierAttached: "se a\xF1ade un modificador a un producto",
+    evModifierDetached: "se quita un modificador de un producto",
+    evTablesMerged: "se juntan dos mesas",
+    evTablesSplit: "se divide una cuenta",
+    evTableTransferred: "se pasa una mesa a otra",
+    evOnlineNoShow: "alguien no se presenta a una reserva por internet",
+    evConsentGranted: "un cliente da su consentimiento",
+    evConsentWithdrawn: "un cliente retira su consentimiento",
+    evOrderFired: "se manda una comanda a cocina",
+    evStaffDeactivated: "se desactiva a alguien del equipo"
   },
   tpl: {
     author: "Automatizaciones",
@@ -8567,7 +9054,195 @@ var en_default = {
     deadClosedWith: "{event} \u2014 closed: \xAB{reason}\xBB",
     deadClosedNoReason: "{event} \u2014 closed, with no reason written down.",
     deadDiscardDo: "Yes, close it",
-    runTook: "took {seconds}s"
+    runTook: "took {seconds}s",
+    evtPhrase: "{subject} {action}",
+    evfAppointments: "Appointments",
+    evfCartCheckout: "Online cart",
+    evfCashRegister: "Till",
+    evfCombos: "Combos",
+    evfCustomers: "Customers",
+    evfFlows: "Automations",
+    evfHost: "This device",
+    evfInventory: "Stock",
+    evfInvoice: "Invoicing",
+    evfInvoiceSeries: "Invoice series",
+    evfKitchen: "Kitchen",
+    evfModifiers: "Modifiers",
+    evfOnlineBooking: "Online booking",
+    evfPaymentGateways: "Payment gateways",
+    evfPayments: "Payments",
+    evfPricing: "Prices",
+    evfPrinting: "Printing",
+    evfReservations: "Table reservations",
+    evfSales: "Sales",
+    evfSchedules: "Opening hours",
+    evfServices: "Services",
+    evfStaff: "Staff",
+    evfTables: "Tables",
+    evfTasks: "Tasks",
+    evfTaxes: "Taxes",
+    evfTickets: "Support",
+    evfVerifactu: "VeriFactu",
+    evfWhatsapp: "WhatsApp",
+    evsAeat: "the AEAT",
+    evsAppointment: "an appointment",
+    evsBlockedDate: "a blocked day",
+    evsBlockedTime: "a blocked slot",
+    evsBooking: "an online booking",
+    evsBookingRequest: "a booking request",
+    evsBusinessHours: "the opening hours",
+    evsCart: "a cart",
+    evsCartLine: "a cart line",
+    evsCarts: "the carts",
+    evsChain: "the invoice chain",
+    evsCheckout: "an online payment",
+    evsChoiceGroup: "a choice group",
+    evsChoiceOption: "a choice",
+    evsCombo: "a combo",
+    evsComment: "a comment",
+    evsConfig: "the configuration",
+    evsContingency: "a contingency",
+    evsConversation: "a conversation",
+    evsCustomer: "a customer",
+    evsDiagnostic: "a diagnostic",
+    evsDraft: "a draft automation",
+    evsGateway: "a payment gateway",
+    evsInvoice: "an invoice",
+    evsInvoiceNumber: "an invoice number",
+    evsLine: "a line",
+    evsMessage: "a message",
+    evsModifier: "a modifier",
+    evsModifierGroup: "a modifier group",
+    evsOnlineOrder: "an online order",
+    evsOpenTable: "an open table",
+    evsOrder: "an order",
+    evsPackage: "a package",
+    evsPayment: "a payment",
+    evsPrice: "a price",
+    evsPriceList: "a price list",
+    evsProduct: "a product",
+    evsProject: "a project",
+    evsRecord: "a VeriFactu record",
+    evsRecurring: "a repeating appointment",
+    evsReminder: "a reminder",
+    evsRequest: "a request",
+    evsReservation: "a table reservation",
+    evsRole: "a role",
+    evsRouting: "the kitchen routing",
+    evsRule: "a rule",
+    evsSale: "a sale",
+    evsSchedule: "a schedule",
+    evsScheduleOverride: "an opening-hours exception",
+    evsSeries: "an invoice series",
+    evsService: "a service",
+    evsSettings: "the settings",
+    evsSla: "an SLA",
+    evsSlot: "a slot",
+    evsSpecialDay: "a special day",
+    evsStaffMember: "a staff member",
+    evsStation: "a kitchen station",
+    evsTable: "a table",
+    evsTask: "a task",
+    evsTaxAlias: "a tax alias",
+    evsTaxCategory: "a tax category",
+    evsTemplate: "a template",
+    evsTicket: "a support ticket",
+    evsTimeOff: "a time-off request",
+    evsTimeslot: "a time slot",
+    evsTransaction: "a card transaction",
+    evsWaitlist: "a waiting-list entry",
+    evsZone: "a zone",
+    evaAbandoned: "is abandoned",
+    evaAdded: "is added",
+    evaAllocated: "is reserved",
+    evaAnonymized: "is anonymised",
+    evaApproved: "is approved",
+    evaAssigned: "is assigned",
+    evaBreached: "is breached",
+    evaBumped: "is cleared off the kitchen screen",
+    evaCancelled: "is cancelled",
+    evaCategorized: "is filed under a category",
+    evaChanged: "changes",
+    evaCleared: "is emptied",
+    evaClosed: "is closed",
+    evaCompleted: "is completed",
+    evaConfirmed: "is confirmed",
+    evaCreated: "is created",
+    evaDeactivated: "is switched off",
+    evaDeleted: "is deleted",
+    evaDue: "falls due",
+    evaExpired: "expires",
+    evaExpiredPl: "expire",
+    evaFailed: "fails",
+    evaFired: "is fired to the kitchen",
+    evaFulfilled: "is fulfilled",
+    evaGranted: "is granted",
+    evaHeld: "is put on hold",
+    evaHoldReleased: "is released from hold",
+    evaInitiated: "is started",
+    evaOpened: "is opened",
+    evaPaid: "is paid",
+    evaParked: "is parked",
+    evaProcessed: "is processed",
+    evaProposed: "is proposed",
+    evaQueried: "is queried",
+    evaReceived: "arrives",
+    evaRectified: "is corrected",
+    evaRecovered: "is recovered",
+    evaRedeemed: "is redeemed",
+    evaRefunded: "is refunded",
+    evaRejected: "is rejected",
+    evaRemoved: "is removed",
+    evaReopened: "is reopened",
+    evaRescheduled: "is moved to another time",
+    evaResolved: "is resolved",
+    evaRestored: "is restored",
+    evaRetried: "is retried",
+    evaRun: "is run",
+    evaSaved: "is saved",
+    evaSavedPl: "are saved",
+    evaSent: "is sent",
+    evaServed: "is served",
+    evaSettled: "is settled",
+    evaStarted: "starts",
+    evaStatusChanged: "changes status",
+    evaSucceeded: "goes through",
+    evaTerminated: "leaves the company",
+    evaTransferred: "is transferred",
+    evaUncategorized: "is taken out of its category",
+    evaUpdated: "is updated",
+    evaUpdatedPl: "are updated",
+    evaValidated: "is validated",
+    evLowStockCrossed: "the stock of a product drops below its minimum",
+    evProductUncategorized: "a product is taken out of its category",
+    evCashMovement: "a till movement is recorded",
+    evCashSettings: "the till settings are changed",
+    evKitchenOrderCreated: "an order reaches the kitchen",
+    evKitchenOrderRecalled: "an order goes back to the kitchen",
+    evKitchenItemRecalled: "a line goes back to the kitchen",
+    evPrintDue: "there is something to print",
+    evReminderDue: "a reminder falls due",
+    evFlowReleaseRevoked: "an automation loses a permission",
+    evHostNotify: "this device is asked to warn somebody",
+    evHostPrint: "this device is asked to print",
+    evUnconfirmedReleased: "unconfirmed reservations are released",
+    evTaxRulesBulk: "tax rules are imported in bulk",
+    evSaleFromAppointment: "a sale is created from an appointment",
+    evStaffMemberCreated: "somebody joins the team",
+    evRecordTransmitted: "an invoice is sent to the tax office",
+    evRecordRejected: "the tax office rejects an invoice",
+    evRecordAcceptedWithErrors: "the tax office accepts an invoice with errors",
+    evSeriesDefaultChanged: "a series becomes the default one",
+    evModifierAttached: "a modifier is attached to a product",
+    evModifierDetached: "a modifier is taken off a product",
+    evTablesMerged: "two tables are merged",
+    evTablesSplit: "a bill is split",
+    evTableTransferred: "a table is moved to another one",
+    evOnlineNoShow: "somebody does not turn up for an online booking",
+    evConsentGranted: "a customer gives their consent",
+    evConsentWithdrawn: "a customer withdraws their consent",
+    evOrderFired: "an order is fired to the kitchen",
+    evStaffDeactivated: "a staff member is deactivated"
   },
   tpl: {
     author: "Automations",

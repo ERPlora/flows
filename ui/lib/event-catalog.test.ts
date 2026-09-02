@@ -1,6 +1,19 @@
 import { describe, it, expect, vi } from 'vitest';
-import { loadEventCatalog } from './event-catalog';
+import { groupByFamily, loadEventCatalog } from './event-catalog';
 import { TRIGGER_CATALOG } from './trigger-catalog';
+import es from '../../locales/es.json';
+
+/** The shell's translator over the Spanish catalogue. */
+const t = (key: string, params?: Record<string, unknown>): string => {
+  let cur: unknown = es;
+  for (const part of key.split('.')) {
+    cur = cur && typeof cur === 'object' ? (cur as Record<string, unknown>)[part] : undefined;
+  }
+  const found = typeof cur === 'string' ? cur : key;
+  return params
+    ? found.replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? ''))
+    : found;
+};
 
 /** A client whose `events.list` answers whatever the test hands it. */
 const clientListing = (rows: unknown) => ({ events: { list: vi.fn(async () => rows) } });
@@ -109,5 +122,48 @@ describe('the events an owner can start a flow from come from THIS hub', () => {
     expect(catalog.status === 'ready' && catalog.options.map((o) => o.event)).toEqual([
       'sale.completed',
     ]);
+  });
+});
+
+describe('the dropdown is grouped by the module the event comes from', () => {
+  const option = (name: string) => ({ event: name, declaredBy: [] });
+
+  it('puts each event under its own family, named as the owner knows it', () => {
+    const groups = groupByFamily(
+      [option('kitchen.order.ready'), option('inventory.product.created')],
+      t,
+    );
+
+    expect(groups.map((g) => g.family)).toEqual(['Cocina', 'Almacén']);
+    expect(groups[0].options.map((o) => o.event)).toEqual(['kitchen.order.ready']);
+  });
+
+  it('keeps the hub’s order — both of the groups and inside each one', () => {
+    // The hub sorts by name, so «what this business fires» does not move under the owner every
+    // time they switch language. Re-sorting by the translated label would do exactly that.
+    const groups = groupByFamily(
+      [
+        option('tables.table.created'),
+        option('inventory.product.created'),
+        option('tables.zone.created'),
+      ],
+      t,
+    );
+
+    expect(groups.map((g) => g.family)).toEqual(['Mesas', 'Almacén']);
+    expect(groups[0].options.map((o) => o.event)).toEqual([
+      'tables.table.created',
+      'tables.zone.created',
+    ]);
+  });
+
+  it('groups an event from a module nobody knows under a readable name too', () => {
+    const groups = groupByFamily([option('weird_module.odd_thing.went_sideways')], t);
+
+    expect(groups.map((g) => g.family)).toEqual(['Weird module']);
+  });
+
+  it('has no groups for no options', () => {
+    expect(groupByFamily([], t)).toEqual([]);
   });
 });
