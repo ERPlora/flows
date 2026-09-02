@@ -1,7 +1,7 @@
 {
   "name": "@erplora/module-flows",
   "private": true,
-  "version": "0.1.24",
+  "version": "0.1.25",
   "type": "module",
   "description": "Módulo flows (editor visual del kernel de automatización, ADR-0283 / pm#110). Habla con `/api/hub/flows*` por la superficie tipada del SDK (hub#714); su propio command `flows.drafts.propose` es la tool con la que el asistente deja un BORRADOR (flows#4), que no es un flujo. Se compila con @erplora/module-cli.",
   "dependencies": {
