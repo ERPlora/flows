@@ -1303,13 +1303,51 @@ describe('the triggers on offer are the ones THIS hub fires (flows#8)', () => {
     ]);
   });
 
-  it('lends its own words where it has them and shows the raw name where it does not', async () => {
+  /**
+   * Until flows#41 this test pinned the opposite — that an event with no hand-written phrase was
+   * offered under its RAW NAME — and that was the defect, not the contract: 172 of the 196 triggers
+   * a full hub serves came out as `inventory.low_stock_crossed`. The hand-written phrase still
+   * wins; what changed is that there is no longer a case where nobody has words.
+   */
+  it('lends its own words where it has them and composes one where it does not', async () => {
     const el = await mount(flowWith([], [{ kind: 'event', event: 'sale.completed' }]));
     await openTrigger(el);
     const labels = Array.from(eventSelect(el).querySelectorAll('option')).map((o) => o.textContent);
 
     expect(labels).toContain('ui.evSaleCompleted');
-    expect(labels).toContain('shop.refund_issued');
+    expect(labels).not.toContain('shop.refund_issued');
+    // `t` here answers with the key, so a composed phrase shows as its template; the point is that
+    // the identifier is gone. `event-phrasing.test.ts` checks the real sentences.
+    expect(labels).toContain('shop refund issued');
+  });
+
+  it('cuts the list into the modules the events come from, so 196 of them can be found', async () => {
+    const el = await mount(flowWith([], [{ kind: 'event', event: 'sale.completed' }]));
+    await openTrigger(el);
+    const groups = Array.from(eventSelect(el).querySelectorAll('optgroup'));
+
+    // `ui.evfCustomers` / `ui.evfSales` come out as keys under the test translator; `Shop` is the
+    // readable name of a family this module has never heard of.
+    expect(groups.map((g) => g.label)).toEqual(['ui.evfCustomers', 'ui.evfSales', 'Shop']);
+    expect(
+      Array.from(groups[1].querySelectorAll('option')).map((o) => o.getAttribute('value')),
+    ).toEqual(['sale.completed']);
+  });
+
+  it('keeps the technical name reachable — it is what travels in the document', async () => {
+    // The owner reads a phrase; whoever arrived from a log or an issue needs the identifier. It is
+    // the `title` of every option, and the «another event» box below always shows the chosen one.
+    const el = await mount(flowWith([], [{ kind: 'event', event: 'sale.completed' }]));
+    await openTrigger(el);
+    const titles = Array.from(eventSelect(el).querySelectorAll('option'))
+      .map((o) => o.getAttribute('title'))
+      .filter(Boolean);
+
+    expect(titles).toContain('sale.completed');
+    expect(titles).toContain('shop.refund_issued');
+    expect(
+      (el.renderRoot.querySelector('#trigger-event-other') as HTMLInputElement).value,
+    ).toBe('sale.completed');
   });
 
   /**

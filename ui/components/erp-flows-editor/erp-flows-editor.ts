@@ -62,8 +62,9 @@ import {
 } from '../../lib/plain-language';
 import type { RunRow, RunStepRow, Translator } from '../../lib/plain-language';
 import { catalogEntry } from '../../lib/trigger-catalog';
-import { loadEventCatalog } from '../../lib/event-catalog';
+import { groupByFamily, loadEventCatalog } from '../../lib/event-catalog';
 import type { EventCatalog } from '../../lib/event-catalog';
+import { eventPhrase } from '../../lib/event-phrasing';
 import { inputFromShape, simulate } from '../../lib/simulate';
 import type { ConditionResult } from '../../lib/simulate';
 import { classify, needsAttention } from '../../lib/run-trouble';
@@ -149,6 +150,19 @@ function clamp(value: number, min: number, max: number, fallback: number): numbe
  */
 function option(value: string, label: string, current: string) {
   return html`<option value=${value} ?selected=${value === current}>${label}</option>`;
+}
+
+/**
+ * An option of the trigger dropdown: the phrase the owner reads, the technical name on hover.
+ *
+ * The identifier is what travels in the document, in the run history and in any issue about it, so
+ * it stays reachable — as `title` here, and in the «another event» box below the select, which
+ * always shows the chosen one (flows#41).
+ */
+function eventOption(value: string, label: string, current: string) {
+  // On one line on purpose: a line break inside `<option>` lands in its `textContent`.
+  // prettier-ignore
+  return html`<option value=${value} title=${value} ?selected=${value === current}>${label}</option>`;
 }
 
 function rowsToWhen(rows: GuardRow[]): Condition {
@@ -1089,9 +1103,9 @@ export class ErpFlowsEditor extends LitElement {
   private readonly fieldLabel = (path: string): string =>
     humaniseField(path.replace(/^(input|event|steps)\./, ''));
 
+  /** What the owner reads for an event: the hand-written phrase, or the composed one (flows#41). */
   private eventLabel(event: string | undefined): string {
-    const entry = event ? catalogEntry(event) : undefined;
-    return entry ? this.t(entry.labelKey) : (event ?? '');
+    return event ? eventPhrase(event, this.t) : '';
   }
 
   // ── Rendering ───────────────────────────────────────────────────────────────────────────────
@@ -1262,8 +1276,18 @@ export class ErpFlowsEditor extends LitElement {
           @change=${(e: Event) => this.setTrigger({ event: (e.target as HTMLSelectElement).value })}
         >
           <option value="">—</option>
-          ${options.map((entry) =>
-            option(entry.event, entry.labelKey ? this.t(entry.labelKey) : entry.event, chosen),
+          <!--
+            Grouped by the module the event comes from (flows#41): a hub with everything installed
+            offers 196 of these, and «Cocina → llega un pedido a cocina» is how Zapier, Power
+            Automate and Odoo all let somebody find one. The order inside each group is still the
+            hub's.
+          -->
+          ${groupByFamily(options, this.t).map(
+            (group) => html`<optgroup label=${group.family}>
+              ${group.options.map((entry) =>
+                eventOption(entry.event, this.eventLabel(entry.event), chosen),
+              )}
+            </optgroup>`,
           )}
           <!--
             The saved event, kept on offer even when the catalogue has not arrived, or arrived
@@ -1272,7 +1296,7 @@ export class ErpFlowsEditor extends LitElement {
             trigger — the exact shape of the bug fixed in v0.1.6, only now with a network round trip
             widening the window.
           -->
-          ${chosen && !listed ? option(chosen, this.eventLabel(chosen), chosen) : nothing}
+          ${chosen && !listed ? eventOption(chosen, this.eventLabel(chosen), chosen) : nothing}
         </select>
         ${this.renderCatalogState()}
         <span class="hint">

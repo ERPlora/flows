@@ -8,9 +8,11 @@
  * and what its outbox has really SEEN, so the set of triggers on offer is this business's own.
  *
  * **The division of labour**: the hub decides WHICH events exist, this module decides what they
- * are CALLED. `TRIGGER_CATALOG` survives only as that dictionary — an event it has no words for is
- * still offered, under its raw name, because a missing phrase is a cosmetic gap and hiding the
- * trigger is a functional one.
+ * are CALLED. `TRIGGER_CATALOG` survives only as that dictionary, and since flows#41 it is the top
+ * layer of one — `event-phrasing.ts` composes a phrase for the events nobody wrote a sentence for,
+ * so an event this module has never heard of is offered as words rather than as
+ * `inventory.low_stock_crossed`. Offered either way: a missing phrase is a cosmetic gap and hiding
+ * the trigger is a functional one.
  *
  * **And when the hub cannot answer, the screen says so.** There is deliberately no quiet fall back
  * to the hand-written list: that would put flows#8 straight back in disguise — the owner offered
@@ -19,6 +21,8 @@
  * cannot list its events is still a hub whose events can be typed.
  */
 import { catalogEntry, type TriggerCatalogEntry } from './trigger-catalog';
+import { eventFamily } from './event-phrasing';
+import type { Translator } from './plain-language';
 import type { EventCatalogEntry } from './hub-flows';
 
 /** One entry of the «when this happens» dropdown, ready to render. */
@@ -99,4 +103,37 @@ export async function loadEventCatalog(
   // The hub's own order is kept: it sorts by name, which groups a business's events by the module
   // that owns them. Re-sorting by translated label would shuffle the list on every language change.
   return options.length ? { status: 'ready', options } : { status: 'empty' };
+}
+
+/** The options of one module, under the name the owner knows that module by. */
+export interface TriggerGroup {
+  family: string;
+  options: TriggerOption[];
+}
+
+/**
+ * The dropdown, cut into the modules its events come from (flows#41).
+ *
+ * A shop with everything installed is offered 196 triggers. Flat, that is a scroll; grouped by
+ * «Cocina», «Almacén», «Caja» it is the shape Zapier, Power Automate and Odoo all settled on —
+ * pick the part of the business first, the moment second.
+ *
+ * The grouping is derived from the event NAME, not from `declaredBy`, so it is the same in every
+ * language and for an event whose module was uninstalled. Order — of the groups and inside each
+ * one — is the hub's, for the reason `loadEventCatalog` gives.
+ */
+export function groupByFamily(options: readonly TriggerOption[], t: Translator): TriggerGroup[] {
+  const groups: TriggerGroup[] = [];
+  const byFamily = new Map<string, TriggerGroup>();
+  for (const option of options) {
+    const family = eventFamily(option.event, t);
+    let group = byFamily.get(family);
+    if (!group) {
+      group = { family, options: [] };
+      byFamily.set(family, group);
+      groups.push(group);
+    }
+    group.options.push(option);
+  }
+  return groups;
 }
