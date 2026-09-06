@@ -389,8 +389,12 @@ describe('the everyday automations of flows#18', () => {
  * nothing about which one a copy was. The commit does.
  *
  * Re-syncing the mirror is: copy the source's steps and prompts into `templates.ts` and the two
- * locale files, set `commit` to the source commit, and recompute the two digests from the source
- * files with the SAME canonical form `digest()` below uses:
+ * locale files, set `commit` to the source commit **on `main`**, and recompute the two digests
+ * from the source files with the SAME canonical form `digest()` below uses. On `main`, and not
+ * the PR branch head: `merge-pr.sh` squashes the source PR, so the branch head is gone the moment
+ * it lands and only the squash commit exists (whatsapp_inbox#69 → `89f8d02`, #75 → `ba2f293`). A
+ * mirror opened while the source is still a branch is re-pinned once the source lands — the last
+ * test of this file names the sha to set, and goes red until it is set.
  *
  *     git -C ../whatsapp_inbox show <commit>:flows/appointment-from-whatsapp.en.flow.json \
  *       | node -e 'const s=v=>Array.isArray(v)?v.map(s):v&&typeof v==="object"?Object.fromEntries(Object.keys(v).sort().map(k=>[k,s(v[k])])):v;
@@ -404,10 +408,11 @@ describe('the everyday automations of flows#18', () => {
  */
 const SOURCE = {
   module: 'whatsapp_inbox',
-  // whatsapp_inbox PR #75 (#61): the proposing step decides FIRST what the message is asking for
-  // and can now CANCEL as well as book — two tools and two grants more. Before it, PR #69 (first
-  // half of #58) added `confirm_to_customer`, and PR #63 (#55) made the two model steps one.
-  commit: 'f50a2f2850b0e69fbd04755a682bb039191d0772',
+  // whatsapp_inbox PR #75 (#61), squash-merged as `ba2f293`: the proposing step decides FIRST what
+  // the message is asking for and can now CANCEL as well as book — two tools and two grants more.
+  // Before it, PR #69 (first half of #58) added `confirm_to_customer`, and PR #63 (#55) made the
+  // two model steps one.
+  commit: 'ba2f293e9b16aeff3c329f54e01764398e17a602',
   files: {
     en: 'flows/appointment-from-whatsapp.en.flow.json',
     es: 'flows/appointment-from-whatsapp.es.flow.json',
@@ -665,6 +670,65 @@ describe('the mirror against the whatsapp_inbox checkout beside this module (flo
         .map((g) => `${g.kind} ${g.value}`)
         .sort(),
     ).toEqual(published);
+  });
+});
+
+/**
+ * **The pin has to be a commit of the source's `main` — and twice in one batch it was not.**
+ *
+ * A mirror PR is written while the source PR is still a branch, so the honest pin at that moment is
+ * the branch head. Then `merge-pr.sh` squashes the source: `main` gets a brand-new commit and the
+ * branch head is gone (whatsapp_inbox#69 → `89f8d02`, whatsapp_inbox#75 → `ba2f293`). The digests
+ * above stay true — the content is the same — but `SOURCE.commit` now names a commit no checkout on
+ * `main` will ever contain: the neighbour test above keeps passing while a fleet worktree at the old
+ * branch lingers, and quietly degrades to «skipped» the day that worktree is removed. Nothing said
+ * «re-pin», and somebody had to remember it — twice.
+ *
+ * This says it. It reads `origin/main` of the canonical checkout as last fetched (`git fetch` is not
+ * something a test does): the pin is in it → fine; the pin is NOT in it but the documents there
+ * hash to what this mirror pins → the source LANDED and the pin was squashed away → red, naming the
+ * sha to set; neither → the source is not on `main` yet, skipped out loud. Skipped too where there
+ * is no canonical checkout (CI, until module-toolkit#211 brings the source repo to the runner).
+ */
+describe('the pin names a commit of whatsapp_inbox main (whatsapp_inbox#61, twice)', () => {
+  const canonical = join(resolve(__dirname, '../../..'), SOURCE.module);
+  const git = (...args: string[]): string | null => {
+    try {
+      return execFileSync('git', ['-C', canonical, ...args], { stdio: ['ignore', 'pipe', 'ignore'] })
+        .toString()
+        .trim();
+    } catch {
+      return null;
+    }
+  };
+  const main = existsSync(join(canonical, 'module.json'))
+    ? git('rev-parse', 'refs/remotes/origin/main')
+    : null;
+  const pinned =
+    main !== null && git('merge-base', '--is-ancestor', SOURCE.commit, 'refs/remotes/origin/main') !== null;
+  const landed =
+    main !== null &&
+    !pinned &&
+    (['en', 'es'] as const).every((lang) => {
+      const body = git('show', `refs/remotes/origin/main:${SOURCE.files[lang]}`);
+      return body !== null && digest(JSON.parse(body) as Record<string, unknown>) === SOURCE.digest[lang];
+    });
+  const state =
+    main === null
+      ? 'SKIPPED: no canonical checkout with origin/main beside this module'
+      : pinned
+        ? `in origin/main as fetched, ${main.slice(0, 7)}`
+        : landed
+          ? 'the source LANDED and the pin was squashed away'
+          : 'SKIPPED: the source is not on main yet';
+
+  it.skipIf(main === null || (!pinned && !landed))(`is a commit of origin/main (${state})`, () => {
+    expect(
+      pinned,
+      `SOURCE.commit ${SOURCE.commit.slice(0, 7)} is not in whatsapp_inbox origin/main, but the ` +
+        `documents there hash to exactly what this mirror pins: the source PR was squash-merged and ` +
+        `its branch head is gone. Set SOURCE.commit to ${main} — the digests do not change.`,
+    ).toBe(true);
   });
 });
 
