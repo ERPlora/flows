@@ -6092,6 +6092,157 @@ var TEMPLATES = [
       ]
     })
   },
+  /**
+   * **flows#52 — the message becomes a booking, which is the case the product is sold on.**
+   *
+   * This is the automation `whatsapp_inbox` has shipped since it learned to book
+   * (`flows/appointment-from-whatsapp.{es,en}.flow.json`), brought into the gallery so that
+   * somebody can actually pick it. Until now nothing installed it: the hub reads no `*.flow.json`
+   * anywhere, so the only thing that ever created it was the module's own end-to-end test, and a
+   * salon that connected its number and opened Automations found «make a task» and nothing else.
+   *
+   * ⚠️ **It is a MIRROR, and mirrors go stale.** The document below is
+   * `whatsapp_inbox@89f8d02` (PR #69, the first half of whatsapp_inbox#58, on top of PR #63's
+   * one-turn rewrite of #55), copied because
+   * the two repositories cannot read each other and the hub has no route that serves a module's
+   * own templates (the manifest has no `flows` key and `erplora pack` does not put the folder in
+   * the zip — hub#1611 and module-toolkit#209). Retiring this copy — the runtime serving each
+   * installed module's templates, and this gallery merging them — is the real fix. Until then the
+   * copy is pinned in `templates.test.ts` by COMMIT (the module's version does not move on a
+   * template change: v2.1.31 named both the old and the new document) and by a hash of the whole
+   * document in both languages, so it cannot word a prompt differently, ask for a different
+   * permission, or drift one iteration without going red. The commit is the thing to move when
+   * whatsapp_inbox#58's second half and #61 rewrite it again — and they will: the template moves
+   * every time the flow does. It went stale TWICE on the day it was written.
+   *
+   * **Why it needs five modules.** It reads the catalogue (`services`), the diary
+   * (`appointments`), who works when (`staff`), the customer's card (`customers`), and it answers
+   * through the conversation (`whatsapp_inbox`). A hub short of any of them cannot run it, which
+   * is why the gallery hides it rather than offering it greyed out: a salon with no Reservations
+   * has no use for whatsapp_inbox#60's table-booking twin either.
+   */
+  {
+    id: "whatsapp-appointment",
+    sector: "beauty",
+    icon: "calendar-number-outline",
+    nameKey: "tpl.waAppointment.name",
+    summaryKey: "tpl.waAppointment.summary",
+    plainKey: "tpl.waAppointment.plain",
+    blanks: [
+      { labelKey: "tpl.waAppointment.blankReply", hintKey: "tpl.waAppointment.blankReplyHint" }
+    ],
+    witnesses: [
+      { event: "whatsapp_inbox.message.received", module: "whatsapp_inbox" },
+      { event: "appointments.appointment.created", module: "appointments" },
+      { event: "customer.created", module: "customers" },
+      { event: "services.service.created", module: "services" },
+      { event: "staff.member.created", module: "staff" }
+    ],
+    grantReasons: {
+      whatsapp: "tpl.grant.notifyWhatsapp",
+      "whatsapp_inbox.conversations.list#contact_phone": "tpl.grant.recipientWhatsapp",
+      "customers.list": "tpl.grant.customersList",
+      "customers.create": "tpl.grant.customersCreate",
+      "services.services.list": "tpl.grant.servicesList",
+      "staff.members.list": "tpl.grant.staffList",
+      "staff.schedules.list_for_member": "tpl.grant.staffSchedules",
+      "appointments.availability.day_opening": "tpl.grant.dayOpening",
+      "appointments.availability.slots": "tpl.grant.availabilitySlots",
+      "appointments.availability.check": "tpl.grant.availabilityCheck",
+      "appointments.appointments.create": "tpl.grant.appointmentsCreate"
+    },
+    build: (t3) => ({
+      schema_version: SCHEMA_VERSION2,
+      triggers: [
+        {
+          kind: "event",
+          // The CORE's own event (`crates/server/src/inbound_poll.rs`), not the module's: it is
+          // what the published document waits for, and it carries the message itself. An empty
+          // body is a sticker or a photo — there is nothing for a model to read, and every reply
+          // this automation sends is billed by Meta.
+          event: "hub.whatsapp.message_received",
+          filter: { "event.text": { neq: "" } },
+          input: {
+            from: "event.from",
+            text: "event.text",
+            wa_message_id: "event.wa_message_id",
+            received_at: "event.received_at"
+          }
+        }
+      ],
+      steps: [
+        // Answered in seconds, before anybody has read anything: the wait is what makes a customer
+        // write to the salon next door. The recipient is resolved through the conversation, never
+        // written into the document — a template that carried a phone number would text the wrong
+        // person on every hub that installed it.
+        {
+          id: "acknowledge",
+          kind: "notify",
+          channel: "whatsapp",
+          to: {
+            query: "whatsapp_inbox.conversations.list",
+            params: { f_wa_contact_id: "input.from" },
+            field: "contact_phone"
+          },
+          template: "",
+          vars: { text: t3("tpl.waAppointment.ackText") }
+        },
+        // `manual`: creating a customer card is a write, and it waits for a person.
+        {
+          id: "know_the_customer",
+          kind: "ai",
+          prompt: t3("tpl.waAppointment.knowPrompt"),
+          tools: { queries: ["customers.list"], commands: ["customers.create"] },
+          policy: "manual",
+          max_iters: 4
+        },
+        // `manual` again, and this is the one that matters: the booking itself waits in the tray
+        // until somebody at the salon says yes. ONE turn asks the diary and proposes — the
+        // availability operations only answer, and a `manual` step may read since hub#1595
+        // (whatsapp_inbox#55 collapsed the former «gather, then propose» pair). `max_iters` sits
+        // at the kernel's cap on purpose: the prompt chains up to nine tool calls, the hub refuses
+        // a document above the cap, so there is no margin here — a tool more means a step more.
+        {
+          id: "propose_appointment",
+          kind: "ai",
+          prompt: t3("tpl.waAppointment.proposePrompt"),
+          tools: {
+            queries: [
+              "customers.list",
+              "services.services.list",
+              "staff.members.list",
+              "staff.schedules.list_for_member"
+            ],
+            commands: [
+              "appointments.availability.day_opening",
+              "appointments.availability.slots",
+              "appointments.availability.check",
+              "appointments.appointments.create"
+            ]
+          },
+          policy: "manual",
+          max_iters: 10
+        },
+        // whatsapp_inbox#58, first half: once the booking goes through, the customer hears about
+        // it — on WhatsApp, in the words the proposing step wrote FOR them (its prompt ends with
+        // «everything you write back is sent to them, word for word»). Same recipient resolution
+        // as the acknowledgement, so the two notifies cost one channel grant and one recipient
+        // grant, not two of each. Not a text of ours to translate: it is the model's reply.
+        {
+          id: "confirm_to_customer",
+          kind: "notify",
+          channel: "whatsapp",
+          to: {
+            query: "whatsapp_inbox.conversations.list",
+            params: { f_wa_contact_id: "input.from" },
+            field: "contact_phone"
+          },
+          template: "",
+          vars: { text: "{{steps.propose_appointment.text}}" }
+        }
+      ]
+    })
+  },
   // ── Bars and restaurants ────────────────────────────────────────────────────────────────────
   {
     id: "big-party-reservation",
@@ -6141,12 +6292,25 @@ function missingModules(template, known) {
   }
   return out;
 }
+function availableTemplates(sector, known) {
+  return templatesOf(sector).filter((tpl) => missingModules(tpl, known).length === 0);
+}
+function unavailableModules(known) {
+  const out = [];
+  for (const template of TEMPLATES) {
+    for (const id of missingModules(template, known)) {
+      if (!out.includes(id)) out.push(id);
+    }
+  }
+  return out;
+}
 var MODULE_LABELS = {
   appointments: "ui.mod_appointments",
   cash_register: "ui.mod_cash_register",
   customers: "ui.mod_customers",
   reservations: "ui.mod_reservations",
   sales: "ui.mod_sales",
+  services: "ui.mod_services",
   staff: "ui.mod_staff",
   tasks: "ui.mod_tasks",
   verifactu: "ui.mod_verifactu",
@@ -6239,9 +6403,6 @@ var ErpFlowsGallery = class extends i3 {
       border: 1px solid var(--ok-border, #d7d5cc);
       border-radius: var(--ok-radius, 14px);
       overflow: hidden;
-    }
-    .card[data-missing] {
-      background: var(--ok-surface-muted, rgba(0, 0, 0, 0.02));
     }
     .card > button.pick {
       display: flex;
@@ -6336,6 +6497,14 @@ var ErpFlowsGallery = class extends i3 {
       font-size: 0.88rem;
       line-height: 1.45;
     }
+    /* The one line that replaced the grey cards (flows#52): under everything, because it is about
+       what is NOT on the screen. */
+    .missing {
+      margin: 0;
+      color: var(--ok-muted, #6b6a63);
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
   `;
   }
   connectedCallback() {
@@ -6404,8 +6573,6 @@ var ErpFlowsGallery = class extends i3 {
     }
   }
   renderPanel(template) {
-    const missing = missingModules(template, this.known);
-    const missingNames = missing.map((id) => moduleName(id, this.t)).join(", ");
     const grants = templateGrants(template, this.t);
     return b2`<div class="panel" id=${`panel-${template.id}`}>
       <p class="plain">${this.t(template.plainKey)}</p>
@@ -6435,12 +6602,6 @@ var ErpFlowsGallery = class extends i3 {
     )}
       </div>
 
-      ${missing.length ? b2`<ok-inline-feedback tone="warning" icon="download-outline">
-            ${this.t(
-      missing.length === 1 ? "ui.tplNeedsModule" : "ui.tplNeedsModules",
-      { modules: missingNames }
-    )}
-          </ok-inline-feedback>` : A}
       ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
             >${this.error}</ok-inline-feedback
           >` : A}
@@ -6449,7 +6610,7 @@ var ErpFlowsGallery = class extends i3 {
         <ion-button
           size="small"
           data-act="use"
-          ?disabled=${this.busy || missing.length > 0}
+          ?disabled=${this.busy}
           @click=${() => void this.use()}
         >
           ${this.busy ? this.t("ui.saving") : this.t("ui.tplUse")}
@@ -6459,13 +6620,8 @@ var ErpFlowsGallery = class extends i3 {
     </div>`;
   }
   renderCard(template) {
-    const missing = missingModules(template, this.known);
     const open = this.picked === template.id;
-    return b2`<div
-      class="card"
-      data-template=${template.id}
-      data-missing=${missing.length ? missing.join(",") : A}
-    >
+    return b2`<div class="card" data-template=${template.id}>
       <button
         type="button"
         class="pick"
@@ -6478,23 +6634,32 @@ var ErpFlowsGallery = class extends i3 {
           <span class="name">${this.t(template.nameKey)}</span>
           <span class="summary">${this.t(template.summaryKey)}</span>
         </span>
-        ${missing.length ? b2`<ok-status-pill
-              tone="neutral"
-              label=${this.t("ui.tplUnavailable", {
-      modules: missing.map((id) => moduleName(id, this.t)).join(", ")
-    })}
-            ></ok-status-pill>` : A}
       </button>
       ${open ? this.renderPanel(template) : A}
     </div>`;
   }
   renderSector(sector) {
-    const templates = templatesOf(sector);
+    const templates = availableTemplates(sector, this.known);
     if (!templates.length) return A;
     return b2`<section data-sector=${sector}>
       <h3>${this.t(`ui.sector_${sector}`)}</h3>
       <div class="cards">${templates.map((template) => this.renderCard(template))}</div>
     </section>`;
+  }
+  /**
+   * The one line that replaced the grey cards (flows#52, keeping what flows#38 protected).
+   *
+   * Sorted by the name the owner reads, not by the order the catalogue happens to have: this is a
+   * shopping list, and «Tasks, Appointments» sends somebody looking for a list that is not sorted.
+   */
+  renderMissing() {
+    const ids = unavailableModules(this.known);
+    if (!ids.length) return A;
+    const names = ids.map((id) => moduleName(id, this.t)).sort((a3, b3) => a3.localeCompare(b3)).join(", ");
+    return b2`<p class="missing" data-missing-modules>${this.t(
+      ids.length === 1 ? "ui.tplHiddenModule" : "ui.tplHiddenModules",
+      { modules: names }
+    )}</p>`;
   }
   render() {
     return b2`<div class="wrap">
@@ -6511,7 +6676,7 @@ var ErpFlowsGallery = class extends i3 {
           ${this.t("ui.guideOpen")}
         </button>
       </div>
-      ${SECTORS.map((sector) => this.renderSector(sector))}
+      ${SECTORS.map((sector) => this.renderSector(sector))} ${this.renderMissing()}
     </div>`;
   }
 };
@@ -8121,9 +8286,6 @@ var es_default = {
     tplNoBlanks: "No hay nada que rellenar. Est\xE1 lista tal cual.",
     tplGrantsTitle: "Lo que te va a pedir permiso para hacer",
     tplGrantsIntro: "Una automatizaci\xF3n funciona con sus propios permisos, nunca con los tuyos. Hasta que se los des, no hace nada.",
-    tplNeedsModule: "Esta necesita el m\xF3dulo {modules}, y este hub no lo tiene. Inst\xE1lalo desde el marketplace, recarga esta pantalla y funcionar\xE1.",
-    tplNeedsModules: "Esta necesita los m\xF3dulos {modules}, y este hub no los tiene. Inst\xE1lalos desde el marketplace, recarga esta pantalla y funcionar\xE1.",
-    tplUnavailable: "Falta: {modules}",
     mod_appointments: "Citas",
     mod_cash_register: "Caja",
     mod_customers: "Clientes",
@@ -8472,13 +8634,27 @@ var es_default = {
     evConsentGranted: "un cliente da su consentimiento",
     evConsentWithdrawn: "un cliente retira su consentimiento",
     evOrderFired: "se manda una comanda a cocina",
-    evStaffDeactivated: "se desactiva a alguien del equipo"
+    evStaffDeactivated: "se desactiva a alguien del equipo",
+    mod_services: "Servicios",
+    tplHiddenModule: "Hay automatizaciones ocultas: necesitan el m\xF3dulo {modules}, y este hub no lo tiene. Inst\xE1lalo desde el marketplace y recarga esta pantalla.",
+    tplHiddenModules: "Hay automatizaciones ocultas: necesitan los m\xF3dulos {modules}, y este hub no los tiene. Inst\xE1lalos desde el marketplace y recarga esta pantalla."
   },
   tpl: {
     author: "Automatizaciones",
     grant: {
       tasksCreate: "Crear una tarea en tu lista. No sale del hub y no le escribe a ning\xFAn cliente.",
-      customersNote: "A\xF1adir una nota al historial de un cliente. No cambia sus datos ni le escribe."
+      customersNote: "A\xF1adir una nota al historial de un cliente. No cambia sus datos ni le escribe.",
+      notifyWhatsapp: "Contestar por WhatsApp. Meta cobra cada mensaje que se manda.",
+      recipientWhatsapp: "Contestar en esa misma conversaci\xF3n, y a nadie m\xE1s.",
+      customersList: "Buscar a la clienta por su tel\xE9fono.",
+      customersCreate: "Crear la ficha cuando es alguien nuevo. Espera a que t\xFA lo apruebes.",
+      servicesList: "Leer tu cat\xE1logo de servicios, para saber cu\xE1l pide y cu\xE1nto dura.",
+      staffList: "Leer qui\xE9n trabaja en el sal\xF3n, para proponer a alguien que de verdad est\xE9.",
+      staffSchedules: "Leer el horario de una profesional, para que el hueco sea uno que trabaje.",
+      dayOpening: "Preguntar cu\xE1ndo abre el sal\xF3n ese d\xEDa, en vez de deducirlo por su cuenta.",
+      availabilitySlots: "Preguntar qu\xE9 huecos est\xE1n libres de verdad ese d\xEDa.",
+      availabilityCheck: "Comprobar que el hueco sigue libre antes de proponerlo.",
+      appointmentsCreate: "Reservar la cita. Espera en la bandeja hasta que t\xFA la apruebes."
     },
     welcome: {
       name: "Dar la bienvenida a cada cliente nuevo",
@@ -8563,6 +8739,16 @@ var es_default = {
       blankSizeHint: "Seis para empezar. Cuenta las personas, no las mesas.",
       taskTitle: "Preparar la mesa de {{input.guest_name}} \u2014 {{input.party_size}} personas",
       taskDescription: "{{input.date}} a las {{input.time}}"
+    },
+    waAppointment: {
+      name: "WhatsApp \u2192 cita propuesta",
+      summary: "Alguien pide cita por WhatsApp: contesta al momento, mira la agenda y propone un hueco real para que lo confirmes.",
+      plain: "Cuando alguien escribe a tu WhatsApp, esto le contesta al momento para que no se quede esperando, se asegura de que tiene ficha de cliente, averigua qu\xE9 servicio pide y cu\xE1nto dura, y busca un hueco que la agenda tenga libre de verdad con una profesional que trabaje a esa hora. Despu\xE9s propone la cita. No se reserva nada ni se crea ninguna ficha hasta que alguien del sal\xF3n lo aprueba.",
+      blankReply: "El mensaje que reciben al momento",
+      blankReplyHint: "La l\xEDnea que sale en cuanto llega un mensaje, antes de que nadie lo lea. Ponla con tus palabras: es lo primero que lee tu clienta.",
+      ackText: "\xA1Gracias por escribirnos! Hemos recibido tu mensaje. Te confirmamos la cita en cuanto abramos el sal\xF3n.",
+      knowPrompt: "Una clienta ha escrito al sal\xF3n por WhatsApp desde el n\xFAmero {{input.from}}. Esto es lo que dice:\n\n\xAB{{input.text}}\xBB\n\nTu \xFAnico trabajo en este turno es asegurarte de que esa persona tiene ficha de cliente, porque una cita se reserva contra un cliente real, nunca contra texto libre.\n\n1. B\xFAscala con `customers.list`, filtrando por `phone`. En el hub el tel\xE9fono se guarda en E.164, as\xED que busca `+{{input.from}}`.\n2. Si ya existe, NO propongas nada. Contesta en una l\xEDnea diciendo qui\xE9n es y para.\n3. Si no aparece nadie, prop\xF3n `customers.create` con el tel\xE9fono `+{{input.from}}` y el nombre que la persona haya dado en su mensaje. Si no ha dado nombre, usa el tel\xE9fono como nombre \u2014 no te lo inventes.\n\nNunca propongas m\xE1s de una escritura. Lo que propongas lo revisa una persona antes de que ocurra.",
+      proposePrompt: "Una clienta ha escrito al sal\xF3n por WhatsApp desde el n\xFAmero {{input.from}} a las {{input.received_at}}. Esto es lo que dice:\n\n\xAB{{input.text}}\xBB\n\nEl paso anterior ya se asegur\xF3 de que la ficha existe, y report\xF3: {{steps.know_the_customer.text}}\n\nBusca el hueco Y prop\xF3n la cita en este mismo turno. Las herramientas de disponibilidad que tienes aqu\xED solo contestan preguntas: no cambian nada, se ejecutan en cuanto las llamas y su respuesta te vuelve a ti. As\xED que preg\xFAntales, y luego prop\xF3n UNA cita, y solo una, con lo que te hayan dicho.\n\n1. Lee el cat\xE1logo con `services.services.list` y elige el servicio que pide. Si el mensaje es demasiado vago para saber cu\xE1l, no propongas NADA: d\xEDselo en una l\xEDnea y nombra los servicios que podr\xEDan encajar, para que elija.\n2. Calcula cu\xE1nto dura. Si el servicio declara `duration_minutes`, \xFAsalo TAL CUAL \u2014 lo decidi\xF3 el sal\xF3n. Si falta o es cero, EST\xCDMALO por lo que es el servicio: un corte no es un tinte, y un tinte no es un tinte con mechas. S\xE9 honesto y s\xE9 generoso antes que justo; una propuesta que se queda quince minutos corta desplaza la tarde entera.\n3. Pregunta a `appointments.availability.day_opening` cu\xE1ndo abre el sal\xF3n el d\xEDa que pide. Contesta `spans` \u2014minutos desde la medianoche de esa misma fecha, con los descansos ya recortados\u2014 y `source`. Si `source` es `schedules` y `spans` viene vac\xEDo, EL SAL\xD3N EST\xC1 CERRADO ese d\xEDa: no propongas nada, d\xEDselo, ofrece el d\xEDa abierto m\xE1s cercano y para. Si `source` es `unset`, el sal\xF3n no tiene ninguna regla que alcance esa fecha, as\xED que no se est\xE1 rechazando nada por ese motivo y no debes filtrar t\xFA por horario.\n4. NUNCA deduzcas el horario por tu cuenta, ni del mensaje ni de ning\xFAn otro sitio \u2014 y lo mismo vale para los huecos libres y para qui\xE9n trabaja. Estas operaciones lo resuelven exactamente igual que la puerta de reserva \u2014d\xEDa especial exacto, d\xEDa especial anual, rango de override, horario semanal, en ese orden\u2014, y tener una segunda opini\xF3n sobre cu\xE1ndo abre el sal\xF3n es justo lo que hace que una propuesta con buena pinta se caiga en cuanto alguien la aprueba. Pregunta; no deduzcas.\n5. Pide a `appointments.availability.slots` los huecos libres de verdad de esa fecha para esa duraci\xF3n, y confirma el que elijas con `appointments.availability.check`. Si `check` lo rechaza, cree su motivo y pasa al siguiente hueco: `outside_schedule` es que el sal\xF3n est\xE1 cerrado a esa hora, y `held` que otra solicitud pendiente lo tiene apartado unos minutos.\n6. Usa `staff.members.list` y `staff.schedules.list_for_member` para elegir a una profesional que de verdad trabaje a esa hora, y confirma el hueco para ella pasando su `staff_id`.\n7. Respeta el d\xEDa o la hora que haya pedido; si no est\xE1 libre, coge el m\xE1s cercano que s\xED lo est\xE9. Si no hay ninguno libre, no propongas nada y d\xEDselo en una l\xEDnea, ofreciendo otro d\xEDa.\n8. Resuelve a la clienta con `customers.list`, filtrando por `phone` = `+{{input.from}}`.\n9. Prop\xF3n `appointments.appointments.create` con la clienta, el servicio, la profesional, el inicio que hayas confirmado y `duration_minutes`.\n\nSobre la duraci\xF3n, esto importa: si la has ESTIMADO en vez de leerla del cat\xE1logo, dilo en `internal_notes`, con palabras y con el n\xFAmero \u2014 por ejemplo \xABDuraci\xF3n estimada por el asistente: 90 min; el cat\xE1logo no declara ninguna para este servicio.\xBB Quien aprueba tiene que poder ver la estimaci\xF3n y corregirla antes de que entre en la agenda, y `internal_notes` es solo para el personal, as\xED que la clienta no lo lee.\n\nPon en `notes` un resumen de una l\xEDnea de lo que ha pedido la clienta, con sus propias palabras.\n\nLo \xFAnico que es una propuesta es la reserva. Preguntar qu\xE9 hay libre no cambia nada y ocurre mientras preguntas; `appointments.appointments.create` es lo \xFAnico que espera en la bandeja de aprobaci\xF3n hasta que alguien del sal\xF3n lo revise, y entonces se ejecuta exactamente como lo escribiste.\n\n**Y ahora la parte que llega a la clienta.** Todo lo que escribas de vuelta se le manda por WhatsApp, palabra por palabra, en cuanto la reserva sale \u2014 as\xED que escr\xEDbelo PARA ella, no sobre ella: en su idioma, una o dos l\xEDneas cortas, cercanas y llanas.\n\n- Si has propuesto una cita, dile lo que tiene: el d\xEDa, la hora y la profesional POR SU NOMBRE. Nunca un id, nunca el nombre de una herramienta, nunca \xABpendiente de aprobar\xBB \u2014 cuando lea esto, ya ha ocurrido.\n- Si no has propuesto nada, dile por qu\xE9 en una l\xEDnea y ofr\xE9cele la alternativa m\xE1s cercana, para que pueda contestar con ella.\n- Nunca metas aqu\xED la duraci\xF3n que estimaste, lo que el cat\xE1logo declaraba o no, ni nada que necesite ver el sal\xF3n. Eso va en `internal_notes`, que solo lee el sal\xF3n.\n\nEscr\xEDbelo en la MISMA respuesta en la que propones la reserva: proponer termina tu turno y no se te vuelve a preguntar, as\xED que una propuesta enviada sin palabras la deja sin nada."
     }
   },
   guide: {
@@ -8891,9 +9077,6 @@ var en_default = {
     tplNoBlanks: "Nothing to fill in. It is ready as it is.",
     tplGrantsTitle: "What it will ask you to allow",
     tplGrantsIntro: "An automation runs with its own permissions, never with yours. Until you allow these, it does nothing.",
-    tplNeedsModule: "This one needs the {modules} module, and this hub does not have it. Install it from the marketplace, reload this screen, and it will work.",
-    tplNeedsModules: "This one needs the {modules} modules, and this hub does not have them. Install them from the marketplace, reload this screen, and it will work.",
-    tplUnavailable: "Missing: {modules}",
     mod_appointments: "Appointments",
     mod_cash_register: "Cash Register",
     mod_customers: "Customers",
@@ -9242,13 +9425,27 @@ var en_default = {
     evConsentGranted: "a customer gives their consent",
     evConsentWithdrawn: "a customer withdraws their consent",
     evOrderFired: "an order is fired to the kitchen",
-    evStaffDeactivated: "a staff member is deactivated"
+    evStaffDeactivated: "a staff member is deactivated",
+    mod_services: "Services",
+    tplHiddenModule: "Some automations are hidden: they need the {modules} module, and this hub does not have it. Install it from the marketplace and reload this screen.",
+    tplHiddenModules: "Some automations are hidden: they need the {modules} modules, and this hub does not have them. Install them from the marketplace and reload this screen."
   },
   tpl: {
     author: "Automations",
     grant: {
       tasksCreate: "Create a task in your list. It stays inside the hub and never writes to a customer.",
-      customersNote: "Add a note to a customer's history. It does not change their details and it does not contact them."
+      customersNote: "Add a note to a customer's history. It does not change their details and it does not contact them.",
+      notifyWhatsapp: "Answer on WhatsApp. Every message sent is billed by Meta.",
+      recipientWhatsapp: "Write back on that same conversation, and to nobody else.",
+      customersList: "Look the customer up by their phone number.",
+      customersCreate: "Create the card when it is somebody new. It waits for you to approve it.",
+      servicesList: "Read your service catalogue, to tell which one they are asking for and how long it takes.",
+      staffList: "Read who works at the salon, so it proposes somebody who is really there.",
+      staffSchedules: "Read a professional\u2019s hours, so the slot is one they actually work.",
+      dayOpening: "Ask when the salon opens that day, instead of working it out on its own.",
+      availabilitySlots: "Ask which slots are really free on that date.",
+      availabilityCheck: "Check the slot is still free before proposing it.",
+      appointmentsCreate: "Book the appointment. It waits in the tray until you approve it."
     },
     welcome: {
       name: "Welcome every new customer",
@@ -9333,6 +9530,16 @@ var en_default = {
       blankSizeHint: "Six to start with. Count the people, not the tables.",
       taskTitle: "Prepare the table for {{input.guest_name}} \u2014 {{input.party_size}} people",
       taskDescription: "{{input.date}} at {{input.time}}"
+    },
+    waAppointment: {
+      name: "WhatsApp \u2192 appointment proposal",
+      summary: "Somebody asks for an appointment on WhatsApp: it answers at once, reads the diary and proposes a real slot for you to confirm.",
+      plain: "When somebody writes to your WhatsApp, this answers them straight away so nobody is left waiting, makes sure they have a customer card, works out which service they are asking for and how long it takes, and finds a slot the diary really has free with a professional who works at that hour. Then it proposes the appointment. Nothing is booked and no card is created until somebody at the salon approves it.",
+      blankReply: "The message they get back straight away",
+      blankReplyHint: "The line that goes out the moment a message arrives, before anybody has read it. Put it in your own words: it is the first thing your customer reads.",
+      ackText: "Thanks for writing! We have your message. We will confirm your appointment as soon as the salon opens.",
+      knowPrompt: 'A customer wrote to the salon on WhatsApp from the phone number {{input.from}}. This is what they said:\n\n"{{input.text}}"\n\nYour only job in this turn is to make sure the person has a customer record, because an appointment is booked against a real customer, never against free text.\n\n1. Look them up with `customers.list`, filtering by `phone`. The number in the hub is stored in E.164, so search for `+{{input.from}}`.\n2. If a customer already exists, propose NOTHING. Answer in one line saying who they are and stop.\n3. If nobody matches, propose `customers.create` with the phone `+{{input.from}}` and the name the person gave in their message. If they gave no name, use the phone number as the name \u2014 do not invent one.\n\nNever propose more than one write. Whatever you propose is reviewed by a person before it happens.',
+      proposePrompt: 'A customer wrote to the salon on WhatsApp from the phone number {{input.from}} at {{input.received_at}}. This is what they said:\n\n"{{input.text}}"\n\nThe previous step already made sure the customer record exists, and reported: {{steps.know_the_customer.text}}\n\nFind the slot AND propose the appointment in this same turn. The availability tools you have here only answer questions: they change nothing, they run the moment you call them, and their answers come straight back to you. So ask them, and then propose ONE appointment, and only one, out of what they told you.\n\n1. Read the catalogue with `services.services.list` and pick the service they are asking for. If the message is too vague to tell which one, propose NOTHING: tell them so in one line and name the services that could fit, so they can pick.\n2. Work out how long it takes. If the service declares `duration_minutes`, use it AS IS \u2014 the salon decided it. If it is missing or zero, ESTIMATE it from what the service is: a cut is not a colour, and a colour is not a colour with highlights. Be honest, and be generous rather than exact; a proposal that falls fifteen minutes short pushes the whole afternoon.\n3. Ask `appointments.availability.day_opening` when the salon is open on the date they want. It answers `spans` \u2014 minutes from that date\'s own midnight, with the breaks already carved out \u2014 and `source`. If `source` is `schedules` and `spans` is empty, THE SALON IS SHUT that day: propose nothing, tell them so, offer the nearest day it is open, and stop. If `source` is `unset` the salon has no rule reaching that date, so nothing is being refused on those grounds and you must not filter by hours yourself.\n4. NEVER work the opening hours out on your own, from the message or from anywhere else \u2014 and the same goes for the free slots and for who is working. These operations resolve them exactly as the booking gate does \u2014 special day, yearly special day, override range, weekly hours, in that order \u2014 and a second opinion about when the salon opens is precisely how a good-looking proposal gets rejected the moment somebody approves it. Ask; never deduce.\n5. Ask `appointments.availability.slots` for the real free slots on that date for that duration, and confirm the one you settle on with `appointments.availability.check`. If `check` refuses it, take its reason at face value and move to the next slot: `outside_schedule` means the salon is shut at that hour, `held` means another pending request has it set aside for a few minutes.\n6. Use `staff.members.list` and `staff.schedules.list_for_member` to pick a professional who actually works at that hour, and confirm the slot for that person by passing their `staff_id`.\n7. Respect the day or the hour they asked for; if it is not free, take the closest one that is. If nothing is free at all, propose nothing and tell them so in one line, offering another day.\n8. Resolve the customer with `customers.list`, filtering by `phone` = `+{{input.from}}`.\n9. Propose `appointments.appointments.create` with the customer, the service, the professional, the start you confirmed and `duration_minutes`.\n\nAbout the duration, this matters: if you ESTIMATED it instead of reading it from the catalogue, say so in `internal_notes`, in words and with the number \u2014 for example "Duration estimated by the assistant: 90 min; the catalogue declares none for this service." Whoever approves has to be able to see the estimate and correct it before it enters the agenda, and `internal_notes` is for staff only, so the customer never reads it.\n\nPut in `notes` a one-line summary of what the customer asked for, in their own words.\n\nOnly the booking is a proposal. Asking what is free changes nothing and happens as you ask; `appointments.appointments.create` is the one thing that waits in the approval tray until somebody at the salon reviews it, and it then runs exactly as you wrote it.\n\n**And now the part that reaches the customer.** Everything you write back is sent to them on WhatsApp, word for word, the moment the booking goes through \u2014 so write it TO them, not about them: their own language, one or two short lines, warm and plain.\n\n- If you proposed a booking, tell them what they have: the day, the hour and the professional BY NAME. Never an id, never a tool name, never \xABpending approval\xBB \u2014 by the time they read this, it happened.\n- If you proposed nothing, tell them why in one line and offer the nearest alternative, so they can answer with it.\n- Never put in here the duration you estimated, what the catalogue did or did not declare, or anything else the salon needs to see. That goes in `internal_notes`, which only the salon reads.\n\nWrite it in the SAME reply in which you propose the booking: proposing ends your turn and you will not be asked again, so a proposal sent with no words leaves her with nothing.'
     }
   },
   guide: {

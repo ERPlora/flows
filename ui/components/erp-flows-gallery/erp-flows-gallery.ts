@@ -2,15 +2,15 @@ import { LitElement, html, css, nothing } from 'lit';
 import { property, state } from 'lit/decorators.js';
 import { define } from '@erplora/outfitkit/define';
 import '@erplora/outfitkit/ok-inline-feedback';
-import '@erplora/outfitkit/ok-status-pill';
 import {
   SECTORS,
+  availableTemplates,
   buildTemplate,
-  missingModules,
   moduleName,
   templateById,
   templateGrants,
   templatesOf,
+  unavailableModules,
 } from '../../lib/templates';
 import type { FlowTemplate, Sector } from '../../lib/templates';
 import { errorCode } from '../../lib/hub-flows';
@@ -29,9 +29,11 @@ import type { Translator } from '../../lib/plain-language';
  *
  * - **Offer what this hub cannot run.** It asks the hub about one declared event per module a
  *   template needs (`GET /api/hub/events/shape`, which answers `404` for an event nobody declares)
- *   and marks the card with the module that is missing. The alternative is a card that fails at
- *   grant time with «command no encontrado», three screens later, in words nobody outside this
- *   repository can read.
+ *   and leaves those cards out (flows#52). The alternative is a card that fails at grant time with
+ *   «command no encontrado», three screens later, in words nobody outside this repository can
+ *   read. The cards used to be shown greyed out with the missing module named on them (flows#38);
+ *   what that was protecting — the owner learning WHICH app to install, by name — is now one line
+ *   under the cards, said once instead of on every grey card.
  * - **Create anything running.** A template becomes a flow with `enabled: false`. An automation
  *   acts while nobody is watching; one that starts because somebody tapped a picture of it is
  *   precisely what the grants system exists to prevent.
@@ -115,9 +117,6 @@ export class ErpFlowsGallery extends LitElement {
       border: 1px solid var(--ok-border, #d7d5cc);
       border-radius: var(--ok-radius, 14px);
       overflow: hidden;
-    }
-    .card[data-missing] {
-      background: var(--ok-surface-muted, rgba(0, 0, 0, 0.02));
     }
     .card > button.pick {
       display: flex;
@@ -208,6 +207,14 @@ export class ErpFlowsGallery extends LitElement {
       align-items: center;
     }
     .muted {
+      color: var(--ok-muted, #6b6a63);
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+    /* The one line that replaced the grey cards (flows#52): under everything, because it is about
+       what is NOT on the screen. */
+    .missing {
+      margin: 0;
       color: var(--ok-muted, #6b6a63);
       font-size: 0.88rem;
       line-height: 1.45;
@@ -306,10 +313,6 @@ export class ErpFlowsGallery extends LitElement {
   }
 
   private renderPanel(template: FlowTemplate) {
-    const missing = missingModules(template, this.known);
-    // The name the marketplace sells it under, never the id: «Instala Tasks», not «Instala tasks»
-    // (flows#38). The label on the grey card and this sentence have to agree.
-    const missingNames = missing.map((id) => moduleName(id, this.t)).join(', ');
     const grants = templateGrants(template, this.t);
     return html`<div class="panel" id=${`panel-${template.id}`}>
       <p class="plain">${this.t(template.plainKey)}</p>
@@ -341,14 +344,6 @@ export class ErpFlowsGallery extends LitElement {
         )}
       </div>
 
-      ${missing.length
-        ? html`<ok-inline-feedback tone="warning" icon="download-outline">
-            ${this.t(
-              missing.length === 1 ? 'ui.tplNeedsModule' : 'ui.tplNeedsModules',
-              { modules: missingNames },
-            )}
-          </ok-inline-feedback>`
-        : nothing}
       ${this.error
         ? html`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
             >${this.error}</ok-inline-feedback
@@ -359,7 +354,7 @@ export class ErpFlowsGallery extends LitElement {
         <ion-button
           size="small"
           data-act="use"
-          ?disabled=${this.busy || missing.length > 0}
+          ?disabled=${this.busy}
           @click=${() => void this.use()}
         >
           ${this.busy ? this.t('ui.saving') : this.t('ui.tplUse')}
@@ -370,13 +365,8 @@ export class ErpFlowsGallery extends LitElement {
   }
 
   private renderCard(template: FlowTemplate) {
-    const missing = missingModules(template, this.known);
     const open = this.picked === template.id;
-    return html`<div
-      class="card"
-      data-template=${template.id}
-      data-missing=${missing.length ? missing.join(',') : nothing}
-    >
+    return html`<div class="card" data-template=${template.id}>
       <button
         type="button"
         class="pick"
@@ -389,26 +379,37 @@ export class ErpFlowsGallery extends LitElement {
           <span class="name">${this.t(template.nameKey)}</span>
           <span class="summary">${this.t(template.summaryKey)}</span>
         </span>
-        ${missing.length
-          ? html`<ok-status-pill
-              tone="neutral"
-              label=${this.t('ui.tplUnavailable', {
-                modules: missing.map((id) => moduleName(id, this.t)).join(', '),
-              })}
-            ></ok-status-pill>`
-          : nothing}
       </button>
       ${open ? this.renderPanel(template) : nothing}
     </div>`;
   }
 
   private renderSector(sector: Sector) {
-    const templates = templatesOf(sector);
+    const templates = availableTemplates(sector, this.known);
     if (!templates.length) return nothing;
     return html`<section data-sector=${sector}>
       <h3>${this.t(`ui.sector_${sector}`)}</h3>
       <div class="cards">${templates.map((template) => this.renderCard(template))}</div>
     </section>`;
+  }
+
+  /**
+   * The one line that replaced the grey cards (flows#52, keeping what flows#38 protected).
+   *
+   * Sorted by the name the owner reads, not by the order the catalogue happens to have: this is a
+   * shopping list, and «Tasks, Appointments» sends somebody looking for a list that is not sorted.
+   */
+  private renderMissing() {
+    const ids = unavailableModules(this.known);
+    if (!ids.length) return nothing;
+    const names = ids
+      .map((id) => moduleName(id, this.t))
+      .sort((a, b) => a.localeCompare(b))
+      .join(', ');
+    return html`<p class="missing" data-missing-modules>${this.t(
+      ids.length === 1 ? 'ui.tplHiddenModule' : 'ui.tplHiddenModules',
+      { modules: names },
+    )}</p>`;
   }
 
   render() {
@@ -427,7 +428,7 @@ export class ErpFlowsGallery extends LitElement {
           ${this.t('ui.guideOpen')}
         </button>
       </div>
-      ${SECTORS.map((sector) => this.renderSector(sector))}
+      ${SECTORS.map((sector) => this.renderSector(sector))} ${this.renderMissing()}
     </div>`;
   }
 }
