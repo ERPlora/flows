@@ -1,4 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import {
   TEMPLATES,
   SECTORS,
@@ -9,7 +13,8 @@ import {
   templateGrants,
   unavailableModules,
 } from './templates';
-import { isSpineKind, readDoc } from './flow-doc';
+import type { FlowDoc } from './flow-doc';
+import { MAX_ITERS_CAP, isSpineKind, readDoc } from './flow-doc';
 import en from '../../locales/en.json';
 import es from '../../locales/es.json';
 
@@ -24,6 +29,9 @@ const lookup = (catalogue: unknown, key: string): string | undefined => {
 
 /** A translator that returns the ENGLISH string, so a document can be inspected as it is stored. */
 const t = (key: string): string => lookup(en, key) ?? key;
+
+/** The same, in Spanish: a mirror is verbatim in BOTH languages or it is not a mirror. */
+const tEs = (key: string): string => lookup(es, key) ?? key;
 
 /** Every i18n key a template hands to `t()`. */
 const keysOf = (template: (typeof TEMPLATES)[number]): string[] => [
@@ -122,6 +130,18 @@ describe('the template catalogue', () => {
           .map((g) => `${g.kind} ${g.value}`)
           .sort(),
       ).toEqual([...expected].sort());
+    }
+  });
+
+  // The hub REFUSES a document above the cap at save (`flow.max_iters_out_of_range`; this
+  // module's `MAX_ITERS_CAP` mirrors it): a card that asks for more is a card whose «Use this»
+  // fails three screens later, in words nobody outside this repository can read.
+  it('never asks a model step for more iterations than the hub allows', () => {
+    for (const template of TEMPLATES) {
+      for (const step of buildTemplate(template, t).steps) {
+        if (step.kind !== 'ai') continue;
+        expect(step.max_iters, `${template.id} › ${step.id}`).toBeLessThanOrEqual(MAX_ITERS_CAP);
+      }
     }
   });
 
@@ -357,9 +377,93 @@ describe('the everyday automations of flows#18', () => {
  * Automations found «somebody writes on WhatsApp → make a task» and nothing else.
  *
  * The card below is that document, in this catalogue, so it can be picked. What it is NOT is a
- * second design: the trigger, the four steps and the twelve permissions are pinned here against
- * the ones the module publishes, so the two cannot quietly say different things.
+ * second design: the trigger, the three steps and the eleven permissions are pinned here against
+ * the ones the module publishes — by COMMIT, and by a hash of the whole document in both
+ * languages — so the two cannot quietly say different things.
  */
+
+/**
+ * **What the mirror mirrors.** Pinned by commit and not by module version because
+ * `whatsapp_inbox`'s release workflow does not bump on `flows/**`: v2.1.31 named BOTH the
+ * four-step document (before whatsapp_inbox#55) and the three-step one (after), so «v2.1.31» said
+ * nothing about which one a copy was. The commit does.
+ *
+ * Re-syncing the mirror is: copy the source's steps and prompts into `templates.ts` and the two
+ * locale files, set `commit` to the source commit, and recompute the two digests from the source
+ * files with the SAME canonical form `digest()` below uses:
+ *
+ *     git -C ../whatsapp_inbox show <commit>:flows/appointment-from-whatsapp.en.flow.json \
+ *       | node -e 'const s=v=>Array.isArray(v)?v.map(s):v&&typeof v==="object"?Object.fromEntries(Object.keys(v).sort().map(k=>[k,s(v[k])])):v;
+ *         const {name,...d}=JSON.parse(require("fs").readFileSync(0,"utf8"));
+ *         console.log(require("crypto").createHash("sha256").update(JSON.stringify(s(d))).digest("hex"))'
+ */
+const SOURCE = {
+  module: 'whatsapp_inbox',
+  // whatsapp_inbox PR #63 (issue #55): the two model steps became one, `conflicting` fell out.
+  commit: '6a6399eba28e8ea0e13487b8e1bc0226f7d8d3c6',
+  files: {
+    en: 'flows/appointment-from-whatsapp.en.flow.json',
+    es: 'flows/appointment-from-whatsapp.es.flow.json',
+    grants: 'flows/appointment-from-whatsapp.grants.json',
+  },
+  digest: {
+    en: 'a19f3bd2959ef13ba10544acc708d2b4f1f782e76cfbb3367a8fadb12c88476d',
+    es: 'e11dc6cd787fcd8002ae9b4cf8606a5853327fe72a4d8ac09c48078c4ffcf8c7',
+  },
+} as const;
+
+/**
+ * The document in its canonical form — keys sorted, no whitespace, the module's `name` left out
+ * because this catalogue carries the name as the card's title — hashed. Two documents that say the
+ * same thing in a different key order hash the same; one word of a prompt changed does not.
+ */
+function digest(doc: FlowDoc | Record<string, unknown>): string {
+  const sort = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(sort)
+      : v && typeof v === 'object'
+        ? Object.fromEntries(
+            Object.keys(v as Record<string, unknown>)
+              .sort()
+              .map((k) => [k, sort((v as Record<string, unknown>)[k])]),
+          )
+        : v;
+  const { name: _name, ...rest } = doc as Record<string, unknown>;
+  return createHash('sha256').update(JSON.stringify(sort(rest))).digest('hex');
+}
+
+/**
+ * The `whatsapp_inbox` checkout beside this module, if the workspace has one at or past
+ * {@link SOURCE.commit}. The canonical checkout (the directory named as the module) is preferred
+ * over the fleet's worktrees; a checkout OLDER than the pin is not a source to judge by — it would
+ * report a drift that is its own — and neither is a directory that is not a git checkout at all.
+ */
+function sourceCheckout(): string | null {
+  const modules = resolve(__dirname, '../../..');
+  let entries: string[];
+  try {
+    entries = readdirSync(modules);
+  } catch {
+    return null;
+  }
+  const candidates = entries
+    .filter((d) => d === SOURCE.module || d.startsWith(`${SOURCE.module}-`))
+    .sort((a, b) => (a === SOURCE.module ? -1 : b === SOURCE.module ? 1 : a.localeCompare(b)));
+  for (const entry of candidates) {
+    const dir = join(modules, entry);
+    try {
+      const manifest = JSON.parse(readFileSync(join(dir, 'module.json'), 'utf8')) as { id?: string };
+      if (manifest.id !== SOURCE.module || !existsSync(join(dir, SOURCE.files.en))) continue;
+      execFileSync('git', ['-C', dir, 'merge-base', '--is-ancestor', SOURCE.commit, 'HEAD'], {
+        stdio: 'ignore',
+      });
+      return dir;
+    } catch {
+      // No manifest, no template, or a checkout older than the pin: keep looking.
+    }
+  }
+  return null;
+}
 describe('WhatsApp → appointment, the card the WhatsApp module has always shipped (flows#52)', () => {
   const template = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment');
 
@@ -385,17 +489,28 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
     });
   });
 
-  it('acknowledges first and proposes after, exactly like the published document', () => {
+  it('acknowledges first, knows the customer, then finds the slot AND proposes in ONE turn', () => {
     const steps = buildTemplate(template!, t).steps;
+    // Three steps, not four. The published document used to split «find what is free» (a step that
+    // only asked, `auto`) from «propose» (a step that wrote from the report): the workaround for a
+    // hub that refused a read inside a `manual` step. hub#1595 made that read legal and
+    // whatsapp_inbox#55 collapsed the two — one turn asks the availability tools and proposes.
     expect(steps.map((s) => [s.id, s.kind])).toEqual([
       ['acknowledge', 'notify'],
       ['know_the_customer', 'ai'],
-      ['gather_availability', 'ai'],
       ['propose_appointment', 'ai'],
     ]);
-    // The two steps that WRITE ask a person first (`manual`); the one that only reads runs on its
-    // own (`auto`). That split is the whole safety story of this automation.
-    expect(steps.map((s) => s.policy)).toEqual([undefined, 'manual', 'auto', 'manual']);
+    // Both model steps WRITE (a customer card, a booking), so both wait for a person.
+    expect(steps.map((s) => s.policy)).toEqual([undefined, 'manual', 'manual']);
+  });
+
+  it('gives the proposing step the whole budget the hub allows, and not one iteration more', () => {
+    // The merged step asks up to nine tools in a row (catalogue, opening hours, slots, check,
+    // staff, schedules, check again, customer, create), so the source pins `max_iters` at the
+    // kernel's cap. Above it the hub refuses the document at save; below it the proposal never
+    // arrives. Zero margin either way — whoever adds a tool to this step adds a STEP instead.
+    const propose = buildTemplate(template!, t).steps.find((s) => s.id === 'propose_appointment');
+    expect(propose?.max_iters).toBe(MAX_ITERS_CAP);
   });
 
   it('writes back on WhatsApp through the conversation, never to a number in the document', () => {
@@ -412,13 +527,17 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
   });
 
   /**
-   * The list is `flows/appointment-from-whatsapp.grants.json` of `whatsapp_inbox@origin/main`
-   * (v2.1.31), written out here because the two repositories cannot read each other. If the card
+   * The list is `flows/appointment-from-whatsapp.grants.json` of `whatsapp_inbox@SOURCE.commit`,
+   * written out here because the two repositories cannot read each other at CI time. If the card
    * ever derives one grant more, or one fewer, than the automation the module publishes, this is
    * where it is caught — and a grant is the difference between an automation that books and one
    * that writes to a customer without being allowed to.
+   *
+   * Eleven, not twelve: `appointments.appointments.conflicting` fell out with whatsapp_inbox#55.
+   * `availability.check` already refuses an overlap with the booking gate's own authority, and the
+   * reads it does on the way run as the SYSTEM (`preload_reads`), which no grant governs.
    */
-  it('asks for the twelve permissions the module’s own grants file lists, and no thirteenth', () => {
+  it('asks for the eleven permissions the module’s own grants file lists, and no twelfth', () => {
     expect(
       templateGrants(template!, t)
         .map((g) => `${g.kind} ${g.value}`)
@@ -431,7 +550,6 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
         'command appointments.availability.slots',
         'command customers.create',
         'notify whatsapp',
-        'query appointments.appointments.conflicting',
         'query customers.list',
         'query services.services.list',
         'query staff.members.list',
@@ -439,6 +557,19 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
         'recipient_query whatsapp_inbox.conversations.list#contact_phone',
       ].sort(),
     );
+  });
+
+  /**
+   * **Verbatim means verbatim, and this is where it is measured.** The whole document this card
+   * builds — trigger, steps, tools, prompts, the acknowledgement — in BOTH languages, hashed in
+   * the canonical form of {@link digest}, against the hashes of the source files at
+   * {@link SOURCE.commit}. The grants test above cannot see a prompt reworded, a `max_iters`
+   * nudged or a tool moved between steps; this can. A mismatch is one of two things — a mirror
+   * that drifted from its source, or a re-sync that forgot to move the pin — and both are the bug.
+   */
+  it('is, hashed, the very document the module publishes — in English and in Spanish', () => {
+    expect(digest(buildTemplate(template!, t)), 'en').toBe(SOURCE.digest.en);
+    expect(digest(buildTemplate(template!, tEs)), 'es').toBe(SOURCE.digest.es);
   });
 
   it('names the five modules it needs, so a hub without one of them never shows it', () => {
@@ -460,6 +591,44 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
       for (const query of step.tools?.queries ?? []) expect(granted.has(`query ${query}`), query).toBe(true);
       for (const command of step.tools?.commands ?? []) expect(granted.has(`command ${command}`), command).toBe(true);
     }
+  });
+});
+
+/**
+ * **The mirror against its source, whenever the workspace has the source** (flows#52).
+ *
+ * Nothing in this repository can see `whatsapp_inbox` at CI time, so the pins above are what CI
+ * runs. But this module is developed inside the monorepo workspace, beside the module it mirrors,
+ * and there the real document is one directory away. This reads it — when it is there, and when it
+ * is at least as new as the commit the mirror claims to copy — and compares the lot: both
+ * documents, and the grants file.
+ *
+ * Skipped LOUDLY otherwise: on a bare checkout there is nothing to read, and a neighbour OLDER than
+ * the pin would report a drift that is its own, not ours (the fleet's checkouts run behind).
+ * `whatsapp_inbox/tests/flow_templates.test.py` applies the same rule when it reads ITS neighbours.
+ * When the source moves past the pin — whatsapp_inbox#58 and #61 are next in line for this very
+ * document — this is the test that goes red on this machine before the drift ships.
+ */
+describe('the mirror against the whatsapp_inbox checkout beside this module (flows#52)', () => {
+  const template = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment');
+  const source = sourceCheckout();
+  const where = source
+    ? `read from ${source}`
+    : 'SKIPPED: no checkout at or past the pin beside this module';
+
+  it.skipIf(!source)(`says exactly what the module’s own files say (${where})`, () => {
+    const read = (file: string): Record<string, unknown> =>
+      JSON.parse(readFileSync(join(source!, file), 'utf8')) as Record<string, unknown>;
+    expect(digest(buildTemplate(template!, t)), 'en').toBe(digest(read(SOURCE.files.en)));
+    expect(digest(buildTemplate(template!, tEs)), 'es').toBe(digest(read(SOURCE.files.es)));
+    const published = (read(SOURCE.files.grants) as { grants: { kind: string; value: string }[] })
+      .grants.map((g) => `${g.kind} ${g.value}`)
+      .sort();
+    expect(
+      templateGrants(template!, t)
+        .map((g) => `${g.kind} ${g.value}`)
+        .sort(),
+    ).toEqual(published);
   });
 });
 

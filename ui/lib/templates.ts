@@ -389,13 +389,17 @@ export const TEMPLATES: readonly FlowTemplate[] = [
    * anywhere, so the only thing that ever created it was the module's own end-to-end test, and a
    * salon that connected its number and opened Automations found «make a task» and nothing else.
    *
-   * ⚠️ **It is a MIRROR, and mirrors go stale.** The document below is `whatsapp_inbox` v2.1.31,
-   * copied because the two repositories cannot read each other and the hub has no route that
-   * serves a module's own templates (the manifest has no `flows` key and `erplora pack` does not
-   * put the folder in the zip). Retiring this copy — the runtime serving each installed module's
-   * templates, and this gallery merging them — is the real fix, and it is issued. Until then, the
-   * grants are pinned against the module's own `.grants.json` in `templates.test.ts`: the two may
-   * word a prompt differently, but they cannot ask for different permissions.
+   * ⚠️ **It is a MIRROR, and mirrors go stale.** The document below is
+   * `whatsapp_inbox@6a6399e` (PR #63, the one-turn rewrite of whatsapp_inbox#55), copied because
+   * the two repositories cannot read each other and the hub has no route that serves a module's
+   * own templates (the manifest has no `flows` key and `erplora pack` does not put the folder in
+   * the zip — hub#1611 and module-toolkit#209). Retiring this copy — the runtime serving each
+   * installed module's templates, and this gallery merging them — is the real fix. Until then the
+   * copy is pinned in `templates.test.ts` by COMMIT (the module's version does not move on a
+   * template change: v2.1.31 named both the old and the new document) and by a hash of the whole
+   * document in both languages, so it cannot word a prompt differently, ask for a different
+   * permission, or drift one iteration without going red. The commit is the thing to move when
+   * whatsapp_inbox#58 and #61 rewrite it again.
    *
    * **Why it needs five modules.** It reads the catalogue (`services`), the diary
    * (`appointments`), who works when (`staff`), the customer's card (`customers`), and it answers
@@ -431,7 +435,6 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       'appointments.availability.day_opening': 'tpl.grant.dayOpening',
       'appointments.availability.slots': 'tpl.grant.availabilitySlots',
       'appointments.availability.check': 'tpl.grant.availabilityCheck',
-      'appointments.appointments.conflicting': 'tpl.grant.appointmentsConflicting',
       'appointments.appointments.create': 'tpl.grant.appointmentsCreate',
     },
     build: (t) => ({
@@ -479,29 +482,12 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           policy: 'manual',
           max_iters: 4,
         },
-        // `auto`: every operation here only ANSWERS. Sending «may I check the diary?» to the
-        // approval tray is how the proposal never arrives.
-        {
-          id: 'gather_availability',
-          kind: 'ai',
-          prompt: t('tpl.waAppointment.availabilityPrompt'),
-          tools: {
-            queries: [
-              'services.services.list',
-              'staff.members.list',
-              'staff.schedules.list_for_member',
-            ],
-            commands: [
-              'appointments.availability.day_opening',
-              'appointments.availability.slots',
-              'appointments.availability.check',
-            ],
-          },
-          policy: 'auto',
-          max_iters: 8,
-        },
         // `manual` again, and this is the one that matters: the booking itself waits in the tray
-        // until somebody at the salon says yes.
+        // until somebody at the salon says yes. ONE turn asks the diary and proposes — the
+        // availability operations only answer, and a `manual` step may read since hub#1595
+        // (whatsapp_inbox#55 collapsed the former «gather, then propose» pair). `max_iters` sits
+        // at the kernel's cap on purpose: the prompt chains up to nine tool calls, the hub refuses
+        // a document above the cap, so there is no margin here — a tool more means a step more.
         {
           id: 'propose_appointment',
           kind: 'ai',
@@ -510,12 +496,18 @@ export const TEMPLATES: readonly FlowTemplate[] = [
             queries: [
               'customers.list',
               'services.services.list',
-              'appointments.appointments.conflicting',
+              'staff.members.list',
+              'staff.schedules.list_for_member',
             ],
-            commands: ['appointments.appointments.create'],
+            commands: [
+              'appointments.availability.day_opening',
+              'appointments.availability.slots',
+              'appointments.availability.check',
+              'appointments.appointments.create',
+            ],
           },
           policy: 'manual',
-          max_iters: 8,
+          max_iters: 10,
         },
       ],
     }),
