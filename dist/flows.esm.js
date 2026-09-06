@@ -6255,6 +6255,160 @@ var TEMPLATES = [
       ]
     })
   },
+  /**
+   * **The same automation, with nobody watching** (whatsapp_inbox#58).
+   *
+   * The twin above proposes and waits: both model steps are `manual`, so every appointment sits in
+   * the approval tray until somebody at the salon says yes. That is right for a shop with a person
+   * at the counter and wrong for the one this card is for — a single hairdresser with both hands
+   * busy, whose WhatsApp nobody reads until closing. For them the tray is not a safety net, it is
+   * where appointments go to expire.
+   *
+   * So the two model steps are `auto`: the hub runs the write inside the turn
+   * (`agent_runner.rs`), the appointment is in the diary before anyone reads the message, and the
+   * customer is told so in the same breath. `approval_mode` in the module's own settings does NOT
+   * do this — a request born `confirmed` can never be approved and nothing books it — which is why
+   * the unattended mode is a second FAMILY and not a switch.
+   *
+   * **What does not change, and is the whole reason this is safe enough to ship:** the model never
+   * chooses the hour. It may only book a start the customer asked for; if the message does not pin
+   * down both a day and an hour it books nothing and answers with the slots that are really free.
+   * With no person to catch it, a bot that picks the hour books people into times they cannot make.
+   * That rule lives in the prompt — the kernel cannot tell «the hour they asked for» from «the hour
+   * I chose» — and `whatsapp_inbox/tests/flow_templates.test.py::hour_choice_problems` is what
+   * keeps it there, in both languages.
+   *
+   * **Install ONE of the two, never both.** They wait on the same event with the same filter, so a
+   * hub with both books every incoming message twice. Neither the name nor the summary leaves that
+   * to a README: the gallery says it on the card, and warns before it creates the second one.
+   */
+  {
+    id: "whatsapp-appointment-unattended",
+    sector: "beauty",
+    // A calendar with a tick, against the twin's numbered calendar: this one is already booked.
+    icon: "calendar-clear-outline",
+    nameKey: "tpl.waAppointmentUnattended.name",
+    summaryKey: "tpl.waAppointmentUnattended.summary",
+    plainKey: "tpl.waAppointmentUnattended.plain",
+    blanks: [
+      {
+        labelKey: "tpl.waAppointmentUnattended.blankReply",
+        hintKey: "tpl.waAppointmentUnattended.blankReplyHint"
+      }
+    ],
+    // The same five modules as the twin: it reads the catalogue, the diary, who works when and the
+    // customer's card, and answers through the conversation.
+    witnesses: [
+      { event: "whatsapp_inbox.message.received", module: "whatsapp_inbox" },
+      { event: "appointments.appointment.created", module: "appointments" },
+      { event: "customer.created", module: "customers" },
+      { event: "services.service.created", module: "services" },
+      { event: "staff.member.created", module: "staff" }
+    ],
+    // The same thirteen, and deliberately not one more: running unattended is a reason to skip the
+    // tray, never a reason to ask for a permission the attended twin does without.
+    grantReasons: {
+      whatsapp: "tpl.grant.notifyWhatsapp",
+      "whatsapp_inbox.conversations.list#contact_phone": "tpl.grant.recipientWhatsapp",
+      "customers.list": "tpl.grant.customersList",
+      "customers.create": "tpl.grant.customersCreate",
+      "services.services.list": "tpl.grant.servicesList",
+      "staff.members.list": "tpl.grant.staffList",
+      "staff.schedules.list_for_member": "tpl.grant.staffSchedules",
+      "appointments.availability.day_opening": "tpl.grant.dayOpening",
+      "appointments.availability.slots": "tpl.grant.availabilitySlots",
+      "appointments.availability.check": "tpl.grant.availabilityCheck",
+      "appointments.appointments.create": "tpl.grant.appointmentsCreate",
+      "appointments.appointments.list_for_customer": "tpl.grant.appointmentsListForCustomer",
+      "appointments.appointments.cancel": "tpl.grant.appointmentsCancel"
+    },
+    build: (t3) => ({
+      schema_version: SCHEMA_VERSION2,
+      triggers: [
+        {
+          kind: "event",
+          // Same event and same filter as the twin — which is exactly why a hub must not run both.
+          event: "hub.whatsapp.message_received",
+          filter: { "event.text": { neq: "" } },
+          input: {
+            from: "event.from",
+            text: "event.text",
+            wa_message_id: "event.wa_message_id",
+            received_at: "event.received_at"
+          }
+        }
+      ],
+      steps: [
+        // Answered in seconds, and here it is the only thing that happens before the diary is
+        // touched. Its wording promises no person: with this family there is not one.
+        {
+          id: "acknowledge",
+          kind: "notify",
+          channel: "whatsapp",
+          to: {
+            query: "whatsapp_inbox.conversations.list",
+            params: { f_wa_contact_id: "input.from" },
+            field: "contact_phone"
+          },
+          template: "",
+          vars: { text: t3("tpl.waAppointmentUnattended.ackText") }
+        },
+        // `auto`: the customer card is created inside the turn, on the salon's real customer list.
+        // The prompt says so in as many words — nobody checks this afterwards.
+        {
+          id: "know_the_customer",
+          kind: "ai",
+          prompt: t3("tpl.waAppointmentUnattended.knowPrompt"),
+          tools: { queries: ["customers.list"], commands: ["customers.create"] },
+          policy: "auto",
+          max_iters: 4
+        },
+        // `auto`, and this is the step the whole family exists for: it books. Named
+        // `book_appointment` and not `propose_appointment` because that is what it does — there is
+        // no proposal and no tray. Same tools and same budget as the twin (the cap: booking chains
+        // up to nine calls), same «decide first what they are asking for» branch that cancels
+        // instead of booking when that is what the message says.
+        {
+          id: "book_appointment",
+          kind: "ai",
+          prompt: t3("tpl.waAppointmentUnattended.bookPrompt"),
+          tools: {
+            queries: [
+              "customers.list",
+              "services.services.list",
+              "staff.members.list",
+              "staff.schedules.list_for_member",
+              "appointments.appointments.list_for_customer"
+            ],
+            commands: [
+              "appointments.availability.day_opening",
+              "appointments.availability.slots",
+              "appointments.availability.check",
+              "appointments.appointments.create",
+              "appointments.appointments.cancel"
+            ]
+          },
+          policy: "auto",
+          max_iters: 10
+        },
+        // What the booking step wrote, sent as it is. With no approval in the middle this is the
+        // customer's ONLY notice that the appointment exists, which is why the prompt ends by
+        // demanding the words come in the same reply as the booking.
+        {
+          id: "confirm_to_customer",
+          kind: "notify",
+          channel: "whatsapp",
+          to: {
+            query: "whatsapp_inbox.conversations.list",
+            params: { f_wa_contact_id: "input.from" },
+            field: "contact_phone"
+          },
+          template: "",
+          vars: { text: "{{steps.book_appointment.text}}" }
+        }
+      ]
+    })
+  },
   // ── Bars and restaurants ────────────────────────────────────────────────────────────────────
   {
     id: "big-party-reservation",
@@ -6285,6 +6439,20 @@ var TEMPLATES = [
     })
   }
 ];
+function templateTriggerEvent(template, t3) {
+  const trigger = template.build(t3).triggers[0];
+  return trigger?.kind === "event" && typeof trigger.event === "string" ? trigger.event : null;
+}
+function triggerEventsOf(definition) {
+  const triggers = definition?.triggers;
+  if (!Array.isArray(triggers)) return [];
+  return triggers.map((trigger) => trigger?.event).filter((event) => typeof event === "string");
+}
+function flowsOnSameTrigger(template, t3, flows) {
+  const event = templateTriggerEvent(template, t3);
+  if (!event) return [];
+  return flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).includes(event)).map((flow) => flow.name);
+}
 function templateById(id) {
   return TEMPLATES.find((tpl) => tpl.id === id);
 }
@@ -6341,6 +6509,7 @@ var ErpFlowsGallery = class extends i3 {
     this.t = (k2) => k2;
     this.picked = null;
     this.known = {};
+    this.existing = [];
     this.busy = false;
     this.error = "";
   }
@@ -6522,9 +6691,34 @@ var ErpFlowsGallery = class extends i3 {
   connectedCallback() {
     super.connectedCallback();
     void this.probe();
+    void this.loadExisting();
   }
   updated(changed) {
-    if (changed.has("client")) void this.probe();
+    if (changed.has("client")) {
+      void this.probe();
+      void this.loadExisting();
+    }
+  }
+  /**
+   * The hub's own flows, read once, only to warn about a trigger that is already taken.
+   *
+   * Swallowed on failure ON PURPOSE, and this is the whole of the error handling: the warning is a
+   * courtesy, the catalogue is the screen. A hub that cannot answer `flows.list()` — offline, a
+   * blip, an older core — must still show every card. What it must never do is turn a missing
+   * warning into an error message, because that reads as «the gallery is broken» for a feature the
+   * owner did not ask for.
+   */
+  async loadExisting() {
+    const client = this.client;
+    if (!client?.flows?.list) return;
+    try {
+      const flows = await client.flows.list();
+      this.existing = flows.map((flow) => ({
+        name: flow.name,
+        definition: flow.definition ?? {}
+      }));
+    } catch {
+    }
   }
   /**
    * Asks the hub, once per distinct event, whether it has ever heard of it.
@@ -6614,6 +6808,7 @@ var ErpFlowsGallery = class extends i3 {
     )}
       </div>
 
+      ${this.renderSameTrigger(template)}
       ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
             >${this.error}</ok-inline-feedback
           >` : A}
@@ -6630,6 +6825,28 @@ var ErpFlowsGallery = class extends i3 {
         <span class="muted">${this.t("ui.tplCreatedPaused")}</span>
       </div>
     </div>`;
+  }
+  /**
+   * **«You already have one of these»** (whatsapp_inbox#58).
+   *
+   * Two flows on one event both fire. For most pairs that is wanted; for the two WhatsApp
+   * appointment families it books every message twice and sends the customer two confirmations.
+   * The owner is the one who can tell those apart, so this NAMES the flow already waiting on that
+   * event and leaves the button alone — warn, do not refuse, which is what Zapier does with a
+   * duplicate Zap. It sits immediately above the button, because a warning further up the panel is
+   * a warning nobody reads.
+   */
+  renderSameTrigger(template) {
+    const clashing = flowsOnSameTrigger(template, this.t, this.existing);
+    if (!clashing.length) return A;
+    return b2`<ok-inline-feedback
+      tone="warning"
+      icon="alert-circle-outline"
+      data-same-trigger
+      >${this.t(clashing.length === 1 ? "ui.tplSameTrigger" : "ui.tplSameTriggerMany", {
+      flows: clashing.join(", ")
+    })}</ok-inline-feedback
+    >`;
   }
   renderCard(template) {
     const open = this.picked === template.id;
@@ -6704,6 +6921,9 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsGallery.prototype, "known", 2);
+__decorateClass([
+  r5()
+], ErpFlowsGallery.prototype, "existing", 2);
 __decorateClass([
   r5()
 ], ErpFlowsGallery.prototype, "busy", 2);
@@ -8309,6 +8529,8 @@ var es_default = {
     mod_whatsapp_inbox: "Bandeja de WhatsApp",
     tplUse: "Usar esta",
     tplCreatedPaused: "Se crea en pausa. No pasa nada hasta que la enciendas.",
+    tplSameTrigger: "Ojo: \xAB{flows}\xBB ya se dispara con lo mismo. Si a\xF1ades esta tambi\xE9n, se ejecutar\xE1n LAS DOS cada vez \u2014 dos citas y dos mensajes a la misma clienta. Apaga antes la otra, salvo que quieras las dos de verdad.",
+    tplSameTriggerMany: "Ojo: \xAB{flows}\xBB ya se disparan con lo mismo. Si a\xF1ades esta tambi\xE9n, se ejecutar\xE1n TODAS cada vez \u2014 varias citas y varios mensajes a la misma clienta. Apaga antes las otras, salvo que las quieras todas de verdad.",
     tplYours: "Tus automatizaciones",
     guideOpen: "\xBFC\xF3mo funciona esto?",
     guideBack: "Volver a las automatizaciones",
@@ -8763,6 +8985,16 @@ var es_default = {
       ackText: "\xA1Gracias por escribirnos! Hemos recibido tu mensaje. Te confirmamos la cita en cuanto abramos el sal\xF3n.",
       knowPrompt: "Una clienta ha escrito al sal\xF3n por WhatsApp desde el n\xFAmero {{input.from}}. Esto es lo que dice:\n\n\xAB{{input.text}}\xBB\n\nTu \xFAnico trabajo en este turno es asegurarte de que esa persona tiene ficha de cliente, porque una cita se reserva contra un cliente real, nunca contra texto libre.\n\n1. B\xFAscala con `customers.list`, filtrando por `phone`. En el hub el tel\xE9fono se guarda en E.164, as\xED que busca `+{{input.from}}`.\n2. Si ya existe, NO propongas nada. Contesta en una l\xEDnea diciendo qui\xE9n es y para.\n3. Si no aparece nadie, prop\xF3n `customers.create` con el tel\xE9fono `+{{input.from}}` y el nombre que la persona haya dado en su mensaje. Si no ha dado nombre, usa el tel\xE9fono como nombre \u2014 no te lo inventes.\n\nNunca propongas m\xE1s de una escritura. Lo que propongas lo revisa una persona antes de que ocurra.",
       proposePrompt: "Una clienta ha escrito al sal\xF3n por WhatsApp desde el n\xFAmero {{input.from}} a las {{input.received_at}}. Esto es lo que dice:\n\n\xAB{{input.text}}\xBB\n\nEl paso anterior ya se asegur\xF3 de que la ficha existe, y report\xF3: {{steps.know_the_customer.text}}\n\n**Lo primero, averigua qu\xE9 est\xE1 pidiendo.** Lee su mensaje y decide cu\xE1l de estas es:\n\n- **Una cita nueva** \u2014 una hora, un servicio, \xAB\xBFten\xE9is hueco ma\xF1ana?\xBB. Haz RESERVAR, abajo.\n- **Anular una que ya tiene** \u2014 \xABno puedo ir\xBB, \xABcanc\xE9lamela\xBB, \xABme ha surgido algo\xBB. Haz ANULAR, abajo, y NO reserves nada. Que alguien pida cancelar y acabe con una segunda cita es lo peor que esta automatizaci\xF3n le puede hacer a un sal\xF3n.\n- **Cualquier otra cosa** \u2014 un precio, una duda, una queja, mover la cita a otro d\xEDa (que esta automatizaci\xF3n todav\xEDa no sabe hacer). No propongas NADA: contesta en una l\xEDnea si puedes y, si no, di que alguien del sal\xF3n le responder\xE1.\n\n# RESERVAR\n\nBusca el hueco Y prop\xF3n la cita en este mismo turno. Las herramientas de disponibilidad que tienes aqu\xED solo contestan preguntas: no cambian nada, se ejecutan en cuanto las llamas y su respuesta te vuelve a ti. As\xED que preg\xFAntales, y luego prop\xF3n UNA cita, y solo una, con lo que te hayan dicho.\n\n1. Lee el cat\xE1logo con `services.services.list` y elige el servicio que pide. Si el mensaje es demasiado vago para saber cu\xE1l, no propongas NADA: d\xEDselo en una l\xEDnea y nombra los servicios que podr\xEDan encajar, para que elija.\n2. Calcula cu\xE1nto dura. Si el servicio declara `duration_minutes`, \xFAsalo TAL CUAL \u2014 lo decidi\xF3 el sal\xF3n. Si falta o es cero, EST\xCDMALO por lo que es el servicio: un corte no es un tinte, y un tinte no es un tinte con mechas. S\xE9 honesto y s\xE9 generoso antes que justo; una propuesta que se queda quince minutos corta desplaza la tarde entera.\n3. Pregunta a `appointments.availability.day_opening` cu\xE1ndo abre el sal\xF3n el d\xEDa que pide. Contesta `spans` \u2014minutos desde la medianoche de esa misma fecha, con los descansos ya recortados\u2014 y `source`. Si `source` es `schedules` y `spans` viene vac\xEDo, EL SAL\xD3N EST\xC1 CERRADO ese d\xEDa: no propongas nada, d\xEDselo, ofrece el d\xEDa abierto m\xE1s cercano y para. Si `source` es `unset`, el sal\xF3n no tiene ninguna regla que alcance esa fecha, as\xED que no se est\xE1 rechazando nada por ese motivo y no debes filtrar t\xFA por horario.\n4. NUNCA deduzcas el horario por tu cuenta, ni del mensaje ni de ning\xFAn otro sitio \u2014 y lo mismo vale para los huecos libres y para qui\xE9n trabaja. Estas operaciones lo resuelven exactamente igual que la puerta de reserva \u2014d\xEDa especial exacto, d\xEDa especial anual, rango de override, horario semanal, en ese orden\u2014, y tener una segunda opini\xF3n sobre cu\xE1ndo abre el sal\xF3n es justo lo que hace que una propuesta con buena pinta se caiga en cuanto alguien la aprueba. Pregunta; no deduzcas.\n5. Pide a `appointments.availability.slots` los huecos libres de verdad de esa fecha para esa duraci\xF3n, y confirma el que elijas con `appointments.availability.check`. Si `check` lo rechaza, cree su motivo y pasa al siguiente hueco: `outside_schedule` es que el sal\xF3n est\xE1 cerrado a esa hora, y `held` que otra solicitud pendiente lo tiene apartado unos minutos.\n6. Usa `staff.members.list` y `staff.schedules.list_for_member` para elegir a una profesional que de verdad trabaje a esa hora, y confirma el hueco para ella pasando su `staff_id`.\n7. Respeta el d\xEDa o la hora que haya pedido; si no est\xE1 libre, coge el m\xE1s cercano que s\xED lo est\xE9. Si no hay ninguno libre, no propongas nada y d\xEDselo en una l\xEDnea, ofreciendo otro d\xEDa.\n8. Resuelve a la clienta con `customers.list`, filtrando por `phone` = `+{{input.from}}`.\n9. Prop\xF3n `appointments.appointments.create` con la clienta, el servicio, la profesional, el inicio que hayas confirmado y `duration_minutes`.\n\nSobre la duraci\xF3n, esto importa: si la has ESTIMADO en vez de leerla del cat\xE1logo, dilo en `internal_notes`, con palabras y con el n\xFAmero \u2014 por ejemplo \xABDuraci\xF3n estimada por el asistente: 90 min; el cat\xE1logo no declara ninguna para este servicio.\xBB Quien aprueba tiene que poder ver la estimaci\xF3n y corregirla antes de que entre en la agenda, y `internal_notes` es solo para el personal, as\xED que la clienta no lo lee.\n\nPon en `notes` un resumen de una l\xEDnea de lo que ha pedido la clienta, con sus propias palabras.\n\nLo \xFAnico que es una propuesta es la reserva. Preguntar qu\xE9 hay libre no cambia nada y ocurre mientras preguntas; `appointments.appointments.create` es lo \xFAnico que espera en la bandeja de aprobaci\xF3n hasta que alguien del sal\xF3n lo revise, y entonces se ejecuta exactamente como lo escribiste.\n\n# ANULAR\n\n1. B\xFAscala con `customers.list`, filtrando por `phone` = `+{{input.from}}`. Si no tiene ficha, tampoco tiene cita: dile que no hay nada reservado a ese n\xFAmero y para.\n2. Mira lo que tiene con `appointments.appointments.list_for_customer`. Contesta de la m\xE1s nueva a la m\xE1s vieja e incluye las pasadas y las ya anuladas, as\xED que coge la M\xC1S PR\xD3XIMA que est\xE9 a\xFAn por venir y cuyo `status` sea `pending` o `confirmed`. Lo que est\xE9 `cancelled`, `completed` o `no_show` es historial: eso no se anula.\n3. Si no le queda ninguna por venir, d\xEDselo y para.\n4. Si le queda m\xE1s de una y su mensaje no dice cu\xE1l, N\xD3MBRALAS \u2014d\xEDa, hora y profesional\u2014 y preg\xFAntale cu\xE1l. No adivines nunca: anular la cita equivocada le cuesta al sal\xF3n el sill\xF3n Y la clienta.\n5. Prop\xF3n `appointments.appointments.cancel` con ese `appointment_id`, un `reason` con sus propias palabras, y `channel` puesto a `customer`.\n\nEse `channel` no es un adorno: es lo que hace que se apliquen las reglas PROPIAS del sal\xF3n \u2014 si las clientas pueden anular, y con cu\xE1nta antelaci\xF3n. Eso lo decide Citas cuando la anulaci\xF3n se ejecuta, con los ajustes de este negocio. No lo calcules t\xFA, no le digas que ya es tarde, y no le ofrezcas anular \xABigualmente\xBB: prop\xF3nlo, y si las reglas del sal\xF3n lo rechazan, el sal\xF3n ve exactamente por qu\xE9.\n\nNunca propongas anular algo que no le hayas nombrado antes.\n\n**Y ahora la parte que llega a la clienta.** Todo lo que escribas de vuelta se le manda por WhatsApp, palabra por palabra, en cuanto la reserva sale \u2014 as\xED que escr\xEDbelo PARA ella, no sobre ella: en su idioma, una o dos l\xEDneas cortas, cercanas y llanas.\n\n- Si has propuesto una cita, dile lo que tiene: el d\xEDa, la hora y la profesional POR SU NOMBRE. Nunca un id, nunca el nombre de una herramienta, nunca \xABpendiente de aprobar\xBB \u2014 cuando lea esto, ya ha ocurrido.\n- Si has propuesto una anulaci\xF3n, dile que queda anulada, nombrando la cita que has anulado para que vea que era la suya, y d\xE9jale la puerta abierta para volver a reservar.\n- Si no has propuesto nada, dile por qu\xE9 en una l\xEDnea y ofr\xE9cele la alternativa m\xE1s cercana, para que pueda contestar con ella.\n- Nunca metas aqu\xED la duraci\xF3n que estimaste, lo que el cat\xE1logo declaraba o no, ni nada que necesite ver el sal\xF3n. Eso va en `internal_notes`, que solo lee el sal\xF3n.\n\nEscr\xEDbelo en la MISMA respuesta en la que propones la reserva: proponer termina tu turno y no se te vuelve a preguntar, as\xED que una propuesta enviada sin palabras la deja sin nada."
+    },
+    waAppointmentUnattended: {
+      name: "WhatsApp \u2192 cita reservada, sin revisi\xF3n",
+      summary: "Alguien pide cita por WhatsApp y la reserva ah\xED mismo, ella sola. Nadie del negocio confirma nada: la cita est\xE1 en la agenda antes de que t\xFA leas el mensaje.",
+      plain: "Cuando alguien escribe a tu WhatsApp, esto le contesta al momento para que no se quede esperando, se asegura de que tiene ficha de cliente, mira tu agenda y RESERVA la cita ella misma \u2014 sin aprobaci\xF3n, sin bandeja, sin nada esper\xE1ndote. Solo reserva el d\xEDa y la hora que haya pedido la clienta: si no dice cu\xE1ndo, le manda los huecos que de verdad est\xE1n libres y se lo pregunta. Despu\xE9s le escribe para decirle lo que tiene. \xDAsalo cuando no hay nadie para atender el WhatsApp; si prefieres decir t\xFA que s\xED a cada una, instala \xABWhatsApp \u2192 propuesta de cita\xBB en su lugar \u2014 no instales las dos, o cada mensaje acaba en dos citas.",
+      blankReply: "El mensaje que recibe al momento",
+      blankReplyHint: "La l\xEDnea que sale en cuanto llega un mensaje, antes incluso de mirar la agenda. Ponla con tus palabras: es lo primero que oye de ti. No prometas que le contestar\xE1 una persona \u2014 con esta automatizaci\xF3n no lo hace nadie.",
+      ackText: "\xA1Gracias por escribirnos! Miro la agenda y te contesto ahora mismo.",
+      knowPrompt: "Una clienta ha escrito al sal\xF3n por WhatsApp desde el n\xFAmero {{input.from}}. Esto es lo que dice:\n\n\xAB{{input.text}}\xBB\n\nTu \xFAnico trabajo en este turno es asegurarte de que esa persona tiene ficha de cliente, porque una cita se reserva contra un cliente real, nunca contra texto libre.\n\n1. B\xFAscala con `customers.list`, filtrando por `phone`. En el hub el tel\xE9fono se guarda en E.164, as\xED que busca `+{{input.from}}`.\n2. Si ya existe, NO escribas nada. Contesta en una l\xEDnea diciendo qui\xE9n es y para.\n3. Si no aparece nadie, cr\xE9ala con `customers.create`, con el tel\xE9fono `+{{input.from}}` y el nombre que la persona haya dado en su mensaje. Si no ha dado nombre, usa el tel\xE9fono como nombre \u2014 no te lo inventes.\n\nNunca escribas m\xE1s de una vez. Y lee esto dos veces, porque es lo que distingue a esta automatizaci\xF3n de la que lleva revisi\xF3n: **nadie va a comprobar lo que hagas.** Este sal\xF3n tiene el WhatsApp desatendido, as\xED que lo que llames ocurre en el acto, sobre la lista de clientes real del sal\xF3n. La ficha que crees es la que van a tener.",
+      bookPrompt: "Una clienta ha escrito al sal\xF3n por WhatsApp desde el n\xFAmero {{input.from}} a las {{input.received_at}}. Esto es lo que dice:\n\n\xAB{{input.text}}\xBB\n\nEl paso anterior ya se asegur\xF3 de que la ficha existe, y report\xF3: {{steps.know_the_customer.text}}\n\n**Todo lo que hagas aqu\xED OCURRE.** Este sal\xF3n tiene el WhatsApp desatendido: no hay bandeja de aprobaci\xF3n y nadie lee tu trabajo antes que la clienta. En cuanto llames a `appointments.appointments.create` la cita est\xE1 en la agenda, y lo que escribas de vuelta se le manda tal cual.\n\n**Lo primero, averigua qu\xE9 est\xE1 pidiendo.** Lee su mensaje y decide cu\xE1l de estas es:\n\n- **Una cita nueva** \u2014 una hora, un servicio, \xAB\xBFten\xE9is hueco ma\xF1ana?\xBB. Haz RESERVAR, abajo.\n- **Anular una que ya tiene** \u2014 \xABno puedo ir\xBB, \xABcanc\xE9lamela\xBB, \xABme ha surgido algo\xBB. Haz ANULAR, abajo, y NO reserves nada. Que alguien pida cancelar y acabe con una segunda cita es lo peor que esta automatizaci\xF3n le puede hacer a un sal\xF3n.\n- **Cualquier otra cosa** \u2014 un precio, una duda, una queja, mover la cita a otro d\xEDa (que esta automatizaci\xF3n todav\xEDa no sabe hacer). No hagas NADA: contesta en una l\xEDnea si puedes y, si no, di que alguien del sal\xF3n le responder\xE1.\n\n# RESERVAR\n\n\u{1F534} **La hora no la eliges t\xFA. La elige ella.** Solo puedes reservar un inicio que la clienta haya pedido. Si su mensaje no fija a la vez el d\xEDa Y la hora, este turno no reserva nada: contestas con los huecos libres de verdad y le pides que responda con el servicio, el d\xEDa y la hora. No es cortes\xEDa, es el dise\xF1o \u2014 sin nadie en el sal\xF3n que lo cace, un bot que elige la hora mete a la gente en horas a las que no pueden ir, y el sal\xF3n pierde el sill\xF3n y la clienta.\n\nLas herramientas de disponibilidad que tienes aqu\xED solo contestan preguntas: no cambian nada, se ejecutan en cuanto las llamas y su respuesta te vuelve a ti. As\xED que preg\xFAntales primero, y act\xFAa con lo que te hayan dicho.\n\n1. Lee el cat\xE1logo con `services.services.list` y elige el servicio que pide. Si el mensaje es demasiado vago para saber cu\xE1l, no reserves NADA: d\xEDselo en una l\xEDnea y nombra los servicios que podr\xEDan encajar, para que elija.\n2. Calcula cu\xE1nto dura. Si el servicio declara `duration_minutes`, \xFAsalo TAL CUAL \u2014 lo decidi\xF3 el sal\xF3n. Si falta o es cero, EST\xCDMALO por lo que es el servicio: un corte no es un tinte, y un tinte no es un tinte con mechas. S\xE9 honesto y s\xE9 generoso antes que justo; una reserva que se queda quince minutos corta desplaza la tarde entera.\n3. Pregunta a `appointments.availability.day_opening` cu\xE1ndo abre el sal\xF3n el d\xEDa que pide. Contesta `spans` \u2014minutos desde la medianoche de esa misma fecha, con los descansos ya recortados\u2014 y `source`. Si `source` es `schedules` y `spans` viene vac\xEDo, EL SAL\xD3N EST\xC1 CERRADO ese d\xEDa: no reserves nada, d\xEDselo, ofrece el d\xEDa abierto m\xE1s cercano y para. Si `source` es `unset`, el sal\xF3n no tiene ninguna regla que alcance esa fecha, as\xED que no se est\xE1 rechazando nada por ese motivo y no debes filtrar t\xFA por horario.\n4. NUNCA deduzcas el horario por tu cuenta, ni del mensaje ni de ning\xFAn otro sitio \u2014 y lo mismo vale para los huecos libres y para qui\xE9n trabaja. Estas operaciones lo resuelven exactamente igual que la puerta de reserva \u2014d\xEDa especial exacto, d\xEDa especial anual, rango de override, horario semanal, en ese orden\u2014 y tener una segunda opini\xF3n sobre cu\xE1ndo abre el sal\xF3n es justo lo que hace que una reserva con buena pinta la rechace la puerta.\n5. Pide a `appointments.availability.slots` los huecos libres de verdad de esa fecha para esa duraci\xF3n. Si ella ha nombrado una hora, confirma ESA hora con `appointments.availability.check`, pasando la profesional que hayas elegido. Si `check` la rechaza, no la muevas a otra hora en su nombre: cree su motivo \u2014`outside_schedule` es que el sal\xF3n est\xE1 cerrado a esa hora, `held` que otra solicitud lo tiene apartado unos minutos\u2014 y ofr\xE9cele los huecos libres de alrededor.\n6. Usa `staff.members.list` y `staff.schedules.list_for_member` para elegir a una profesional que de verdad trabaje a esa hora, y confirma el hueco para ella pasando su `staff_id`. Elegir QUI\xC9N es tuyo; elegir CU\xC1NDO no.\n7. Si la hora que pidi\xF3 no est\xE1 libre, o no lleg\xF3 a nombrar ninguna, no reserves NADA. Cont\xE9stale con dos o tres de los huecos libres de verdad \u2014d\xEDa, hora y profesional por su nombre\u2014 y p\xEDdele que responda con el servicio, el d\xEDa y la hora, deletre\xE1ndole un ejemplo: \xABcorte, ma\xF1ana a las 10:30\xBB. Su siguiente mensaje es un turno nuevo que empieza de cero, as\xED que tiene que llevar tambi\xE9n el servicio \u2014 un \xAB10:30\xBB a secas te llega sin saber para qu\xE9 es. Si no hay ning\xFAn hueco libre ese d\xEDa, d\xEDselo y ofr\xE9cele el d\xEDa m\xE1s cercano que s\xED tenga.\n8. Resuelve a la clienta con `customers.list`, filtrando por `phone` = `+{{input.from}}`.\n9. Res\xE9rvala con `appointments.appointments.create`: la clienta, el servicio, la profesional, el inicio que hayas confirmado y `duration_minutes`.\n\nSobre la duraci\xF3n, esto importa: si la has ESTIMADO en vez de leerla del cat\xE1logo, dilo en `internal_notes`, con palabras y con el n\xFAmero \u2014 por ejemplo \xABDuraci\xF3n estimada por el asistente: 90 min; el cat\xE1logo no declara ninguna para este servicio.\xBB Esta reserva no la aprueba nadie, as\xED que `internal_notes` es donde el sal\xF3n se entera despu\xE9s de que la duraci\xF3n era una estimaci\xF3n y puede corregirla antes de que llegue el d\xEDa. Es solo para el personal: la clienta no lo lee.\n\nPon en `notes` un resumen de una l\xEDnea de lo que ha pedido la clienta, con sus propias palabras.\n\nPreguntar qu\xE9 hay libre no cambia nada. `appointments.appointments.create` es la \xFAnica llamada que mete una cita real en la agenda del sal\xF3n, y lo hace en el acto: no hay bandeja, no hay revisi\xF3n y no hay vuelta atr\xE1s que no sea anularla.\n\n# ANULAR\n\n1. B\xFAscala con `customers.list`, filtrando por `phone` = `+{{input.from}}`. Si no tiene ficha, tampoco tiene cita: dile que no hay nada reservado a ese n\xFAmero y para.\n2. Mira lo que tiene con `appointments.appointments.list_for_customer`. Contesta de la m\xE1s nueva a la m\xE1s vieja e incluye las pasadas y las ya anuladas, as\xED que coge la M\xC1S PR\xD3XIMA que est\xE9 a\xFAn por venir y cuyo `status` sea `pending` o `confirmed`. Lo que est\xE9 `cancelled`, `completed` o `no_show` es historial: eso no se anula.\n3. Si no le queda ninguna por venir, d\xEDselo y para.\n4. Si le queda m\xE1s de una y su mensaje no dice cu\xE1l, no anules NADA: N\xD3MBRALAS \u2014d\xEDa, hora y profesional\u2014 y preg\xFAntale cu\xE1l. No adivines nunca: anular la cita equivocada le cuesta al sal\xF3n el sill\xF3n Y la clienta. Su respuesta llega como un mensaje nuevo y sus citas siguen ah\xED para listarlas, as\xED que volver a nombrarlas es todo lo que hace falta.\n5. An\xFAlala con `appointments.appointments.cancel`: ese `appointment_id`, un `reason` con sus propias palabras, y `channel` puesto a `customer`.\n\nEse `channel` no es un adorno: es lo que hace que se apliquen las reglas PROPIAS del sal\xF3n \u2014 si las clientas pueden anular, y con cu\xE1nta antelaci\xF3n. Eso lo decide Citas cuando la anulaci\xF3n se ejecuta, con los ajustes de este negocio. No lo calcules t\xFA, no le digas que ya es tarde, y no la anules \xABigualmente\xBB: ll\xE1malo, y si las reglas del sal\xF3n lo rechazan, dile exactamente lo que ha contestado el sal\xF3n.\n\nNunca anules algo que no le hayas nombrado antes.\n\n**Y ahora la parte que llega a la clienta.** Todo lo que escribas de vuelta se le manda por WhatsApp, palabra por palabra, en cuanto termine este turno \u2014 as\xED que escr\xEDbelo PARA ella, no sobre ella: en su idioma, una o dos l\xEDneas cortas, cercanas y llanas.\n\n- Si has reservado, dile lo que tiene: el d\xEDa, la hora y la profesional POR SU NOMBRE. Nunca un id, nunca el nombre de una herramienta, nunca \xABpendiente de aprobar\xBB \u2014 cuando lea esto, ya ha ocurrido.\n- Si has anulado, dile que queda anulada, nombrando la cita que has anulado para que vea que era la suya, y d\xE9jale la puerta abierta para volver a reservar.\n- Si no has reservado nada porque necesitas que elija, dale los huecos libres y dile exactamente c\xF3mo contestar, con el ejemplo.\n- Si no has reservado nada por cualquier otro motivo, dile por qu\xE9 en una l\xEDnea y ofr\xE9cele la alternativa m\xE1s cercana, para que pueda contestar con ella.\n- Nunca metas aqu\xED la duraci\xF3n que estimaste, lo que el cat\xE1logo declaraba o no, ni nada que necesite ver el sal\xF3n. Eso va en `internal_notes`, que solo lee el sal\xF3n.\n\nEscr\xEDbelo en la MISMA respuesta en la que reservas: el turno termina cuando paras y no se te vuelve a preguntar, as\xED que una reserva hecha sin palabras la deja sin nada."
     }
   },
   guide: {
@@ -9102,6 +9334,8 @@ var en_default = {
     mod_whatsapp_inbox: "WhatsApp Inbox",
     tplUse: "Use this one",
     tplCreatedPaused: "It is created paused. Nothing happens until you turn it on.",
+    tplSameTrigger: "Careful: \xAB{flows}\xBB already runs on the same thing happening. If you add this one too, BOTH will run every time \u2014 two appointments, two messages to the same customer. Turn the other one off first unless you really want both.",
+    tplSameTriggerMany: "Careful: \xAB{flows}\xBB already run on the same thing happening. If you add this one too, they will ALL run every time \u2014 several appointments, several messages to the same customer. Turn the others off first unless you really want them all.",
     tplYours: "Your automations",
     guideOpen: "How does this work?",
     guideBack: "Back to the automations",
@@ -9556,6 +9790,16 @@ var en_default = {
       ackText: "Thanks for writing! We have your message. We will confirm your appointment as soon as the salon opens.",
       knowPrompt: 'A customer wrote to the salon on WhatsApp from the phone number {{input.from}}. This is what they said:\n\n"{{input.text}}"\n\nYour only job in this turn is to make sure the person has a customer record, because an appointment is booked against a real customer, never against free text.\n\n1. Look them up with `customers.list`, filtering by `phone`. The number in the hub is stored in E.164, so search for `+{{input.from}}`.\n2. If a customer already exists, propose NOTHING. Answer in one line saying who they are and stop.\n3. If nobody matches, propose `customers.create` with the phone `+{{input.from}}` and the name the person gave in their message. If they gave no name, use the phone number as the name \u2014 do not invent one.\n\nNever propose more than one write. Whatever you propose is reviewed by a person before it happens.',
       proposePrompt: "A customer wrote to the salon on WhatsApp from the phone number {{input.from}} at {{input.received_at}}. This is what they said:\n\n\"{{input.text}}\"\n\nThe previous step already made sure the customer record exists, and reported: {{steps.know_the_customer.text}}\n\n**First, work out what they are asking for.** Read their message and decide which of these it is:\n\n- **A new appointment** \u2014 a time, a service, \xABdo you have room tomorrow\xBB. Do BOOKING below.\n- **Cancelling one they already have** \u2014 \xABI can't make it\xBB, \xABcancel it\xBB, \xABsomething came up\xBB. Do CANCELLING below, and do NOT book anything. Somebody who asks to cancel and ends up with a second appointment is the worst thing this automation can do to a salon.\n- **Anything else** \u2014 a price, a question, a complaint, moving an appointment to another day (which this automation cannot do yet). Propose NOTHING: answer in one line if you can, and otherwise say somebody from the salon will get back to them.\n\n# BOOKING\n\nFind the slot AND propose the appointment in this same turn. The availability tools you have here only answer questions: they change nothing, they run the moment you call them, and their answers come straight back to you. So ask them, and then propose ONE appointment, and only one, out of what they told you.\n\n1. Read the catalogue with `services.services.list` and pick the service they are asking for. If the message is too vague to tell which one, propose NOTHING: tell them so in one line and name the services that could fit, so they can pick.\n2. Work out how long it takes. If the service declares `duration_minutes`, use it AS IS \u2014 the salon decided it. If it is missing or zero, ESTIMATE it from what the service is: a cut is not a colour, and a colour is not a colour with highlights. Be honest, and be generous rather than exact; a proposal that falls fifteen minutes short pushes the whole afternoon.\n3. Ask `appointments.availability.day_opening` when the salon is open on the date they want. It answers `spans` \u2014 minutes from that date's own midnight, with the breaks already carved out \u2014 and `source`. If `source` is `schedules` and `spans` is empty, THE SALON IS SHUT that day: propose nothing, tell them so, offer the nearest day it is open, and stop. If `source` is `unset` the salon has no rule reaching that date, so nothing is being refused on those grounds and you must not filter by hours yourself.\n4. NEVER work the opening hours out on your own, from the message or from anywhere else \u2014 and the same goes for the free slots and for who is working. These operations resolve them exactly as the booking gate does \u2014 special day, yearly special day, override range, weekly hours, in that order \u2014 and a second opinion about when the salon opens is precisely how a good-looking proposal gets rejected the moment somebody approves it. Ask; never deduce.\n5. Ask `appointments.availability.slots` for the real free slots on that date for that duration, and confirm the one you settle on with `appointments.availability.check`. If `check` refuses it, take its reason at face value and move to the next slot: `outside_schedule` means the salon is shut at that hour, `held` means another pending request has it set aside for a few minutes.\n6. Use `staff.members.list` and `staff.schedules.list_for_member` to pick a professional who actually works at that hour, and confirm the slot for that person by passing their `staff_id`.\n7. Respect the day or the hour they asked for; if it is not free, take the closest one that is. If nothing is free at all, propose nothing and tell them so in one line, offering another day.\n8. Resolve the customer with `customers.list`, filtering by `phone` = `+{{input.from}}`.\n9. Propose `appointments.appointments.create` with the customer, the service, the professional, the start you confirmed and `duration_minutes`.\n\nAbout the duration, this matters: if you ESTIMATED it instead of reading it from the catalogue, say so in `internal_notes`, in words and with the number \u2014 for example \"Duration estimated by the assistant: 90 min; the catalogue declares none for this service.\" Whoever approves has to be able to see the estimate and correct it before it enters the agenda, and `internal_notes` is for staff only, so the customer never reads it.\n\nPut in `notes` a one-line summary of what the customer asked for, in their own words.\n\nOnly the booking is a proposal. Asking what is free changes nothing and happens as you ask; `appointments.appointments.create` is the one thing that waits in the approval tray until somebody at the salon reviews it, and it then runs exactly as you wrote it.\n\n# CANCELLING\n\n1. Find them with `customers.list`, filtering by `phone` = `+{{input.from}}`. No record means no appointment: tell them there is nothing booked under that number and stop.\n2. List what they have with `appointments.appointments.list_for_customer`. It answers newest first and it includes the past and the already-cancelled ones, so take the SOONEST one still to come whose `status` is `pending` or `confirmed`. Anything `cancelled`, `completed` or `no_show` is history \u2014 it is not theirs to cancel.\n3. If nothing is still to come, tell them there is nothing booked and stop.\n4. If more than one is still to come and their message does not say which, NAME them \u2014 day, hour and professional \u2014 and ask which one. Never guess: cancelling the wrong appointment costs the salon the chair AND the customer.\n5. Propose `appointments.appointments.cancel` with that `appointment_id`, a `reason` in their own words, and `channel` set to `customer`.\n\nThat `channel` is not decoration: it is what makes the salon's OWN rules apply \u2014 whether customers may cancel at all, and how much notice they owe. Citas decides that when the cancellation runs, with the settings of this business. Do not work it out yourself, do not tell them it is too late, and do not offer to cancel \xABanyway\xBB: propose it, and if the salon's rules refuse it, the salon sees exactly why.\n\nNever propose cancelling something you have not named to them first.\n\n**And now the part that reaches the customer.** Everything you write back is sent to them on WhatsApp, word for word, the moment the booking goes through \u2014 so write it TO them, not about them: their own language, one or two short lines, warm and plain.\n\n- If you proposed a booking, tell them what they have: the day, the hour and the professional BY NAME. Never an id, never a tool name, never \xABpending approval\xBB \u2014 by the time they read this, it happened.\n- If you proposed a cancellation, tell them it is cancelled, naming the appointment you cancelled so they can see it was the right one, and leave the door open to book again.\n- If you proposed nothing, tell them why in one line and offer the nearest alternative, so they can answer with it.\n- Never put in here the duration you estimated, what the catalogue did or did not declare, or anything else the salon needs to see. That goes in `internal_notes`, which only the salon reads.\n\nWrite it in the SAME reply in which you propose the booking: proposing ends your turn and you will not be asked again, so a proposal sent with no words leaves her with nothing."
+    },
+    waAppointmentUnattended: {
+      name: "WhatsApp \u2192 appointment booked, no review",
+      summary: "Somebody asks for an appointment on WhatsApp and it books it there and then, on its own. Nobody at the shop confirms anything: the appointment is in the diary before you read the message.",
+      plain: "When somebody writes to your WhatsApp, this answers them straight away so nobody is left waiting, makes sure they have a customer card, reads your diary and BOOKS the appointment itself \u2014 no approval, no tray, nothing waiting for you. It only ever books a day and an hour the customer asked for: if they did not say when, it sends them the slots that are really free and asks. Then it writes back to tell them what they have. Use it when there is nobody to watch WhatsApp; if you would rather say yes to each one first, install \xABWhatsApp \u2192 appointment proposal\xBB instead \u2014 do not install both, or every message gets two appointments.",
+      blankReply: "The message they get back straight away",
+      blankReplyHint: "The line that goes out the moment a message arrives, before the diary has even been read. Put it in your own words: it is the first thing they hear from you. Do not promise a person will reply \u2014 with this automation, nobody does.",
+      ackText: "Thanks for writing! Let me check the diary and I will come straight back to you.",
+      knowPrompt: 'A customer wrote to the salon on WhatsApp from the phone number {{input.from}}. This is what they said:\n\n"{{input.text}}"\n\nYour only job in this turn is to make sure the person has a customer record, because an appointment is booked against a real customer, never against free text.\n\n1. Look them up with `customers.list`, filtering by `phone`. The number in the hub is stored in E.164, so search for `+{{input.from}}`.\n2. If a customer already exists, write NOTHING. Answer in one line saying who they are and stop.\n3. If nobody matches, create them with `customers.create`, with the phone `+{{input.from}}` and the name the person gave in their message. If they gave no name, use the phone number as the name \u2014 do not invent one.\n\nNever write more than once. And read this twice, because it is what makes this automation different from the one with a review step: **nobody is going to check your work.** This salon runs its WhatsApp unattended, so anything you call happens immediately, on the salon\'s real customer list. The record you create is the record they will have.',
+      bookPrompt: "A customer wrote to the salon on WhatsApp from the phone number {{input.from}} at {{input.received_at}}. This is what they said:\n\n\"{{input.text}}\"\n\nThe previous step already made sure the customer record exists, and reported: {{steps.know_the_customer.text}}\n\n**Everything you do here HAPPENS.** This salon runs its WhatsApp unattended: there is no approval tray, and nobody reads your work before the customer does. The moment you call `appointments.appointments.create` the appointment is in the diary, and what you write back is sent to the customer as it is.\n\n**First, work out what they are asking for.** Read their message and decide which of these it is:\n\n- **A new appointment** \u2014 a time, a service, \xABdo you have room tomorrow\xBB. Do BOOKING below.\n- **Cancelling one they already have** \u2014 \xABI can't make it\xBB, \xABcancel it\xBB, \xABsomething came up\xBB. Do CANCELLING below, and do NOT book anything. Somebody who asks to cancel and ends up with a second appointment is the worst thing this automation can do to a salon.\n- **Anything else** \u2014 a price, a question, a complaint, moving an appointment to another day (which this automation cannot do yet). Do NOTHING: answer in one line if you can, and otherwise say somebody from the salon will get back to them.\n\n# BOOKING\n\n\u{1F534} **You never choose the hour. They do.** You may only book a start the customer asked for themselves. If their message does not pin down BOTH a day and an hour, you book nothing this turn: you answer with the real free slots and ask them to reply with the service, the day and the hour. That is not politeness, it is the design \u2014 with nobody at the salon to catch it, a bot that picks the hour books people into times they cannot make, and the salon loses the chair and the customer both.\n\nThe availability tools you have here only answer questions: they change nothing, they run the moment you call them, and their answers come straight back to you. So ask them first, and act on what they told you.\n\n1. Read the catalogue with `services.services.list` and pick the service they are asking for. If the message is too vague to tell which one, book NOTHING: tell them so in one line and name the services that could fit, so they can pick.\n2. Work out how long it takes. If the service declares `duration_minutes`, use it AS IS \u2014 the salon decided it. If it is missing or zero, ESTIMATE it from what the service is: a cut is not a colour, and a colour is not a colour with highlights. Be honest, and be generous rather than exact; a booking that falls fifteen minutes short pushes the whole afternoon.\n3. Ask `appointments.availability.day_opening` when the salon is open on the date they want. It answers `spans` \u2014 minutes from that date's own midnight, with the breaks already carved out \u2014 and `source`. If `source` is `schedules` and `spans` is empty, THE SALON IS SHUT that day: book nothing, tell them so, offer the nearest day it is open, and stop. If `source` is `unset` the salon has no rule reaching that date, so nothing is being refused on those grounds and you must not filter by hours yourself.\n4. NEVER work the opening hours out on your own, from the message or from anywhere else \u2014 and the same goes for the free slots and for who is working. These operations resolve them exactly as the booking gate does \u2014 special day, yearly special day, override range, weekly hours, in that order \u2014 and a second opinion about when the salon opens is precisely how a booking that looked fine gets refused at the gate.\n5. Ask `appointments.availability.slots` for the real free slots on that date for that duration. If they named an hour, confirm THAT hour with `appointments.availability.check`, passing the professional you settled on. If `check` refuses it, do not slide to a different hour on their behalf: take its reason at face value \u2014 `outside_schedule` means the salon is shut then, `held` means another request has it set aside for a few minutes \u2014 and offer them the free slots around it instead.\n6. Use `staff.members.list` and `staff.schedules.list_for_member` to pick a professional who actually works at that hour, and confirm the slot for that person by passing their `staff_id`. Choosing WHO is yours to make; choosing WHEN is not.\n7. If the hour they asked for is not free, or they never named one, book NOTHING. Reply with two or three of the real free slots \u2014 day, hour and professional by name \u2014 and ask them to answer with the service, the day and the hour, spelling out an example: \xABcut, tomorrow at 10:30\xBB. Their next message is a fresh turn that starts from nothing, so it has to carry the service too \u2014 an answer of \xAB10:30\xBB on its own reaches you with no idea what it is for. If nothing at all is free that day, say so and offer the nearest day that has room.\n8. Resolve the customer with `customers.list`, filtering by `phone` = `+{{input.from}}`.\n9. Book it with `appointments.appointments.create`: the customer, the service, the professional, the start you confirmed and `duration_minutes`.\n\nAbout the duration, this matters: if you ESTIMATED it instead of reading it from the catalogue, say so in `internal_notes`, in words and with the number \u2014 for example \"Duration estimated by the assistant: 90 min; the catalogue declares none for this service.\" Nobody approves this booking, so `internal_notes` is where the salon finds out afterwards that the length was a guess and can fix it before the day comes. It is for staff only: the customer never reads it.\n\nPut in `notes` a one-line summary of what the customer asked for, in their own words.\n\nAsking what is free changes nothing. `appointments.appointments.create` is the one call that puts a real appointment in the salon's diary, and it does it immediately: there is no tray, no review, and no way back other than cancelling it.\n\n# CANCELLING\n\n1. Find them with `customers.list`, filtering by `phone` = `+{{input.from}}`. No record means no appointment: tell them there is nothing booked under that number and stop.\n2. List what they have with `appointments.appointments.list_for_customer`. It answers newest first and it includes the past and the already-cancelled ones, so take the SOONEST one still to come whose `status` is `pending` or `confirmed`. Anything `cancelled`, `completed` or `no_show` is history \u2014 it is not theirs to cancel.\n3. If nothing is still to come, tell them there is nothing booked and stop.\n4. If more than one is still to come and their message does not say which, cancel NOTHING: NAME them \u2014 day, hour and professional \u2014 and ask which one. Never guess: cancelling the wrong appointment costs the salon the chair AND the customer. Their answer comes back as a new message and their appointments are still there to be listed, so naming them again is all it takes.\n5. Cancel it with `appointments.appointments.cancel`: that `appointment_id`, a `reason` in their own words, and `channel` set to `customer`.\n\nThat `channel` is not decoration: it is what makes the salon's OWN rules apply \u2014 whether customers may cancel at all, and how much notice they owe. Citas decides that when the cancellation runs, with the settings of this business. Do not work it out yourself, do not tell them it is too late, and do not cancel \xABanyway\xBB: call it, and if the salon's rules refuse it, tell them exactly what the salon answered.\n\nNever cancel something you have not named to them first.\n\n**And now the part that reaches the customer.** Everything you write back is sent to them on WhatsApp, word for word, as soon as this turn ends \u2014 so write it TO them, not about them: their own language, one or two short lines, warm and plain.\n\n- If you booked, tell them what they have: the day, the hour and the professional BY NAME. Never an id, never a tool name, never \xABpending approval\xBB \u2014 by the time they read this, it happened.\n- If you cancelled, tell them it is cancelled, naming the appointment you cancelled so they can see it was the right one, and leave the door open to book again.\n- If you booked nothing because you need them to choose, give them the free slots and tell them exactly how to answer, with the example.\n- If you booked nothing for any other reason, tell them why in one line and offer the nearest alternative, so they can answer with it.\n- Never put in here the duration you estimated, what the catalogue did or did not declare, or anything else the salon needs to see. That goes in `internal_notes`, which only the salon reads.\n\nWrite it in the SAME reply in which you book: the turn ends when you stop and you will not be asked again, so a booking made with no words leaves them with nothing."
     }
   },
   guide: {

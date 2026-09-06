@@ -5,6 +5,7 @@ import '@erplora/outfitkit/ok-inline-feedback';
 import {
   SECTORS,
   availableTemplates,
+  flowsOnSameTrigger,
   buildTemplate,
   moduleName,
   templateById,
@@ -234,6 +235,13 @@ export class ErpFlowsGallery extends LitElement {
    */
   @state() private known: Record<string, boolean> = {};
 
+  /**
+   * The flows this hub already has, for the «you already have one on this event» warning
+   * (whatsapp_inbox#58). Empty until the hub answers, and empty FOREVER if it refuses: a gallery
+   * that cannot list flows still has to show its catalogue.
+   */
+  @state() private existing: { name: string; definition: Record<string, unknown> }[] = [];
+
   @state() private busy = false;
 
   @state() private error = '';
@@ -241,10 +249,37 @@ export class ErpFlowsGallery extends LitElement {
   connectedCallback(): void {
     super.connectedCallback();
     void this.probe();
+    void this.loadExisting();
   }
 
   updated(changed: Map<string, unknown>): void {
-    if (changed.has('client')) void this.probe();
+    if (changed.has('client')) {
+      void this.probe();
+      void this.loadExisting();
+    }
+  }
+
+  /**
+   * The hub's own flows, read once, only to warn about a trigger that is already taken.
+   *
+   * Swallowed on failure ON PURPOSE, and this is the whole of the error handling: the warning is a
+   * courtesy, the catalogue is the screen. A hub that cannot answer `flows.list()` — offline, a
+   * blip, an older core — must still show every card. What it must never do is turn a missing
+   * warning into an error message, because that reads as «the gallery is broken» for a feature the
+   * owner did not ask for.
+   */
+  private async loadExisting(): Promise<void> {
+    const client = this.client;
+    if (!client?.flows?.list) return;
+    try {
+      const flows = await client.flows.list();
+      this.existing = flows.map((flow) => ({
+        name: flow.name,
+        definition: (flow.definition ?? {}) as Record<string, unknown>,
+      }));
+    } catch {
+      // No answer, no warning. Never an error on the catalogue.
+    }
   }
 
   /**
@@ -344,6 +379,7 @@ export class ErpFlowsGallery extends LitElement {
         )}
       </div>
 
+      ${this.renderSameTrigger(template)}
       ${this.error
         ? html`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
             >${this.error}</ok-inline-feedback
@@ -362,6 +398,29 @@ export class ErpFlowsGallery extends LitElement {
         <span class="muted">${this.t('ui.tplCreatedPaused')}</span>
       </div>
     </div>`;
+  }
+
+  /**
+   * **«You already have one of these»** (whatsapp_inbox#58).
+   *
+   * Two flows on one event both fire. For most pairs that is wanted; for the two WhatsApp
+   * appointment families it books every message twice and sends the customer two confirmations.
+   * The owner is the one who can tell those apart, so this NAMES the flow already waiting on that
+   * event and leaves the button alone — warn, do not refuse, which is what Zapier does with a
+   * duplicate Zap. It sits immediately above the button, because a warning further up the panel is
+   * a warning nobody reads.
+   */
+  private renderSameTrigger(template: FlowTemplate) {
+    const clashing = flowsOnSameTrigger(template, this.t, this.existing);
+    if (!clashing.length) return nothing;
+    return html`<ok-inline-feedback
+      tone="warning"
+      icon="alert-circle-outline"
+      data-same-trigger
+      >${this.t(clashing.length === 1 ? 'ui.tplSameTrigger' : 'ui.tplSameTriggerMany', {
+        flows: clashing.join(', '),
+      })}</ok-inline-feedback
+    >`;
   }
 
   private renderCard(template: FlowTemplate) {

@@ -544,6 +544,161 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     }),
   },
 
+  /**
+   * **The same automation, with nobody watching** (whatsapp_inbox#58).
+   *
+   * The twin above proposes and waits: both model steps are `manual`, so every appointment sits in
+   * the approval tray until somebody at the salon says yes. That is right for a shop with a person
+   * at the counter and wrong for the one this card is for — a single hairdresser with both hands
+   * busy, whose WhatsApp nobody reads until closing. For them the tray is not a safety net, it is
+   * where appointments go to expire.
+   *
+   * So the two model steps are `auto`: the hub runs the write inside the turn
+   * (`agent_runner.rs`), the appointment is in the diary before anyone reads the message, and the
+   * customer is told so in the same breath. `approval_mode` in the module's own settings does NOT
+   * do this — a request born `confirmed` can never be approved and nothing books it — which is why
+   * the unattended mode is a second FAMILY and not a switch.
+   *
+   * **What does not change, and is the whole reason this is safe enough to ship:** the model never
+   * chooses the hour. It may only book a start the customer asked for; if the message does not pin
+   * down both a day and an hour it books nothing and answers with the slots that are really free.
+   * With no person to catch it, a bot that picks the hour books people into times they cannot make.
+   * That rule lives in the prompt — the kernel cannot tell «the hour they asked for» from «the hour
+   * I chose» — and `whatsapp_inbox/tests/flow_templates.test.py::hour_choice_problems` is what
+   * keeps it there, in both languages.
+   *
+   * **Install ONE of the two, never both.** They wait on the same event with the same filter, so a
+   * hub with both books every incoming message twice. Neither the name nor the summary leaves that
+   * to a README: the gallery says it on the card, and warns before it creates the second one.
+   */
+  {
+    id: 'whatsapp-appointment-unattended',
+    sector: 'beauty',
+    // A calendar with a tick, against the twin's numbered calendar: this one is already booked.
+    icon: 'calendar-clear-outline',
+    nameKey: 'tpl.waAppointmentUnattended.name',
+    summaryKey: 'tpl.waAppointmentUnattended.summary',
+    plainKey: 'tpl.waAppointmentUnattended.plain',
+    blanks: [
+      {
+        labelKey: 'tpl.waAppointmentUnattended.blankReply',
+        hintKey: 'tpl.waAppointmentUnattended.blankReplyHint',
+      },
+    ],
+    // The same five modules as the twin: it reads the catalogue, the diary, who works when and the
+    // customer's card, and answers through the conversation.
+    witnesses: [
+      { event: 'whatsapp_inbox.message.received', module: 'whatsapp_inbox' },
+      { event: 'appointments.appointment.created', module: 'appointments' },
+      { event: 'customer.created', module: 'customers' },
+      { event: 'services.service.created', module: 'services' },
+      { event: 'staff.member.created', module: 'staff' },
+    ],
+    // The same thirteen, and deliberately not one more: running unattended is a reason to skip the
+    // tray, never a reason to ask for a permission the attended twin does without.
+    grantReasons: {
+      whatsapp: 'tpl.grant.notifyWhatsapp',
+      'whatsapp_inbox.conversations.list#contact_phone': 'tpl.grant.recipientWhatsapp',
+      'customers.list': 'tpl.grant.customersList',
+      'customers.create': 'tpl.grant.customersCreate',
+      'services.services.list': 'tpl.grant.servicesList',
+      'staff.members.list': 'tpl.grant.staffList',
+      'staff.schedules.list_for_member': 'tpl.grant.staffSchedules',
+      'appointments.availability.day_opening': 'tpl.grant.dayOpening',
+      'appointments.availability.slots': 'tpl.grant.availabilitySlots',
+      'appointments.availability.check': 'tpl.grant.availabilityCheck',
+      'appointments.appointments.create': 'tpl.grant.appointmentsCreate',
+      'appointments.appointments.list_for_customer': 'tpl.grant.appointmentsListForCustomer',
+      'appointments.appointments.cancel': 'tpl.grant.appointmentsCancel',
+    },
+    build: (t) => ({
+      schema_version: SCHEMA_VERSION,
+      triggers: [
+        {
+          kind: 'event',
+          // Same event and same filter as the twin — which is exactly why a hub must not run both.
+          event: 'hub.whatsapp.message_received',
+          filter: { 'event.text': { neq: '' } },
+          input: {
+            from: 'event.from',
+            text: 'event.text',
+            wa_message_id: 'event.wa_message_id',
+            received_at: 'event.received_at',
+          },
+        },
+      ],
+      steps: [
+        // Answered in seconds, and here it is the only thing that happens before the diary is
+        // touched. Its wording promises no person: with this family there is not one.
+        {
+          id: 'acknowledge',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: {
+            query: 'whatsapp_inbox.conversations.list',
+            params: { f_wa_contact_id: 'input.from' },
+            field: 'contact_phone',
+          },
+          template: '',
+          vars: { text: t('tpl.waAppointmentUnattended.ackText') },
+        },
+        // `auto`: the customer card is created inside the turn, on the salon's real customer list.
+        // The prompt says so in as many words — nobody checks this afterwards.
+        {
+          id: 'know_the_customer',
+          kind: 'ai',
+          prompt: t('tpl.waAppointmentUnattended.knowPrompt'),
+          tools: { queries: ['customers.list'], commands: ['customers.create'] },
+          policy: 'auto',
+          max_iters: 4,
+        },
+        // `auto`, and this is the step the whole family exists for: it books. Named
+        // `book_appointment` and not `propose_appointment` because that is what it does — there is
+        // no proposal and no tray. Same tools and same budget as the twin (the cap: booking chains
+        // up to nine calls), same «decide first what they are asking for» branch that cancels
+        // instead of booking when that is what the message says.
+        {
+          id: 'book_appointment',
+          kind: 'ai',
+          prompt: t('tpl.waAppointmentUnattended.bookPrompt'),
+          tools: {
+            queries: [
+              'customers.list',
+              'services.services.list',
+              'staff.members.list',
+              'staff.schedules.list_for_member',
+              'appointments.appointments.list_for_customer',
+            ],
+            commands: [
+              'appointments.availability.day_opening',
+              'appointments.availability.slots',
+              'appointments.availability.check',
+              'appointments.appointments.create',
+              'appointments.appointments.cancel',
+            ],
+          },
+          policy: 'auto',
+          max_iters: 10,
+        },
+        // What the booking step wrote, sent as it is. With no approval in the middle this is the
+        // customer's ONLY notice that the appointment exists, which is why the prompt ends by
+        // demanding the words come in the same reply as the booking.
+        {
+          id: 'confirm_to_customer',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: {
+            query: 'whatsapp_inbox.conversations.list',
+            params: { f_wa_contact_id: 'input.from' },
+            field: 'contact_phone',
+          },
+          template: '',
+          vars: { text: '{{steps.book_appointment.text}}' },
+        },
+      ],
+    }),
+  },
+
   // ── Bars and restaurants ────────────────────────────────────────────────────────────────────
   {
     id: 'big-party-reservation',
@@ -576,6 +731,54 @@ export const TEMPLATES: readonly FlowTemplate[] = [
 ];
 
 /** The template with this id, or `undefined` — an unknown id is a stale link, not a crash. */
+/**
+ * The event a card's trigger waits on, or `null` for a card that does not start on an event.
+ *
+ * Read from the built document rather than declared on the card: the document is what the hub
+ * stores and what actually fires, so a card whose `build()` changed its trigger cannot go on
+ * claiming the old one.
+ */
+export function templateTriggerEvent(template: FlowTemplate, t: Translator): string | null {
+  const trigger = template.build(t).triggers[0];
+  return trigger?.kind === 'event' && typeof trigger.event === 'string' ? trigger.event : null;
+}
+
+/** The events a stored flow waits on — whatever the hub happens to have in `definition`. */
+function triggerEventsOf(definition: Record<string, unknown>): string[] {
+  const triggers = definition?.triggers;
+  if (!Array.isArray(triggers)) return [];
+  return triggers
+    .map((trigger) => (trigger as { event?: unknown } | null)?.event)
+    .filter((event): event is string => typeof event === 'string');
+}
+
+/**
+ * **The flows this hub already runs on the same event as `template`, by name** (whatsapp_inbox#58).
+ *
+ * Two automations on one event both fire. For most pairs that is fine and wanted — log every
+ * message AND act on it. For the two WhatsApp appointment families it is not: they wait on the same
+ * event with the same filter, so a hub running both books every incoming message TWICE, sends two
+ * confirmations, and leaves a customer to cancel one of them.
+ *
+ * The gallery uses this to ASK before it creates the second one, naming the flow already there. It
+ * does not refuse — it is the owner's hub, and «two flows on one event» is a legitimate thing to
+ * build. Warn-and-name is what Zapier does for a duplicate Zap and Power Automate for a duplicate
+ * flow; a hard block would be us deciding for them.
+ *
+ * Matched on the EVENT and not on the document: an owner who renamed the flow and reworded its
+ * prompts still has an automation firing on every message, and that is the one most likely to have
+ * been running longest.
+ */
+export function flowsOnSameTrigger(
+  template: FlowTemplate,
+  t: Translator,
+  flows: readonly { name: string; definition: Record<string, unknown> }[],
+): string[] {
+  const event = templateTriggerEvent(template, t);
+  if (!event) return [];
+  return flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).includes(event)).map((flow) => flow.name);
+}
+
 export function templateById(id: string): FlowTemplate | undefined {
   return TEMPLATES.find((tpl) => tpl.id === id);
 }

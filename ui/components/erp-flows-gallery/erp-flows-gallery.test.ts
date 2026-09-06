@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
 import { ErpFlowsGallery } from './erp-flows-gallery';
 import { ErpFlowsApp } from '../erp-flows-app/erp-flows-app';
-import { TEMPLATES, templateById } from '../../lib/templates';
+import { TEMPLATES, templateById, buildTemplate } from '../../lib/templates';
 import en from '../../../locales/en.json';
 
 /** The shell's translator, reduced to the lookup a test needs, `{param}` included. */
@@ -328,5 +328,92 @@ describe('the gallery says WHICH modules the hidden cards needed (flows#38 · fl
   it('says nothing at all when this hub can run everything', async () => {
     const el = await mount(hub());
     expect(note(el)).toBeNull();
+  });
+});
+
+/**
+ * **Before it creates the second automation on one event** (whatsapp_inbox#58).
+ *
+ * The two WhatsApp appointment families wait on the same event with the same filter: a hub running
+ * both books every incoming message twice and sends two confirmations. The owner is the only one
+ * who can decide that — so the gallery says it, names the flow already there, and lets them
+ * through. It does not refuse: two flows on one event is a normal thing to build.
+ */
+describe('a card that would double up on a trigger says so first (whatsapp_inbox#58)', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  /** The attended twin, as the hub would hand it back from `flows.list()`. */
+  const attendedFlow = () => ({
+    id: 'f1',
+    name: 'WhatsApp → appointment proposal',
+    enabled: true,
+    definition: buildTemplate(templateById('whatsapp-appointment')!, t) as unknown as Record<string, unknown>,
+  });
+  const warning = (el: ErpFlowsGallery): Element | null =>
+    el.renderRoot.querySelector('[data-same-trigger]');
+
+  it('names the flow already waiting on that event, in the panel, before the button', async () => {
+    const client = hub({ flows: { list: vi.fn(async () => [attendedFlow()]) } });
+    const el = await mount(client);
+    el.open('whatsapp-appointment-unattended');
+    await el.updateComplete;
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    await el.updateComplete;
+
+    const note = warning(el);
+    expect(note, 'no warning shown for a card that collides').toBeTruthy();
+    expect(note?.textContent).toContain('WhatsApp → appointment proposal');
+  });
+
+  it('still lets them create it — it is their hub', async () => {
+    const client = hub({ flows: { list: vi.fn(async () => [attendedFlow()]) } });
+    const el = await mount(client);
+    el.open('whatsapp-appointment-unattended');
+    await el.updateComplete;
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    await el.updateComplete;
+    await el.use();
+
+    expect(client.flows.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('says nothing when no flow waits on that event', async () => {
+    // The control: with the warning wired to «is there any flow at all» this passes green while
+    // warning about everything, so it has to be a hub that HAS flows, just not on this event.
+    const other = {
+      id: 'f9',
+      name: 'Friday review',
+      enabled: true,
+      definition: { schema_version: 1, triggers: [{ kind: 'cron', cron: '0 9 * * 5' }], steps: [] },
+    };
+    const el = await mount(hub({ flows: { list: vi.fn(async () => [other]) } }));
+    el.open('whatsapp-appointment-unattended');
+    await el.updateComplete;
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    await el.updateComplete;
+
+    expect(warning(el)).toBeNull();
+  });
+
+  it('shows the gallery anyway when the hub cannot list flows', async () => {
+    // `list` is part of the frozen §9 method list, but a hub that refuses it — offline, a blip,
+    // an older core — must not cost the owner the catalogue. No answer means no warning, never an
+    // error screen.
+    const client = hub({
+      flows: {
+        list: vi.fn(async () => {
+          throw new Error('nope');
+        }),
+      },
+    });
+    const el = await mount(client);
+    el.open('whatsapp-appointment-unattended');
+    await el.updateComplete;
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    await el.updateComplete;
+
+    expect(warning(el)).toBeNull();
+    expect(card(el, 'whatsapp-appointment-unattended')).toBeTruthy();
+    expect(el.renderRoot.querySelector('ok-inline-feedback[tone="danger"]')).toBeNull();
   });
 });
