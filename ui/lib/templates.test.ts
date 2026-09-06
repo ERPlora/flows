@@ -377,7 +377,7 @@ describe('the everyday automations of flows#18', () => {
  * Automations found «somebody writes on WhatsApp → make a task» and nothing else.
  *
  * The card below is that document, in this catalogue, so it can be picked. What it is NOT is a
- * second design: the trigger, the three steps and the eleven permissions are pinned here against
+ * second design: the trigger, the four steps and the eleven permissions are pinned here against
  * the ones the module publishes — by COMMIT, and by a hash of the whole document in both
  * languages — so the two cannot quietly say different things.
  */
@@ -399,16 +399,18 @@ describe('the everyday automations of flows#18', () => {
  */
 const SOURCE = {
   module: 'whatsapp_inbox',
-  // whatsapp_inbox PR #63 (issue #55): the two model steps became one, `conflicting` fell out.
-  commit: '6a6399eba28e8ea0e13487b8e1bc0226f7d8d3c6',
+  // whatsapp_inbox PR #69 (first half of #58): `confirm_to_customer` writes the proposal back to
+  // the customer, and the proposing prompt ends with «what you write reaches them». Before it,
+  // PR #63 (#55) had made the two model steps one and dropped `conflicting`.
+  commit: '89f8d02ca9a7a0bfc13804c3042bc896bc9f8417',
   files: {
     en: 'flows/appointment-from-whatsapp.en.flow.json',
     es: 'flows/appointment-from-whatsapp.es.flow.json',
     grants: 'flows/appointment-from-whatsapp.grants.json',
   },
   digest: {
-    en: 'a19f3bd2959ef13ba10544acc708d2b4f1f782e76cfbb3367a8fadb12c88476d',
-    es: 'e11dc6cd787fcd8002ae9b4cf8606a5853327fe72a4d8ac09c48078c4ffcf8c7',
+    en: '9a4eeffa3230974387a3c6253e0553d3c55171cb15dbae0ca9c0e8418ed717a3',
+    es: '3abcd324c70f6b77af478800b4da42790dba12d021afab306b38686c5098d2f1',
   },
 } as const;
 
@@ -433,10 +435,13 @@ function digest(doc: FlowDoc | Record<string, unknown>): string {
 }
 
 /**
- * The `whatsapp_inbox` checkout beside this module, if the workspace has one at or past
- * {@link SOURCE.commit}. The canonical checkout (the directory named as the module) is preferred
- * over the fleet's worktrees; a checkout OLDER than the pin is not a source to judge by — it would
- * report a drift that is its own — and neither is a directory that is not a git checkout at all.
+ * The `whatsapp_inbox` checkout beside this module to judge the mirror by: of every checkout in
+ * the workspace at or past {@link SOURCE.commit} — the canonical one and the fleet's worktrees
+ * alike — the one whose HEAD is NEWEST. A worktree where somebody is already moving the document
+ * (whatsapp_inbox#58's second half, #61) is exactly the one that should be heard, and it is newer
+ * than a canonical checkout that merely reached the pin. A checkout OLDER than the pin is not a
+ * source to judge by — it would report a drift that is its own — and neither is a directory that
+ * is not a git checkout at all. Ties go to the canonical checkout.
  */
 function sourceCheckout(): string | null {
   const modules = resolve(__dirname, '../../..');
@@ -449,6 +454,7 @@ function sourceCheckout(): string | null {
   const candidates = entries
     .filter((d) => d === SOURCE.module || d.startsWith(`${SOURCE.module}-`))
     .sort((a, b) => (a === SOURCE.module ? -1 : b === SOURCE.module ? 1 : a.localeCompare(b)));
+  let best: { dir: string; at: number } | null = null;
   for (const entry of candidates) {
     const dir = join(modules, entry);
     try {
@@ -457,12 +463,17 @@ function sourceCheckout(): string | null {
       execFileSync('git', ['-C', dir, 'merge-base', '--is-ancestor', SOURCE.commit, 'HEAD'], {
         stdio: 'ignore',
       });
-      return dir;
+      const at = Number(
+        execFileSync('git', ['-C', dir, 'log', '-1', '--format=%ct', 'HEAD'], { stdio: ['ignore', 'pipe', 'ignore'] })
+          .toString()
+          .trim(),
+      );
+      if (!best || at > best.at) best = { dir, at };
     } catch {
       // No manifest, no template, or a checkout older than the pin: keep looking.
     }
   }
-  return null;
+  return best?.dir ?? null;
 }
 describe('WhatsApp → appointment, the card the WhatsApp module has always shipped (flows#52)', () => {
   const template = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment');
@@ -489,19 +500,35 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
     });
   });
 
-  it('acknowledges first, knows the customer, then finds the slot AND proposes in ONE turn', () => {
+  it('acknowledges, knows the customer, finds the slot AND proposes in ONE turn, then tells them', () => {
     const steps = buildTemplate(template!, t).steps;
-    // Three steps, not four. The published document used to split «find what is free» (a step that
-    // only asked, `auto`) from «propose» (a step that wrote from the report): the workaround for a
-    // hub that refused a read inside a `manual` step. hub#1595 made that read legal and
-    // whatsapp_inbox#55 collapsed the two — one turn asks the availability tools and proposes.
+    // «Find what is free» and «propose» are ONE model step: they used to be two (a step that only
+    // asked, `auto`, and one that wrote from its report), the workaround for a hub that refused a
+    // read inside a `manual` step — hub#1595 made the read legal and whatsapp_inbox#55 collapsed
+    // them. The fourth step is whatsapp_inbox#58's first half: once the booking goes through, the
+    // customer hears about it, on WhatsApp, in the words the model wrote for them.
     expect(steps.map((s) => [s.id, s.kind])).toEqual([
       ['acknowledge', 'notify'],
       ['know_the_customer', 'ai'],
       ['propose_appointment', 'ai'],
+      ['confirm_to_customer', 'notify'],
     ]);
     // Both model steps WRITE (a customer card, a booking), so both wait for a person.
-    expect(steps.map((s) => s.policy)).toEqual([undefined, 'manual', 'manual']);
+    expect(steps.map((s) => s.policy)).toEqual([undefined, 'manual', 'manual', undefined]);
+  });
+
+  it('confirms to the customer with the proposing step’s own words, through the same conversation', () => {
+    const steps = buildTemplate(template!, t).steps;
+    const confirm = steps.find((s) => s.id === 'confirm_to_customer');
+    // The text is the model's reply from the step that booked — which is why that step's prompt
+    // ends with «everything you write back is sent to them, word for word». Not a template of ours,
+    // not a second model call: the salon pays for one WhatsApp, and the customer reads what the
+    // assistant decided, after a person approved it.
+    expect(confirm?.vars?.text).toBe('{{steps.propose_appointment.text}}');
+    // Same recipient resolution as the acknowledgement: the conversation, never a typed number —
+    // so the two notifies cost ONE recipient grant and ONE channel grant, not two of each.
+    expect(confirm?.channel).toBe('whatsapp');
+    expect(confirm?.to).toEqual(steps[0].to);
   });
 
   it('gives the proposing step the whole budget the hub allows, and not one iteration more', () => {

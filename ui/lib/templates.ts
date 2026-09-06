@@ -390,7 +390,8 @@ export const TEMPLATES: readonly FlowTemplate[] = [
    * salon that connected its number and opened Automations found «make a task» and nothing else.
    *
    * ⚠️ **It is a MIRROR, and mirrors go stale.** The document below is
-   * `whatsapp_inbox@6a6399e` (PR #63, the one-turn rewrite of whatsapp_inbox#55), copied because
+   * `whatsapp_inbox@89f8d02` (PR #69, the first half of whatsapp_inbox#58, on top of PR #63's
+   * one-turn rewrite of #55), copied because
    * the two repositories cannot read each other and the hub has no route that serves a module's
    * own templates (the manifest has no `flows` key and `erplora pack` does not put the folder in
    * the zip — hub#1611 and module-toolkit#209). Retiring this copy — the runtime serving each
@@ -399,7 +400,8 @@ export const TEMPLATES: readonly FlowTemplate[] = [
    * template change: v2.1.31 named both the old and the new document) and by a hash of the whole
    * document in both languages, so it cannot word a prompt differently, ask for a different
    * permission, or drift one iteration without going red. The commit is the thing to move when
-   * whatsapp_inbox#58 and #61 rewrite it again.
+   * whatsapp_inbox#58's second half and #61 rewrite it again — and they will: the template moves
+   * every time the flow does. It went stale TWICE on the day it was written.
    *
    * **Why it needs five modules.** It reads the catalogue (`services`), the diary
    * (`appointments`), who works when (`staff`), the customer's card (`customers`), and it answers
@@ -508,6 +510,23 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           },
           policy: 'manual',
           max_iters: 10,
+        },
+        // whatsapp_inbox#58, first half: once the booking goes through, the customer hears about
+        // it — on WhatsApp, in the words the proposing step wrote FOR them (its prompt ends with
+        // «everything you write back is sent to them, word for word»). Same recipient resolution
+        // as the acknowledgement, so the two notifies cost one channel grant and one recipient
+        // grant, not two of each. Not a text of ours to translate: it is the model's reply.
+        {
+          id: 'confirm_to_customer',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: {
+            query: 'whatsapp_inbox.conversations.list',
+            params: { f_wa_contact_id: 'input.from' },
+            field: 'contact_phone',
+          },
+          template: '',
+          vars: { text: '{{steps.propose_appointment.text}}' },
         },
       ],
     }),
