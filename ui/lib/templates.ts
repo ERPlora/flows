@@ -438,6 +438,8 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       'appointments.availability.slots': 'tpl.grant.availabilitySlots',
       'appointments.availability.check': 'tpl.grant.availabilityCheck',
       'appointments.appointments.create': 'tpl.grant.appointmentsCreate',
+      'appointments.appointments.list_for_customer': 'tpl.grant.appointmentsListForCustomer',
+      'appointments.appointments.cancel': 'tpl.grant.appointmentsCancel',
     },
     build: (t) => ({
       schema_version: SCHEMA_VERSION,
@@ -484,12 +486,20 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           policy: 'manual',
           max_iters: 4,
         },
-        // `manual` again, and this is the one that matters: the booking itself waits in the tray
+        // `manual` again, and this is the one that matters: what it proposes waits in the tray
         // until somebody at the salon says yes. ONE turn asks the diary and proposes — the
         // availability operations only answer, and a `manual` step may read since hub#1595
-        // (whatsapp_inbox#55 collapsed the former «gather, then propose» pair). `max_iters` sits
-        // at the kernel's cap on purpose: the prompt chains up to nine tool calls, the hub refuses
-        // a document above the cap, so there is no margin here — a tool more means a step more.
+        // (whatsapp_inbox#55 collapsed the former «gather, then propose» pair).
+        //
+        // It also CANCELS (whatsapp_inbox#61): the prompt decides first what the message is asking
+        // for, and books or cancels. Two steps would have cost either an extra billed model turn
+        // or a second flow routed by keyword — and `Op::Contains` is case-sensitive, ANDed and
+        // unnegatable, so «Cancela mi cita» would miss while the booking flow fired anyway. The
+        // branches EXCLUDE each other, so the budget below is untouched: booking chains up to nine
+        // calls, cancelling three.
+        //
+        // `max_iters` sits at the kernel's cap on purpose: the hub refuses a document above it, so
+        // there is no margin — whoever lengthens the BOOKING chain adds a step instead.
         {
           id: 'propose_appointment',
           kind: 'ai',
@@ -500,12 +510,14 @@ export const TEMPLATES: readonly FlowTemplate[] = [
               'services.services.list',
               'staff.members.list',
               'staff.schedules.list_for_member',
+              'appointments.appointments.list_for_customer',
             ],
             commands: [
               'appointments.availability.day_opening',
               'appointments.availability.slots',
               'appointments.availability.check',
               'appointments.appointments.create',
+              'appointments.appointments.cancel',
             ],
           },
           policy: 'manual',

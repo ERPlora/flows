@@ -404,18 +404,18 @@ describe('the everyday automations of flows#18', () => {
  */
 const SOURCE = {
   module: 'whatsapp_inbox',
-  // whatsapp_inbox PR #69 (first half of #58): `confirm_to_customer` writes the proposal back to
-  // the customer, and the proposing prompt ends with «what you write reaches them». Before it,
-  // PR #63 (#55) had made the two model steps one and dropped `conflicting`.
-  commit: '89f8d02ca9a7a0bfc13804c3042bc896bc9f8417',
+  // whatsapp_inbox PR #75 (#61): the proposing step decides FIRST what the message is asking for
+  // and can now CANCEL as well as book — two tools and two grants more. Before it, PR #69 (first
+  // half of #58) added `confirm_to_customer`, and PR #63 (#55) made the two model steps one.
+  commit: 'f50a2f2850b0e69fbd04755a682bb039191d0772',
   files: {
     en: 'flows/appointment-from-whatsapp.en.flow.json',
     es: 'flows/appointment-from-whatsapp.es.flow.json',
     grants: 'flows/appointment-from-whatsapp.grants.json',
   },
   digest: {
-    en: '9a4eeffa3230974387a3c6253e0553d3c55171cb15dbae0ca9c0e8418ed717a3',
-    es: '3abcd324c70f6b77af478800b4da42790dba12d021afab306b38686c5098d2f1',
+    en: 'aaf15be0a201432c680ca7a21de4971219dc5ea5909b49558ca182388943748e',
+    es: '96289feba45cd0c323db1722d13b27d7454efa478006ae724a63453631e08aa6',
   },
 } as const;
 
@@ -565,23 +565,27 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
    * where it is caught — and a grant is the difference between an automation that books and one
    * that writes to a customer without being allowed to.
    *
-   * Eleven, not twelve: `appointments.appointments.conflicting` fell out with whatsapp_inbox#55.
-   * `availability.check` already refuses an overlap with the booking gate's own authority, and the
-   * reads it does on the way run as the SYSTEM (`preload_reads`), which no grant governs.
+   * Thirteen: eleven, plus the two whatsapp_inbox#61 needs to CANCEL — reading what a customer
+   * already has, and cancelling it. (It was twelve before whatsapp_inbox#55 dropped
+   * `appointments.appointments.conflicting`: `availability.check` already refuses an overlap with
+   * the booking gate's own authority, and the reads it does on the way run as the SYSTEM
+   * (`preload_reads`), which no grant governs.)
    */
-  it('asks for the eleven permissions the module’s own grants file lists, and no twelfth', () => {
+  it('asks for the thirteen permissions the module’s own grants file lists, and no fourteenth', () => {
     expect(
       templateGrants(template!, t)
         .map((g) => `${g.kind} ${g.value}`)
         .sort(),
     ).toEqual(
       [
+        'command appointments.appointments.cancel',
         'command appointments.appointments.create',
         'command appointments.availability.check',
         'command appointments.availability.day_opening',
         'command appointments.availability.slots',
         'command customers.create',
         'notify whatsapp',
+        'query appointments.appointments.list_for_customer',
         'query customers.list',
         'query services.services.list',
         'query staff.members.list',
