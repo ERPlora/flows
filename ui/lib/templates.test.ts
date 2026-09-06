@@ -394,8 +394,13 @@ describe('the everyday automations of flows#18', () => {
  *
  *     git -C ../whatsapp_inbox show <commit>:flows/appointment-from-whatsapp.en.flow.json \
  *       | node -e 'const s=v=>Array.isArray(v)?v.map(s):v&&typeof v==="object"?Object.fromEntries(Object.keys(v).sort().map(k=>[k,s(v[k])])):v;
- *         const {name,...d}=JSON.parse(require("fs").readFileSync(0,"utf8"));
- *         console.log(require("crypto").createHash("sha256").update(JSON.stringify(s(d))).digest("hex"))'
+ *         const {name,...d}=JSON.parse(require("node:fs").readFileSync(0,"utf8"));
+ *         console.log(require("node:crypto").createHash("sha256").update(JSON.stringify(s(d))).digest("hex"))'
+ *
+ * (`node:` on purpose, and not only for style: `erplora test` reads every bare name handed to
+ * `require` under `ui/` — comments included — as a package the module needs, and the plain
+ * `fs` / `crypto` forms in this very comment had the gate declare all 27 TypeScript tests
+ * unrunnable. The `node:` form is skipped by that scanner.)
  */
 const SOURCE = {
   module: 'whatsapp_inbox',
