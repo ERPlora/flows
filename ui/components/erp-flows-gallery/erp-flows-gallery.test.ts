@@ -82,18 +82,23 @@ describe('a template this hub cannot run', () => {
   // The gallery asks the hub about one declared event per module a template needs. A `404` is the
   // hub saying it has never heard of it — which happens for exactly one reason: the module that
   // emits it is not installed here.
-  it('is offered with the reason and cannot be used', async () => {
+  //
+  // It used to be shown greyed out (flows#38). flows#52 hides it instead: the catalogue now
+  // carries cards for modules a business will never own — the WhatsApp card needs Appointments,
+  // Services and Staff, and whatsapp_inbox#60 adds a table-booking twin for Reservations — so a
+  // salon was being offered a restaurant's automation with a badge on it. What flows#38 was
+  // protecting (the owner learning WHICH app, by name, and that a reload is what brings it to
+  // life) is the sentence below the cards now, once instead of on every grey card.
+  it('is not offered at all', async () => {
     const el = await mount(
       hub({ events: { shape: vi.fn(async (name: string) => (name.startsWith('tasks.') ? notFound() : { event_name: name, declared_by: ['x'], samples: 0, fields: [] })) } }),
     );
-    const target = card(el, 'no-show-followup');
-    expect(target?.getAttribute('data-missing')).toBe('tasks');
-    // Offered, not hidden: «you need the Tasks module» is a thing the owner can act on; a card
-    // that silently is not there is not.
-    expect(target).toBeTruthy();
+    expect(card(el, 'no-show-followup')).toBeNull();
+    // The control: the cards this hub CAN run are still there, so «hidden» is not «broken».
+    expect(card(el, 'whatsapp-appointment')).toBeTruthy();
   });
 
-  it('does not grey anything out while the hub has not answered yet', async () => {
+  it('does not hide anything while the hub has not answered yet', async () => {
     let release: (() => void) | undefined;
     const pending = new Promise<never>((resolve) => {
       release = resolve as () => void;
@@ -103,7 +108,10 @@ describe('a template this hub cannot run', () => {
     el.t = t;
     document.body.appendChild(el);
     await el.updateComplete;
-    expect(el.renderRoot.querySelector('[data-missing]')).toBeNull();
+    // Every card of the catalogue, and no «you are missing something» line: an unanswered probe
+    // is not a refusal, and a gallery that empties itself and fills back in reads as broken.
+    expect(el.renderRoot.querySelectorAll('[data-template]').length).toBe(TEMPLATES.length);
+    expect(el.renderRoot.querySelector('[data-missing-modules]')).toBeNull();
     release?.();
   });
 });
@@ -262,13 +270,16 @@ describe('the gallery takes the width it is given (flows#40)', () => {
 });
 
 /**
- * **«Falta un módulo» is not an answer** (flows#38).
+ * **«Falta un módulo» is not an answer** (flows#38, kept through flows#52).
  *
  * On a hub built from the Restaurant template — seventeen apps, no `tasks` — the whole gallery
  * came out grey with the same label on every card, naming nothing. The module id the witnesses
  * compute (`tasks`) was known all along; it was the label that threw it away.
+ *
+ * flows#52 removed the grey cards, so what these guard now is the line that replaced them: the
+ * names are still said, still readable, still with the reload — once, instead of nine times.
  */
-describe('a template this hub cannot run says WHICH module it is missing (flows#38)', () => {
+describe('the gallery says WHICH modules the hidden cards needed (flows#38 · flows#52)', () => {
   beforeEach(() => document.body.replaceChildren());
 
   /** A hub that has never heard of the events of the given modules (their apps are not installed). */
@@ -283,36 +294,39 @@ describe('a template this hub cannot run says WHICH module it is missing (flows#
       },
     });
 
-  it('carries the readable module name on the grey card, not just «Needs a module»', async () => {
+  const note = (el: ErpFlowsGallery): Element | null =>
+    el.renderRoot.querySelector('[data-missing-modules]');
+
+  it('carries the readable module name, not the id the witnesses compute', async () => {
     const el = await mount(hubWithout('tasks'));
-    const pill = card(el, 'no-show-followup')?.querySelector('ok-status-pill');
-    expect(pill?.getAttribute('label')).toContain(t('ui.mod_tasks'));
-    expect(pill?.getAttribute('label')).not.toBe(t('ui.tplUnavailable'));
+    expect(note(el)?.textContent).toContain(t('ui.mod_tasks'));
+    // «Tasks», never «tasks»: the name on the marketplace card is the one the owner can act on.
+    expect(note(el)?.textContent).not.toContain(' tasks');
   });
 
-  it('lists every missing module when there is more than one', async () => {
-    // `no-show-followup` needs Appointments for its trigger and Tasks for its action: a hub with
-    // neither has to hear about both, or the owner installs one and the card stays grey.
+  it('lists every missing module when there is more than one, in the plural sentence', async () => {
+    // A hub with neither Appointments nor Tasks has to hear about both, or the owner installs one
+    // and nothing comes back.
     const el = await mount(hubWithout('appointments', 'tasks'));
-    const label = card(el, 'no-show-followup')?.querySelector('ok-status-pill')?.getAttribute('label');
-    expect(label).toContain(t('ui.mod_appointments'));
-    expect(label).toContain(t('ui.mod_tasks'));
+    const said = note(el)?.textContent ?? '';
+    expect(said).toContain(t('ui.mod_appointments'));
+    expect(said).toContain(t('ui.mod_tasks'));
+    expect(said).toBe(
+      t('ui.tplHiddenModules', {
+        modules: `${t('ui.mod_appointments')}, ${t('ui.mod_tasks')}`,
+      }),
+    );
   });
 
-  it('says it by name when the card is open, and that the screen needs a reload after installing', async () => {
-    // The panel is where the sentence fits; the card carries the badge. Installing happens in the
-    // marketplace, out of this screen's hands — what this screen owes the owner is the name and
-    // the fact that a reload brings the cards to life.
+  it('says a reload is what brings the cards to life, because installing happens elsewhere', async () => {
     const el = await mount(hubWithout('tasks'));
-    el.open('no-show-followup');
-    await el.updateComplete;
-    // The warning carries the whole sentence — name and reload included: installing happens in the
-    // marketplace, and this screen owes the owner the fact that a reload is what brings the cards
-    // to life. (The permissions block below it shows `tasks.tasks.create` on purpose: a grant is
-    // named by its command. The missing-module sentence is the one that must speak in names.)
-    const warning = el.renderRoot.querySelector('#panel-no-show-followup ok-inline-feedback');
-    expect(warning?.textContent).toContain(t('ui.mod_tasks'));
-    expect(warning?.textContent).not.toContain(' tasks,');
-    expect(warning?.textContent).toContain(t('ui.tplNeedsModule', { modules: t('ui.mod_tasks') }));
+    // One module, one sentence written for one — «install them» about a single app is the kind of
+    // seam that makes a screen feel machine-written.
+    expect(note(el)?.textContent).toBe(t('ui.tplHiddenModule', { modules: t('ui.mod_tasks') }));
+  });
+
+  it('says nothing at all when this hub can run everything', async () => {
+    const el = await mount(hub());
+    expect(note(el)).toBeNull();
   });
 });

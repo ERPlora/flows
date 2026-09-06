@@ -258,9 +258,6 @@
     "tplNoBlanks": "No hay nada que rellenar. Está lista tal cual.",
     "tplGrantsTitle": "Lo que te va a pedir permiso para hacer",
     "tplGrantsIntro": "Una automatización funciona con sus propios permisos, nunca con los tuyos. Hasta que se los des, no hace nada.",
-    "tplNeedsModule": "Esta necesita el módulo {modules}, y este hub no lo tiene. Instálalo desde el marketplace, recarga esta pantalla y funcionará.",
-    "tplNeedsModules": "Esta necesita los módulos {modules}, y este hub no los tiene. Instálalos desde el marketplace, recarga esta pantalla y funcionará.",
-    "tplUnavailable": "Falta: {modules}",
     "mod_appointments": "Citas",
     "mod_cash_register": "Caja",
     "mod_customers": "Clientes",
@@ -609,13 +606,28 @@
     "evConsentGranted": "un cliente da su consentimiento",
     "evConsentWithdrawn": "un cliente retira su consentimiento",
     "evOrderFired": "se manda una comanda a cocina",
-    "evStaffDeactivated": "se desactiva a alguien del equipo"
+    "evStaffDeactivated": "se desactiva a alguien del equipo",
+    "mod_services": "Servicios",
+    "tplHiddenModule": "Hay automatizaciones ocultas: necesitan el módulo {modules}, y este hub no lo tiene. Instálalo desde el marketplace y recarga esta pantalla.",
+    "tplHiddenModules": "Hay automatizaciones ocultas: necesitan los módulos {modules}, y este hub no los tiene. Instálalos desde el marketplace y recarga esta pantalla."
   },
   "tpl": {
     "author": "Automatizaciones",
     "grant": {
       "tasksCreate": "Crear una tarea en tu lista. No sale del hub y no le escribe a ningún cliente.",
-      "customersNote": "Añadir una nota al historial de un cliente. No cambia sus datos ni le escribe."
+      "customersNote": "Añadir una nota al historial de un cliente. No cambia sus datos ni le escribe.",
+      "notifyWhatsapp": "Contestar por WhatsApp. Meta cobra cada mensaje que se manda.",
+      "recipientWhatsapp": "Contestar en esa misma conversación, y a nadie más.",
+      "customersList": "Buscar a la clienta por su teléfono.",
+      "customersCreate": "Crear la ficha cuando es alguien nuevo. Espera a que tú lo apruebes.",
+      "servicesList": "Leer tu catálogo de servicios, para saber cuál pide y cuánto dura.",
+      "staffList": "Leer quién trabaja en el salón, para proponer a alguien que de verdad esté.",
+      "staffSchedules": "Leer el horario de una profesional, para que el hueco sea uno que trabaje.",
+      "dayOpening": "Preguntar cuándo abre el salón ese día, en vez de deducirlo por su cuenta.",
+      "availabilitySlots": "Preguntar qué huecos están libres de verdad ese día.",
+      "availabilityCheck": "Comprobar que el hueco sigue libre antes de proponerlo.",
+      "appointmentsConflicting": "Comprobar que nadie ha cogido el hueco mientras tanto.",
+      "appointmentsCreate": "Reservar la cita. Espera en la bandeja hasta que tú la apruebes."
     },
     "welcome": {
       "name": "Dar la bienvenida a cada cliente nuevo",
@@ -700,6 +712,17 @@
       "blankSizeHint": "Seis para empezar. Cuenta las personas, no las mesas.",
       "taskTitle": "Preparar la mesa de {{input.guest_name}} — {{input.party_size}} personas",
       "taskDescription": "{{input.date}} a las {{input.time}}"
+    },
+    "waAppointment": {
+      "name": "WhatsApp → cita propuesta",
+      "summary": "Alguien pide cita por WhatsApp: contesta al momento, mira la agenda y propone un hueco real para que lo confirmes.",
+      "plain": "Cuando alguien escribe a tu WhatsApp, esto le contesta al momento para que no se quede esperando, se asegura de que tiene ficha de cliente, averigua qué servicio pide y cuánto dura, y busca un hueco que la agenda tenga libre de verdad con una profesional que trabaje a esa hora. Después propone la cita. No se reserva nada ni se crea ninguna ficha hasta que alguien del salón lo aprueba.",
+      "blankReply": "El mensaje que reciben al momento",
+      "blankReplyHint": "La línea que sale en cuanto llega un mensaje, antes de que nadie lo lea. Ponla con tus palabras: es lo primero que lee tu clienta.",
+      "ackText": "¡Gracias por escribirnos! Hemos recibido tu mensaje. Te confirmamos la cita en cuanto abramos el salón.",
+      "knowPrompt": "Una clienta ha escrito al salón por WhatsApp desde el número {{input.from}}. Esto es lo que dice:\n\n«{{input.text}}»\n\nTu único trabajo en este turno es asegurarte de que esa persona tiene ficha de cliente, porque una cita se reserva contra un cliente real, nunca contra texto libre.\n\n1. Búscala con `customers.list`, filtrando por `phone`. En el hub el teléfono se guarda en E.164, así que busca `+{{input.from}}`.\n2. Si ya existe, NO propongas nada. Contesta en una línea diciendo quién es y para.\n3. Si no aparece nadie, propón `customers.create` con el teléfono `+{{input.from}}` y el nombre que la persona haya dado en su mensaje. Si no ha dado nombre, usa el teléfono como nombre — no te lo inventes.\n\nNunca propongas más de una escritura. Lo que propongas lo revisa una persona antes de que ocurra.",
+      "availabilityPrompt": "Una clienta ha escrito al salón por WhatsApp desde el número {{input.from}} a las {{input.received_at}}. Esto es lo que dice:\n\n«{{input.text}}»\n\nEl paso anterior ya se aseguró de que la ficha existe, y reportó: {{steps.know_the_customer.text}}\n\nTu trabajo en este turno es AVERIGUAR, no reservar. Todas las herramientas que tienes aquí solo contestan preguntas; ninguna cambia nada. Cuenta lo que hayas encontrado en palabras llanas y para.\n\n1. Lee el catálogo con `services.services.list` y elige el servicio que pide. Si el mensaje es demasiado vago para saber cuál, dilo, nombra los servicios que podrían encajar, y para.\n2. Calcula cuánto dura. Si el servicio declara `duration_minutes`, úsalo TAL CUAL — lo decidió el salón. Si falta o es cero, ESTÍMALO por lo que es el servicio: un corte no es un tinte, y un tinte no es un tinte con mechas. Sé honesto y sé generoso antes que justo; una propuesta que se queda quince minutos corta desplaza la tarde entera.\n3. Pregunta a `appointments.availability.day_opening` cuándo abre el salón el día que pide. Contesta `spans` —minutos desde la medianoche de esa misma fecha, con los descansos ya recortados— y `source`. Si `source` es `schedules` y `spans` viene vacío, EL SALÓN ESTÁ CERRADO ese día: dilo, ofrece el día abierto más cercano, y para. Si `source` es `unset`, el salón no tiene ninguna regla que alcance esa fecha, así que no se está rechazando nada por ese motivo y no debes filtrar tú por horario.\n4. NUNCA deduzcas el horario por tu cuenta, ni del mensaje ni de ningún otro sitio. Esta operación lo resuelve exactamente igual que la puerta de reserva —día especial exacto, día especial anual, rango de override, horario semanal, en ese orden—, y tener una segunda opinión sobre cuándo abre el salón es justo lo que hace que una propuesta con buena pinta se caiga en cuanto alguien la aprueba.\n5. Pide a `appointments.availability.slots` los huecos libres de verdad de esa fecha para esa duración, y confirma el que elijas con `appointments.availability.check`. Si `check` lo rechaza, cree su motivo y pasa al siguiente hueco: `outside_schedule` es que el salón está cerrado a esa hora, y `held` que otra solicitud pendiente lo tiene apartado unos minutos.\n6. Usa `staff.members.list` y `staff.schedules.list_for_member` para elegir a una profesional que de verdad trabaje a esa hora, y confirma el hueco para ella pasando su `staff_id`.\n7. Respeta el día o la hora que haya pedido; si no está libre, coge el más cercano que sí lo esté.\n\nCuenta, en palabras llanas: la clienta, el servicio con su id, la duración en minutos Y si la leíste del catálogo o la estimaste, la profesional con su id, y el inicio exacto del hueco con su offset. Si no has encontrado nada, di qué te lo ha impedido. La propuesta la escribe otro a partir de lo que digas aquí, así que lo que te dejes es una cita que no ocurre.",
+      "proposePrompt": "Una clienta ha escrito al salón por WhatsApp desde el número {{input.from}} a las {{input.received_at}}. Esto es lo que dice:\n\n«{{input.text}}»\n\nEl paso de disponibilidad ya ha hecho la búsqueda, contra las mismas reglas que aplica la puerta de reserva, y reportó:\n\n{{steps.gather_availability.text}}\n\nPropón UNA cita, y solo una, con lo que haya encontrado.\n\n1. Si el paso anterior no encontró nada —el mensaje era demasiado vago, el salón está cerrado ese día, no había ningún hueco libre—, no propongas NADA y di exactamente eso, en una línea, para que quien lea la bandeja pueda contestarle.\n2. NO vuelvas a deducir el horario, los huecos ni la profesional. Ya se le preguntaron a las operaciones que contestan con la autoridad de la propia puerta de reserva; deducirlo aquí por segunda vez es lo que hace que una propuesta con buena pinta se caiga en cuanto alguien la aprueba.\n3. Resuelve los ids que necesitas: la clienta con `customers.list`, filtrando por `phone` = `+{{input.from}}`, y el servicio con `services.services.list`. Si quieres asegurarte de que el hueco sigue libre ahora mismo, `appointments.appointments.conflicting` te lo dice.\n4. Propón `appointments.appointments.create` con la clienta, el servicio, la profesional, la hora de inicio y `duration_minutes`, exactamente como los reportó el paso anterior.\n\nSobre la duración, esto importa: si el paso anterior la ESTIMÓ en vez de leerla del catálogo, dilo en `internal_notes`, con palabras y con el número — por ejemplo «Duración estimada por el asistente: 90 min; el catálogo no declara ninguna para este servicio.» Quien aprueba tiene que poder ver la estimación y corregirla antes de que entre en la agenda, y `internal_notes` es solo para el personal, así que la clienta no lo lee.\n\nPon en `notes` un resumen de una línea de lo que ha pedido la clienta, con sus propias palabras.\n\nNada de lo que propongas ocurre solo: espera en la bandeja de aprobación hasta que alguien del salón lo revise."
     }
   },
   "guide": {

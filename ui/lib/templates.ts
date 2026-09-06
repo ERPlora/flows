@@ -380,6 +380,147 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     }),
   },
 
+  /**
+   * **flows#52 — the message becomes a booking, which is the case the product is sold on.**
+   *
+   * This is the automation `whatsapp_inbox` has shipped since it learned to book
+   * (`flows/appointment-from-whatsapp.{es,en}.flow.json`), brought into the gallery so that
+   * somebody can actually pick it. Until now nothing installed it: the hub reads no `*.flow.json`
+   * anywhere, so the only thing that ever created it was the module's own end-to-end test, and a
+   * salon that connected its number and opened Automations found «make a task» and nothing else.
+   *
+   * ⚠️ **It is a MIRROR, and mirrors go stale.** The document below is `whatsapp_inbox` v2.1.31,
+   * copied because the two repositories cannot read each other and the hub has no route that
+   * serves a module's own templates (the manifest has no `flows` key and `erplora pack` does not
+   * put the folder in the zip). Retiring this copy — the runtime serving each installed module's
+   * templates, and this gallery merging them — is the real fix, and it is issued. Until then, the
+   * grants are pinned against the module's own `.grants.json` in `templates.test.ts`: the two may
+   * word a prompt differently, but they cannot ask for different permissions.
+   *
+   * **Why it needs five modules.** It reads the catalogue (`services`), the diary
+   * (`appointments`), who works when (`staff`), the customer's card (`customers`), and it answers
+   * through the conversation (`whatsapp_inbox`). A hub short of any of them cannot run it, which
+   * is why the gallery hides it rather than offering it greyed out: a salon with no Reservations
+   * has no use for whatsapp_inbox#60's table-booking twin either.
+   */
+  {
+    id: 'whatsapp-appointment',
+    sector: 'beauty',
+    icon: 'calendar-number-outline',
+    nameKey: 'tpl.waAppointment.name',
+    summaryKey: 'tpl.waAppointment.summary',
+    plainKey: 'tpl.waAppointment.plain',
+    blanks: [
+      { labelKey: 'tpl.waAppointment.blankReply', hintKey: 'tpl.waAppointment.blankReplyHint' },
+    ],
+    witnesses: [
+      { event: 'whatsapp_inbox.message.received', module: 'whatsapp_inbox' },
+      { event: 'appointments.appointment.created', module: 'appointments' },
+      { event: 'customer.created', module: 'customers' },
+      { event: 'services.service.created', module: 'services' },
+      { event: 'staff.member.created', module: 'staff' },
+    ],
+    grantReasons: {
+      whatsapp: 'tpl.grant.notifyWhatsapp',
+      'whatsapp_inbox.conversations.list#contact_phone': 'tpl.grant.recipientWhatsapp',
+      'customers.list': 'tpl.grant.customersList',
+      'customers.create': 'tpl.grant.customersCreate',
+      'services.services.list': 'tpl.grant.servicesList',
+      'staff.members.list': 'tpl.grant.staffList',
+      'staff.schedules.list_for_member': 'tpl.grant.staffSchedules',
+      'appointments.availability.day_opening': 'tpl.grant.dayOpening',
+      'appointments.availability.slots': 'tpl.grant.availabilitySlots',
+      'appointments.availability.check': 'tpl.grant.availabilityCheck',
+      'appointments.appointments.conflicting': 'tpl.grant.appointmentsConflicting',
+      'appointments.appointments.create': 'tpl.grant.appointmentsCreate',
+    },
+    build: (t) => ({
+      schema_version: SCHEMA_VERSION,
+      triggers: [
+        {
+          kind: 'event',
+          // The CORE's own event (`crates/server/src/inbound_poll.rs`), not the module's: it is
+          // what the published document waits for, and it carries the message itself. An empty
+          // body is a sticker or a photo — there is nothing for a model to read, and every reply
+          // this automation sends is billed by Meta.
+          event: 'hub.whatsapp.message_received',
+          filter: { 'event.text': { neq: '' } },
+          input: {
+            from: 'event.from',
+            text: 'event.text',
+            wa_message_id: 'event.wa_message_id',
+            received_at: 'event.received_at',
+          },
+        },
+      ],
+      steps: [
+        // Answered in seconds, before anybody has read anything: the wait is what makes a customer
+        // write to the salon next door. The recipient is resolved through the conversation, never
+        // written into the document — a template that carried a phone number would text the wrong
+        // person on every hub that installed it.
+        {
+          id: 'acknowledge',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: {
+            query: 'whatsapp_inbox.conversations.list',
+            params: { f_wa_contact_id: 'input.from' },
+            field: 'contact_phone',
+          },
+          template: '',
+          vars: { text: t('tpl.waAppointment.ackText') },
+        },
+        // `manual`: creating a customer card is a write, and it waits for a person.
+        {
+          id: 'know_the_customer',
+          kind: 'ai',
+          prompt: t('tpl.waAppointment.knowPrompt'),
+          tools: { queries: ['customers.list'], commands: ['customers.create'] },
+          policy: 'manual',
+          max_iters: 4,
+        },
+        // `auto`: every operation here only ANSWERS. Sending «may I check the diary?» to the
+        // approval tray is how the proposal never arrives.
+        {
+          id: 'gather_availability',
+          kind: 'ai',
+          prompt: t('tpl.waAppointment.availabilityPrompt'),
+          tools: {
+            queries: [
+              'services.services.list',
+              'staff.members.list',
+              'staff.schedules.list_for_member',
+            ],
+            commands: [
+              'appointments.availability.day_opening',
+              'appointments.availability.slots',
+              'appointments.availability.check',
+            ],
+          },
+          policy: 'auto',
+          max_iters: 8,
+        },
+        // `manual` again, and this is the one that matters: the booking itself waits in the tray
+        // until somebody at the salon says yes.
+        {
+          id: 'propose_appointment',
+          kind: 'ai',
+          prompt: t('tpl.waAppointment.proposePrompt'),
+          tools: {
+            queries: [
+              'customers.list',
+              'services.services.list',
+              'appointments.appointments.conflicting',
+            ],
+            commands: ['appointments.appointments.create'],
+          },
+          policy: 'manual',
+          max_iters: 8,
+        },
+      ],
+    }),
+  },
+
   // ── Bars and restaurants ────────────────────────────────────────────────────────────────────
   {
     id: 'big-party-reservation',
@@ -456,6 +597,47 @@ export function missingModules(
 }
 
 /**
+ * **The templates of one sector this hub can actually run** (flows#52).
+ *
+ * A card whose module the hub has refused is not offered at all. It used to be shown greyed out
+ * with the module named on it (flows#38), and that was the right answer while every card in the
+ * catalogue was something any shop might install. It stopped being the right answer when the
+ * catalogue grew cards for modules a business will never own: the WhatsApp card needs a diary, a
+ * service catalogue and a staff list, and whatsapp_inbox#60 adds a table-booking twin that needs
+ * Reservations — so a hair salon was being shown a restaurant's automation with a badge on it.
+ *
+ * What flows#38 was protecting is kept, and it is {@link unavailableModules}: the owner still
+ * learns which app to install, by name — once, under the cards, instead of on each grey one.
+ *
+ * `known[event] === false` is the only refusal. «Not asked yet» leaves the card in place, for the
+ * same reason it never greyed one out: hiding on an unanswered probe empties the gallery for the
+ * first second of every visit and then fills it back in, which reads as a broken screen.
+ */
+export function availableTemplates(
+  sector: Sector,
+  known: Readonly<Record<string, boolean>>,
+): FlowTemplate[] {
+  return templatesOf(sector).filter((tpl) => missingModules(tpl, known).length === 0);
+}
+
+/**
+ * The modules the hidden cards needed, deduped, in catalogue order.
+ *
+ * Only the modules of a card that is actually hidden: a hub without `sales` hides «write the big
+ * visits into the card», and naming its OTHER module would send the owner to install Customers,
+ * which they already have.
+ */
+export function unavailableModules(known: Readonly<Record<string, boolean>>): string[] {
+  const out: string[] = [];
+  for (const template of TEMPLATES) {
+    for (const id of missingModules(template, known)) {
+      if (!out.includes(id)) out.push(id);
+    }
+  }
+  return out;
+}
+
+/**
  * The name the owner knows a module by, in place of the id the witnesses carry (flows#38).
  *
  * A grey card saying «Falta un módulo» is true and useless: the owner's next step is the
@@ -472,6 +654,7 @@ const MODULE_LABELS: Readonly<Record<string, string>> = {
   customers: 'ui.mod_customers',
   reservations: 'ui.mod_reservations',
   sales: 'ui.mod_sales',
+  services: 'ui.mod_services',
   staff: 'ui.mod_staff',
   tasks: 'ui.mod_tasks',
   verifactu: 'ui.mod_verifactu',

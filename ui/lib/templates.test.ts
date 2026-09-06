@@ -2,10 +2,12 @@ import { describe, it, expect } from 'vitest';
 import {
   TEMPLATES,
   SECTORS,
+  availableTemplates,
   buildTemplate,
   missingModules,
   moduleName,
   templateGrants,
+  unavailableModules,
 } from './templates';
 import { isSpineKind, readDoc } from './flow-doc';
 import en from '../../locales/en.json';
@@ -88,16 +90,38 @@ describe('the template catalogue', () => {
   // The grants screen and the document must agree. Deriving the list from the document (rather
   // than writing it out a second time in the template) is what stops a typo reading as
   // authorisation — `requiredGrants` is the same function the editor's Permissions tab uses.
-  it('asks for exactly the commands its own document runs', () => {
+  //
+  // Re-derived BY HAND below, kind by kind, rather than by calling `requiredGrants` a second
+  // time: a guard that asks the function whether it agrees with itself proves nothing. Until
+  // flows#52 every template ran commands and nothing else, so this could compare one list of
+  // command names; the WhatsApp card writes on WhatsApp and offers tools to a model, so a guard
+  // that only knows about commands would have gone green while eleven permissions went unchecked.
+  it('asks for exactly the permissions its own document needs, of every kind', () => {
     for (const template of TEMPLATES) {
       const doc = buildTemplate(template, t);
-      const commands = doc.steps
-        .filter((s) => s.kind === 'command')
-        .map((s) => String(s.command));
-      expect(templateGrants(template, t).map((g) => g.value).sort()).toEqual(
-        [...new Set(commands)].sort(),
-      );
-      expect(templateGrants(template, t).every((g) => g.kind === 'command')).toBe(true);
+      const expected = new Set<string>();
+      for (const step of doc.steps) {
+        // An `http` step would add a URL pattern, and no card in this catalogue has one. The
+        // assertion is here rather than in a test of its own because the moment one appears, this
+        // derivation stops being complete.
+        expect(step.kind, `${template.id} carries an http step`).not.toBe('http');
+        if (step.kind === 'command') expected.add(`command ${String(step.command)}`);
+        if (step.kind === 'query') expected.add(`query ${String(step.query)}`);
+        if (step.kind === 'ai') {
+          for (const query of step.tools?.queries ?? []) expected.add(`query ${query}`);
+          for (const command of step.tools?.commands ?? []) expected.add(`command ${command}`);
+        }
+        if (step.kind === 'notify') {
+          // Two grants, never one: what it costs (the channel) and who gets written to.
+          expected.add(`notify ${String(step.channel)}`);
+          expected.add(`recipient_query ${String(step.to?.query)}#${String(step.to?.field)}`);
+        }
+      }
+      expect(
+        templateGrants(template, t)
+          .map((g) => `${g.kind} ${g.value}`)
+          .sort(),
+      ).toEqual([...expected].sort());
     }
   });
 
@@ -141,16 +165,30 @@ describe('what a template needs from this hub', () => {
   // The hub has no endpoint that lists its commands, but `GET /api/hub/events/shape` answers 404
   // for an event nobody declares — so one event per module is the witness that says whether that
   // module is installed HERE. Without it a card would promise something that fails at save.
-  it('names a witness event for its trigger and for every module it commands', () => {
+  it('names a witness event for its trigger and for every module it touches', () => {
     for (const template of TEMPLATES) {
       const doc = buildTemplate(template, t);
       const trigger = doc.triggers[0];
-      if (trigger.kind === 'event') {
+      // `hub.*` is the core's own event (the runtime's outbox), not a module's: every hub has it,
+      // so there is nothing to witness and no module to tell the owner to install.
+      if (trigger.kind === 'event' && !String(trigger.event).startsWith('hub.')) {
         expect(template.witnesses.map((w) => w.event)).toContain(trigger.event);
       }
+      // Every module the document reaches into, whichever way it reaches: a command step, a query
+      // step, a tool OFFERED to a model, and the query a `notify` resolves its recipient with. A
+      // card is hidden on the strength of these, so one missing here is a card offered on a hub
+      // that cannot run it.
+      const owners = new Set<string>();
       for (const step of doc.steps) {
-        if (step.kind !== 'command') continue;
-        const owner = String(step.command).split('.')[0];
+        if (step.kind === 'command') owners.add(String(step.command).split('.')[0]);
+        if (step.kind === 'query') owners.add(String(step.query).split('.')[0]);
+        if (step.kind === 'ai') {
+          for (const query of step.tools?.queries ?? []) owners.add(query.split('.')[0]);
+          for (const command of step.tools?.commands ?? []) owners.add(command.split('.')[0]);
+        }
+        if (step.kind === 'notify' && step.to?.query) owners.add(step.to.query.split('.')[0]);
+      }
+      for (const owner of owners) {
         const covered = template.witnesses.some((w) => w.module === owner);
         expect(covered, `${template.id} has no witness for the \`${owner}\` module`).toBe(true);
       }
@@ -306,5 +344,185 @@ describe('the everyday automations of flows#18', () => {
       expect(grants.length, id).toBeGreaterThan(0);
       for (const grant of grants) expect(byId(id)!.grantReasons[grant.value], grant.value).toBeTruthy();
     }
+  });
+});
+
+/**
+ * **The automation the WhatsApp module ships, offered where people look for it** (flows#52).
+ *
+ * `whatsapp_inbox` has carried `flows/appointment-from-whatsapp.{es,en}.flow.json` since it
+ * learned to book — the case the product is sold on — and nobody installed it: the hub reads no
+ * `*.flow.json` anywhere (`grep '\.flow\.json' hub/crates` = 0), so the only thing that ever
+ * created it was the module's own end-to-end test. A shop that connects its number and opens
+ * Automations found «somebody writes on WhatsApp → make a task» and nothing else.
+ *
+ * The card below is that document, in this catalogue, so it can be picked. What it is NOT is a
+ * second design: the trigger, the four steps and the twelve permissions are pinned here against
+ * the ones the module publishes, so the two cannot quietly say different things.
+ */
+describe('WhatsApp → appointment, the card the WhatsApp module has always shipped (flows#52)', () => {
+  const template = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment');
+
+  it('is in the gallery at all — until flows#52 the only way in was the module’s own test', () => {
+    expect(template, 'no `whatsapp-appointment` template in the catalogue').toBeTruthy();
+  });
+
+  it('starts on the message the CORE delivers, and ignores a message with no text', () => {
+    const trigger = buildTemplate(template!, t).triggers[0];
+    // `hub.whatsapp.message_received` is the runtime's own event (`crates/server/src/inbound_poll.rs`),
+    // which is what the module's published template waits for. An empty body is a sticker or an
+    // image: there is nothing for a model to read, and answering it costs money.
+    expect(trigger).toEqual({
+      kind: 'event',
+      event: 'hub.whatsapp.message_received',
+      filter: { 'event.text': { neq: '' } },
+      input: {
+        from: 'event.from',
+        text: 'event.text',
+        wa_message_id: 'event.wa_message_id',
+        received_at: 'event.received_at',
+      },
+    });
+  });
+
+  it('acknowledges first and proposes after, exactly like the published document', () => {
+    const steps = buildTemplate(template!, t).steps;
+    expect(steps.map((s) => [s.id, s.kind])).toEqual([
+      ['acknowledge', 'notify'],
+      ['know_the_customer', 'ai'],
+      ['gather_availability', 'ai'],
+      ['propose_appointment', 'ai'],
+    ]);
+    // The two steps that WRITE ask a person first (`manual`); the one that only reads runs on its
+    // own (`auto`). That split is the whole safety story of this automation.
+    expect(steps.map((s) => s.policy)).toEqual([undefined, 'manual', 'auto', 'manual']);
+  });
+
+  it('writes back on WhatsApp through the conversation, never to a number in the document', () => {
+    const notify = buildTemplate(template!, t).steps[0];
+    expect(notify.channel).toBe('whatsapp');
+    expect(notify.to).toEqual({
+      query: 'whatsapp_inbox.conversations.list',
+      params: { f_wa_contact_id: 'input.from' },
+      field: 'contact_phone',
+    });
+    // The acknowledgement is the one sentence every shop wants in its own words, so it is a blank.
+    expect(template!.blanks.length).toBeGreaterThan(0);
+    expect(String(notify.vars?.text ?? '')).not.toBe('');
+  });
+
+  /**
+   * The list is `flows/appointment-from-whatsapp.grants.json` of `whatsapp_inbox@origin/main`
+   * (v2.1.31), written out here because the two repositories cannot read each other. If the card
+   * ever derives one grant more, or one fewer, than the automation the module publishes, this is
+   * where it is caught — and a grant is the difference between an automation that books and one
+   * that writes to a customer without being allowed to.
+   */
+  it('asks for the twelve permissions the module’s own grants file lists, and no thirteenth', () => {
+    expect(
+      templateGrants(template!, t)
+        .map((g) => `${g.kind} ${g.value}`)
+        .sort(),
+    ).toEqual(
+      [
+        'command appointments.appointments.create',
+        'command appointments.availability.check',
+        'command appointments.availability.day_opening',
+        'command appointments.availability.slots',
+        'command customers.create',
+        'notify whatsapp',
+        'query appointments.appointments.conflicting',
+        'query customers.list',
+        'query services.services.list',
+        'query staff.members.list',
+        'query staff.schedules.list_for_member',
+        'recipient_query whatsapp_inbox.conversations.list#contact_phone',
+      ].sort(),
+    );
+  });
+
+  it('names the five modules it needs, so a hub without one of them never shows it', () => {
+    expect([...new Set(template!.witnesses.map((w) => w.module))].sort()).toEqual([
+      'appointments',
+      'customers',
+      'services',
+      'staff',
+      'whatsapp_inbox',
+    ]);
+  });
+
+  it('tells the model which tools it may use, and offers no tool it has no permission for', () => {
+    const granted = new Set(templateGrants(template!, t).map((g) => `${g.kind} ${g.value}`));
+    for (const step of buildTemplate(template!, t).steps) {
+      if (step.kind !== 'ai') continue;
+      expect(step.prompt, step.id).toBeTruthy();
+      expect((step.tools?.queries?.length ?? 0) + (step.tools?.commands?.length ?? 0)).toBeGreaterThan(0);
+      for (const query of step.tools?.queries ?? []) expect(granted.has(`query ${query}`), query).toBe(true);
+      for (const command of step.tools?.commands ?? []) expect(granted.has(`command ${command}`), command).toBe(true);
+    }
+  });
+});
+
+/**
+ * **A card for a module this hub does not have is not offered at all** (flows#52).
+ *
+ * It used to be shown greyed out, naming what to install (flows#38). What changed the answer is
+ * that the catalogue now carries cards for modules a business will never own: the WhatsApp card
+ * above needs Appointments, Services and Staff, and whatsapp_inbox#60 adds a table-booking twin
+ * that needs Reservations. Listed by whether WhatsApp is installed, a hair salon is offered a
+ * card about restaurant tables — and a gallery whose cards are mostly things you cannot use is a
+ * gallery people stop reading.
+ *
+ * What flows#38 was actually protecting — the owner learning WHICH app to install, by its name,
+ * and that the screen needs a reload — is kept, in one line under the cards instead of on N grey
+ * ones.
+ */
+describe('the gallery only offers what this hub can run (flows#52)', () => {
+  /** The hub answered `404` for every event of the given modules: they are not installed. */
+  const without = (...modules: string[]): Record<string, boolean> =>
+    Object.fromEntries(
+      TEMPLATES.flatMap((tpl) => tpl.witnesses).map((w) => [w.event, !modules.includes(w.module)]),
+    );
+
+  it('drops the cards whose modules are missing, and keeps the rest', () => {
+    const known = without('tasks');
+    const shown = SECTORS.flatMap((sector) => availableTemplates(sector, known)).map((tpl) => tpl.id);
+    expect(shown).not.toContain('no-show-followup');
+    expect(shown).toContain('whatsapp-appointment');
+  });
+
+  it('hides the WhatsApp card on a hub that has WhatsApp but no diary', () => {
+    // The case that made hiding the answer: every module of the card but one.
+    const shown = availableTemplates('beauty', without('appointments')).map((tpl) => tpl.id);
+    expect(shown).not.toContain('whatsapp-appointment');
+  });
+
+  it('offers everything while the hub has not answered yet', () => {
+    // «Not asked yet» is not a refusal. Hiding on an unanswered probe would empty the gallery for
+    // the first second of every visit and then fill it back in, which reads as a broken screen.
+    const shown = SECTORS.flatMap((sector) => availableTemplates(sector, {})).map((tpl) => tpl.id);
+    expect(shown.sort()).toEqual(TEMPLATES.map((tpl) => tpl.id).sort());
+  });
+
+  it('says which modules the hidden cards needed, each named once', () => {
+    const missing = unavailableModules(without('tasks', 'appointments'));
+    expect(missing).toContain('tasks');
+    expect(missing).toContain('appointments');
+    // Deduped: nine cards need `tasks`, and «Tasks, Tasks, Tasks» is not a sentence.
+    expect(new Set(missing).size).toBe(missing.length);
+  });
+
+  it('names nothing when nothing is hidden', () => {
+    expect(unavailableModules(without())).toEqual([]);
+    expect(unavailableModules({})).toEqual([]);
+  });
+
+  it('does not name a module that is missing but was not needed by any hidden card', () => {
+    // The control that stops this from being «list every module that answered 404»: a hub without
+    // `sales` hides `note-big-sale`, whose OTHER module (`customers`) is installed and must not
+    // be named — sending the owner to install something they already have.
+    const missing = unavailableModules(without('sales'));
+    expect(missing).toContain('sales');
+    expect(missing).not.toContain('customers');
   });
 });
