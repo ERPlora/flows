@@ -444,16 +444,16 @@ const SOURCES: readonly MirrorSource[] = [
   {
     template: 'whatsapp-appointment-unattended',
     module: 'whatsapp_inbox',
-    // whatsapp_inbox PR #77 (second half of #58): the unattended family — the same four steps with
-    // both model steps on `auto`, so the appointment is booked inside the turn instead of waiting
-    // in the approval tray.
+    // whatsapp_inbox PR #77 (second half of #58), squash-merged as `a44a3f1`: the unattended
+    // family — the same four steps with both model steps on `auto`, so the appointment is booked
+    // inside the turn instead of waiting in the approval tray. It carries the review's own commit
+    // (`hour_choice_problems`, `silence_problems` hardened), which is what keeps «you never choose
+    // the hour» in the prompt this mirror copies.
     //
-    // 🔴 PIN PROVISIONAL: this is the branch head of `fix/58-unattended-booking`, because this
-    // mirror was written while the source PR was still open. `merge-pr.sh` squashes it, so the
-    // moment wi#77 lands this sha stops existing on `main` and the LAST test of this file goes red
-    // naming the squash commit to put here. That is the re-pin, and it is not optional: the two
-    // digests do not change, only this line does.
-    commit: '63aa5a97d72c58ccf74bbbd7555f600869aedaf2',
+    // Re-pinned from the branch head to the squash the day wi#77 landed, which is the drill the
+    // last test of this file enforces: it went red naming this very sha, and the two digests below
+    // did not move — the documents are the same, only the commit that carries them is new.
+    commit: 'a44a3f18923d6654a59feaec7b856f63b64a742b',
     files: {
       en: 'flows/appointment-from-whatsapp-unattended.en.flow.json',
       es: 'flows/appointment-from-whatsapp-unattended.es.flow.json',
