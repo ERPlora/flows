@@ -6451,7 +6451,7 @@ function triggerEventsOf(definition) {
 function flowsOnSameTrigger(template, t3, flows) {
   const event = templateTriggerEvent(template, t3);
   if (!event) return [];
-  return flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).includes(event)).map((flow) => flow.name);
+  return flows.filter((flow) => flow.enabled !== false && triggerEventsOf(flow.definition ?? {}).includes(event)).map((flow) => flow.name);
 }
 function templateById(id) {
   return TEMPLATES.find((tpl) => tpl.id === id);
@@ -6715,6 +6715,8 @@ var ErpFlowsGallery = class extends i3 {
       const flows = await client.flows.list();
       this.existing = flows.map((flow) => ({
         name: flow.name,
+        // Carried through on purpose: a paused flow does not fire, so it is not a collision.
+        enabled: flow.enabled,
         definition: flow.definition ?? {}
       }));
     } catch {

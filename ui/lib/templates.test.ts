@@ -1056,6 +1056,18 @@ describe('the gallery can see that a card would double up on a trigger (whatsapp
     expect(flowsOnSameTrigger(unattended, t, [edited])).toEqual(['My WhatsApp thing']);
   });
 
+  it('does not name a flow that is PAUSED — a flow that is off does not fire', () => {
+    // The warning is about double-firing, and a paused twin books nothing. The real switch-over is
+    // exactly this: the salon turns the attended flow off to move to the unattended one, and a
+    // warning that keeps naming it tells them to do what they have just done — the warning that
+    // teaches an owner to click through warnings. A flow handed back WITHOUT `enabled` still counts:
+    // not knowing is not the same as knowing it is off.
+    const twin = asFlow('WhatsApp → appointment proposal', attended);
+    expect(flowsOnSameTrigger(unattended, t, [{ ...twin, enabled: false }])).toEqual([]);
+    expect(flowsOnSameTrigger(unattended, t, [{ ...twin, enabled: true }])).toEqual([twin.name]);
+    expect(flowsOnSameTrigger(unattended, t, [twin])).toEqual([twin.name]);
+  });
+
   it('does not fall over on a flow whose definition is not a document it understands', () => {
     // `Flow.definition` is `Record<string, unknown>` — whatever the hub stored. A gallery that
     // throws here shows the owner an error instead of a catalogue.

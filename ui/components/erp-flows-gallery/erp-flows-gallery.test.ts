@@ -377,6 +377,20 @@ describe('a card that would double up on a trigger says so first (whatsapp_inbox
     expect(client.flows.create).toHaveBeenCalledTimes(1);
   });
 
+  it('says nothing about the twin once the owner has turned it off', async () => {
+    // The switch-over this card exists for: the salon pauses the attended flow to move to the
+    // unattended one. A paused flow does not fire, so there is nothing to double up on — and a
+    // warning that still names it tells the owner to do what they have just done.
+    const client = hub({ flows: { list: vi.fn(async () => [{ ...attendedFlow(), enabled: false }]) } });
+    const el = await mount(client);
+    el.open('whatsapp-appointment-unattended');
+    await el.updateComplete;
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    await el.updateComplete;
+
+    expect(warning(el), 'a PAUSED twin is still being warned about').toBeNull();
+  });
+
   it('says nothing when no flow waits on that event', async () => {
     // The control: with the warning wired to «is there any flow at all» this passes green while
     // warning about everything, so it has to be a hub that HAS flows, just not on this event.

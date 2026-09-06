@@ -768,15 +768,22 @@ function triggerEventsOf(definition: Record<string, unknown>): string[] {
  * Matched on the EVENT and not on the document: an owner who renamed the flow and reworded its
  * prompts still has an automation firing on every message, and that is the one most likely to have
  * been running longest.
+ *
+ * A flow that is PAUSED is not named: it does not fire, so there is nothing to double up on — and
+ * the switch-over this warning exists for is precisely «turn the attended one off, install the
+ * unattended one». A flow handed back without `enabled` still counts: not knowing is not knowing
+ * it is off.
  */
 export function flowsOnSameTrigger(
   template: FlowTemplate,
   t: Translator,
-  flows: readonly { name: string; definition: Record<string, unknown> }[],
+  flows: readonly { name: string; enabled?: boolean; definition: Record<string, unknown> }[],
 ): string[] {
   const event = templateTriggerEvent(template, t);
   if (!event) return [];
-  return flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).includes(event)).map((flow) => flow.name);
+  return flows
+    .filter((flow) => flow.enabled !== false && triggerEventsOf(flow.definition ?? {}).includes(event))
+    .map((flow) => flow.name);
 }
 
 export function templateById(id: string): FlowTemplate | undefined {

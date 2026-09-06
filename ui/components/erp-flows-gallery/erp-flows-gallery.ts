@@ -240,7 +240,7 @@ export class ErpFlowsGallery extends LitElement {
    * (whatsapp_inbox#58). Empty until the hub answers, and empty FOREVER if it refuses: a gallery
    * that cannot list flows still has to show its catalogue.
    */
-  @state() private existing: { name: string; definition: Record<string, unknown> }[] = [];
+  @state() private existing: { name: string; enabled?: boolean; definition: Record<string, unknown> }[] = [];
 
   @state() private busy = false;
 
@@ -275,6 +275,8 @@ export class ErpFlowsGallery extends LitElement {
       const flows = await client.flows.list();
       this.existing = flows.map((flow) => ({
         name: flow.name,
+        // Carried through on purpose: a paused flow does not fire, so it is not a collision.
+        enabled: flow.enabled,
         definition: (flow.definition ?? {}) as Record<string, unknown>,
       }));
     } catch {
