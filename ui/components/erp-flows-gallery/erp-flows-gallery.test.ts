@@ -399,21 +399,32 @@ describe('a card that would double up on a trigger says so first (whatsapp_inbox
     // `list` is part of the frozen §9 method list, but a hub that refuses it — offline, a blip,
     // an older core — must not cost the owner the catalogue. No answer means no warning, never an
     // error screen.
-    const client = hub({
+    //
+    // 🔴 The panel has to be OPEN when the refusal lands, and that is the whole point of the
+    // sequencing below. `open()` clears `error`, so a version of this test that opened the panel
+    // AFTER the failed load passed against a gallery that DID set an error — the mutant survived.
+    // Swapping the client re-runs the load through `updated()`, which is a real path (the shell
+    // hands over a new client) and the one where a refusal can reach an open panel.
+    const el = await mount(hub({ flows: { list: vi.fn(async () => []) } }));
+    el.open('whatsapp-appointment-unattended');
+    await el.updateComplete;
+
+    el.client = hub({
       flows: {
         list: vi.fn(async () => {
           throw new Error('nope');
         }),
       },
-    });
-    const el = await mount(client);
-    el.open('whatsapp-appointment-unattended');
+    }) as never;
     await el.updateComplete;
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
     await el.updateComplete;
 
     expect(warning(el)).toBeNull();
     expect(card(el, 'whatsapp-appointment-unattended')).toBeTruthy();
-    expect(el.renderRoot.querySelector('ok-inline-feedback[tone="danger"]')).toBeNull();
+    expect(
+      el.renderRoot.querySelector('ok-inline-feedback[tone="danger"]'),
+      'a refusal to LIST flows became an error on the catalogue',
+    ).toBeNull();
   });
 });
