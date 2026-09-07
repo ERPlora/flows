@@ -6162,8 +6162,28 @@ var TEMPLATES = [
           // what the published document waits for, and it carries the message itself. An empty
           // body is a sticker or a photo — there is nothing for a model to read, and every reply
           // this automation sends is billed by Meta.
+          //
+          // The other two clauses are what stop the automation answering things no customer ever
+          // wrote (whatsapp_inbox#90). The poller asks the core for `?direction=all&source=all`, so
+          // the event carries the owner's OWN replies echoed back from her phone — answered, the
+          // salon is confirmed an appointment on its own number — and the 180 days of backlog Meta
+          // hands over the moment the number is connected: everybody who wrote in March is
+          // confirmed today.
+          //
+          // `neq` and not `eq`/`in` on purpose, and it is the SAME reason on both sides of this
+          // mirror: `direction`, `source` and `contact` reach the event only from hub#1621, which
+          // no published hub tag carries — `v1.1.15` is the newest, and it is the floor
+          // whatsapp_inbox declares. In the kernel an absent path resolves to `Null` and
+          // `json_eq(Null, x)` is false, so a filter written affirmatively matches NOTHING on a hub
+          // at that floor: no run, no error, no log. Written as `neq`, `Null` passes — which is
+          // exactly what such a core can serve (inbound only, live only). The affirmative form is
+          // whatsapp_inbox#95, for when the floor rises.
           event: "hub.whatsapp.message_received",
-          filter: { "event.text": { neq: "" } },
+          filter: {
+            "event.text": { neq: "" },
+            "event.direction": { neq: "outbound" },
+            "event.source": { neq: "history" }
+          },
           input: {
             from: "event.from",
             text: "event.text",
@@ -6349,9 +6369,16 @@ var TEMPLATES = [
       triggers: [
         {
           kind: "event",
-          // Same event and same filter as the twin — which is exactly why a hub must not run both.
+          // Same event and same filter as the twin — which is exactly why a hub must not run both,
+          // the echo and the backlog included (whatsapp_inbox#90; the twin above carries the why).
+          // This family matters most for it: it books without asking anybody, so an echo answered
+          // here is an appointment in the diary, not just a message.
           event: "hub.whatsapp.message_received",
-          filter: { "event.text": { neq: "" } },
+          filter: {
+            "event.text": { neq: "" },
+            "event.direction": { neq: "outbound" },
+            "event.source": { neq: "history" }
+          },
           input: {
             from: "event.from",
             text: "event.text",
