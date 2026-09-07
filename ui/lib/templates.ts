@@ -522,12 +522,34 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           },
           policy: 'manual',
           max_iters: 10,
+          // whatsapp_inbox#67. Without this the kernel CANCELS the run at the rejection, and the
+          // notify below — the only thing that ever speaks to the customer — is dead code: she was
+          // told «we will confirm as soon as the salon opens» and then nothing came, forever.
+          // `continue` hands the refusal to the step after it instead of ending the run.
+          //
+          // 🔴 Needs hub#1622 DEPLOYED. An `ai` step carrying `on_reject` on an older hub is not
+          // degraded, it is refused whole (`flow.invalid_definition`), so this card would fail to
+          // install rather than install without the reply.
+          on_reject: 'continue',
         },
-        // whatsapp_inbox#58, first half: once the booking goes through, the customer hears about
-        // it — on WhatsApp, in the words the proposing step wrote FOR them (its prompt ends with
-        // «everything you write back is sent to them, word for word»). Same recipient resolution
-        // as the acknowledgement, so the two notifies cost one channel grant and one recipient
-        // grant, not two of each. Not a text of ours to translate: it is the model's reply.
+        // whatsapp_inbox#67: the one step that knows how it ENDED, and the only author of what she
+        // reads. It carries no tools on purpose — it cannot book, cancel or look anything up, so
+        // there is nothing here for the salon to approve and nothing a customer's message could
+        // talk it into doing. `approved` or nothing refused, it forwards the proposing step's
+        // words untouched (the day, the hour and the professional live only there); `rejected`, it
+        // writes a new message that says the time cannot be AND what she does next — answer here
+        // with another day. A «no» with nothing after it is where she stops writing.
+        {
+          id: 'reply_to_customer',
+          kind: 'ai',
+          prompt: t('tpl.waAppointment.replyPrompt'),
+          policy: 'manual',
+          max_iters: 1,
+        },
+        // whatsapp_inbox#58, first half: once the salon has decided, the customer hears about it —
+        // on WhatsApp, in the words the step above wrote FOR them. Same recipient resolution as the
+        // acknowledgement, so the two notifies cost one channel grant and one recipient grant, not
+        // two of each. Not a text of ours to translate: it is the model's reply.
         {
           id: 'confirm_to_customer',
           kind: 'notify',
@@ -538,7 +560,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
             field: 'contact_phone',
           },
           template: '',
-          vars: { text: '{{steps.propose_appointment.text}}' },
+          vars: { text: '{{steps.reply_to_customer.text}}' },
         },
       ],
     }),
