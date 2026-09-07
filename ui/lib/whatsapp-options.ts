@@ -337,18 +337,37 @@ export function setTapOptions(doc: FlowDoc, index: number, options: TapOptions |
  *
  * Deliberately NOT symmetric with an empty value: coming back with nothing written adds no `vars`
  * at all, because `{text: ''}` is a key the document never had, not «the copy came back».
+ *
+ * @param remembered the `interactive` the step had before it was switched to plain text (flows#95).
+ * It cannot wait in the document —the hub answers `conflicting_message_type` for a step carrying
+ * both, and its parser refuses a step key it does not know— so the SCREEN holds it while the mode
+ * is off. Without it, «me lo pienso y lo devuelvo» handed back one empty button and threw away the
+ * header, the footer, the list shape and the titles of the groups.
  */
-export function setTapMode(doc: FlowDoc, index: number, wants: boolean): FlowDoc {
+export function setTapMode(
+  doc: FlowDoc,
+  index: number,
+  wants: boolean,
+  remembered?: Record<string, unknown> | null,
+): FlowDoc {
   const step = doc.steps[index];
   if (!step) return doc;
-  if (wants) {
-    return setTapOptions(doc, index, {
-      ...blankTapOptions('button'),
-      body: copy(obj(step.vars)?.text),
-    });
+  if (!wants) {
+    const off = setTapOptions(doc, index, null);
+    const body = readTapOptions(step)?.body;
+    if (!textOf(body)) return off;
+    return patchStep(off, index, { vars: { ...(obj(step.vars) ?? {}), text: body } });
   }
-  const off = setTapOptions(doc, index, null);
-  const body = readTapOptions(step)?.body;
-  if (!textOf(body)) return off;
-  return patchStep(off, index, { vars: { ...(obj(step.vars) ?? {}), text: body } });
+  // The remembered message goes back on the step BEFORE the options are applied, and that is the
+  // whole of flows#95: {@link setTapOptions} fuses over what the step is carrying, and on the way
+  // in it is carrying nothing — the way out had to take `interactive` off. Put it back first and
+  // the merge that already keeps the header, the footer and the titled groups does the rest.
+  const back = obj(remembered);
+  const restored = back ? patchStep(doc, index, { interactive: back }) : doc;
+  const had = readTapOptions(restored.steps[index]);
+  // The sentence is whatever she has NOW: she may have rewritten it while it was plain copy.
+  return setTapOptions(restored, index, {
+    ...(had ?? blankTapOptions('button')),
+    body: copy(obj(step.vars)?.text),
+  });
 }

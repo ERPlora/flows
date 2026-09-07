@@ -615,3 +615,231 @@ describe('changing the mode keeps the sentence that was already written (flows#9
     expect((step(el).vars as Record<string, unknown>).text).toBe('¿Cuándo te viene bien?');
   });
 });
+
+/**
+ * **Se lo piensa y lo devuelve** (flows#95).
+ *
+ * The owner opens a step that arrived from a recipe with a header, a footer and two titled groups,
+ * flips «Qué es este mensaje» to plain text to reread the sentence on its own, thinks better of it
+ * and flips back. What came back was one empty button: the mode switch has to take `interactive`
+ * off the document (the hub refuses a step carrying both), so there was nothing left to rebuild
+ * from. The screen remembers it instead — for as long as it is open, which is as long as
+ * «me lo pienso» lasts.
+ */
+describe('flipping out of the options mode and back keeps the message (flows#95)', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  const rich = () =>
+    whatsapp({
+      interactive: {
+        type: 'list',
+        header: { type: 'text', text: 'Tus huecos' },
+        body: { text: 'Elige hueco' },
+        footer: { text: 'Toca una opción' },
+        action: {
+          button: 'Ver huecos',
+          sections: [
+            { title: 'Jueves', rows: [{ id: 'j1', title: '10:00' }] },
+            { title: 'Viernes', rows: [{ id: 'v1', title: '17:00' }] },
+          ],
+        },
+      },
+    });
+
+  const mode = (el: ErpFlowsEditor): Element | null =>
+    el.renderRoot.querySelector('[data-node="n"] .panel select[data-field="notify-mode"]');
+
+  /** The open panel — opening the card only if it is closed, since `panelOf` TOGGLES. */
+  const openPanel = async (el: ErpFlowsEditor): Promise<Element> =>
+    el.renderRoot.querySelector('[data-node="n"] .panel') ?? (await panelOf(el));
+
+  const listOf = (el: ErpFlowsEditor) => {
+    const back = step(el).interactive as Record<string, Record<string, unknown>>;
+    expect(back.type, 'the list came back as a bare button').toBe('list');
+    return back.action.sections as { title?: string; rows: { id: string }[] }[];
+  };
+
+  it('gives back the list, its groups, its titles and the button that opens it', async () => {
+    const el = await mount(rich());
+    await pick(el, (await panelOf(el)).querySelector('select[data-field="notify-mode"]'), 'text');
+    expect('interactive' in step(el), 'the copy mode still carries the options').toBe(false);
+    await pick(el, mode(el), 'options');
+
+    const back = step(el).interactive as Record<string, unknown>;
+    expect(back.type, 'the list came back as a bare button').toBe('list');
+    expect(back.header).toEqual({ type: 'text', text: 'Tus huecos' });
+    expect(back.footer).toEqual({ text: 'Toca una opción' });
+    const action = back.action as Record<string, unknown>;
+    expect(action.button).toBe('Ver huecos');
+    const sections = action.sections as { title?: string; rows: { id: string }[] }[];
+    expect(sections.map((s) => s.title)).toEqual(['Jueves', 'Viernes']);
+    expect(sections.map((s) => s.rows.map((r) => r.id))).toEqual([['j1'], ['v1']]);
+  });
+
+  it('keeps the sentence she rewrote while it was a plain message', async () => {
+    const el = await mount(rich());
+    await pick(el, (await panelOf(el)).querySelector('select[data-field="notify-mode"]'), 'text');
+    const panel = el.renderRoot.querySelector('[data-node="n"] .panel')!;
+    await compose(el, panel.querySelector('erp-flows-value[data-field="var-text"]'), [
+      { kind: 'text', text: 'Estos son los huecos' },
+    ]);
+    await pick(el, mode(el), 'options');
+    const back = step(el).interactive as Record<string, Record<string, unknown>>;
+    expect(back.body.text).toBe('Estos son los huecos');
+    expect(back.type).toBe('list');
+  });
+
+  it('remembers what she edited, not what the recipe brought', async () => {
+    const el = await mount(rich());
+    let panel = await panelOf(el);
+    await type(el, panel.querySelector('input[data-field="tap-id-0"]'), 'jueves_10');
+    await pick(el, mode(el), 'text');
+    await pick(el, mode(el), 'options');
+    expect(listOf(el)[0].rows[0].id).toBe('jueves_10');
+  });
+
+  /**
+   * The memory belongs to the flow on screen, not to the screen: `n` is the id every one-step
+   * automation gets, so a memory that outlived the flow would put one automation's message into
+   * another's.
+   */
+  it('does not hand one automation’s message to the next one', async () => {
+    const el = await mount(rich());
+    await pick(el, (await panelOf(el)).querySelector('select[data-field="notify-mode"]'), 'text');
+    el.flow = {
+      id: 'f2',
+      name: 'Otra',
+      enabled: false,
+      definition: {
+        schema_version: 1,
+        triggers: [{ kind: 'event', event: 'sale.completed' }],
+        steps: whatsapp({ vars: { text: 'otra cosa' } }),
+      },
+    } as never;
+    await settle(el);
+    await pick(el, (await openPanel(el)).querySelector('select[data-field="notify-mode"]'), 'options');
+    const back = step(el).interactive as Record<string, Record<string, unknown>>;
+    expect(back.type, 'the other automation’s message leaked in').toBe('button');
+    expect(back.header).toBeUndefined();
+    expect(back.body.text).toBe('otra cosa');
+  });
+});
+
+/**
+ * The same round trip through the OTHER door (flows#95): the options only exist on WhatsApp, so
+ * picking email takes them off the document exactly like the mode switch does.
+ */
+describe('the trip through email keeps the message too (flows#95)', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  it('gives the list back after a detour to email and back', async () => {
+    const el = await mount(
+      whatsapp({
+        interactive: {
+          type: 'list',
+          header: { type: 'text', text: 'Tus huecos' },
+          body: { text: 'Elige hueco' },
+          action: {
+            button: 'Ver huecos',
+            sections: [{ title: 'Jueves', rows: [{ id: 'j1', title: '10:00' }] }],
+          },
+        },
+      }),
+    );
+    const panel = await panelOf(el);
+    await pick(el, panel.querySelector('select[data-field="channel"]'), 'email');
+    expect('interactive' in step(el)).toBe(false);
+    const back = el.renderRoot.querySelector('[data-node="n"] .panel')!;
+    await pick(el, back.querySelector('select[data-field="channel"]'), 'whatsapp');
+    await pick(
+      el,
+      el.renderRoot.querySelector('[data-node="n"] .panel select[data-field="notify-mode"]'),
+      'options',
+    );
+    const restored = step(el).interactive as Record<string, Record<string, unknown>>;
+    expect(restored.type, 'the detour through email threw the message away').toBe('list');
+    expect(restored.header).toEqual({ type: 'text', text: 'Tus huecos' });
+    expect((restored.action.sections as { title?: string }[])[0].title).toBe('Jueves');
+  });
+});
+
+/**
+ * **The two doors, taken one after the other** (flows#95).
+ *
+ * The message is written down on the way OUT, and there are two ways out — the mode and the
+ * channel. Taken in a row they are not the same trip twice: she flips to plain text to reread the
+ * sentence on its own, and only THEN decides this one should go by email. The channel door then
+ * finds a step carrying nothing, and a screen that wrote that nothing down would erase what the
+ * mode door had just saved — the bug of this issue again, by the long way round.
+ *
+ * And the memory belongs to a STEP, not to the editor: an automation that sends two WhatsApp
+ * messages has two of them on screen at once.
+ */
+describe('the memory survives the second door and stays with its own step (flows#95)', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  const list = (text: string) => ({
+    type: 'list',
+    header: { type: 'text', text: 'Tus huecos' },
+    body: { text },
+    action: {
+      button: 'Ver huecos',
+      sections: [{ title: 'Jueves', rows: [{ id: 'j1', title: '10:00' }] }],
+    },
+  });
+
+  /** The panel of a given card, opening it only if it is not the one already open. */
+  const panelFor = async (el: ErpFlowsEditor, node: string): Promise<Element> => {
+    const open = el.renderRoot.querySelector(`[data-node="${node}"] .panel`);
+    if (open) return open;
+    const opener = el.renderRoot.querySelector(`[data-node="${node}"] button.open`) as HTMLButtonElement;
+    expect(opener, `the card ${node} has no way to open it`).toBeTruthy();
+    opener.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, cancelable: true }));
+    await settle(el);
+    return el.renderRoot.querySelector(`[data-node="${node}"] .panel`)!;
+  };
+
+  const field = async (el: ErpFlowsEditor, node: string, name: string): Promise<Element | null> =>
+    (await panelFor(el, node)).querySelector(`select[data-field="${name}"]`);
+
+  it('keeps it when the email detour starts from plain text', async () => {
+    const el = await mount(whatsapp({ interactive: list('Elige hueco') }));
+    // Out through the mode door first: the message is now only in the screen's memory.
+    await pick(el, await field(el, 'n', 'notify-mode'), 'text');
+    // …and only now does she decide it should be an email. The step carries nothing to remember;
+    // writing that down would throw away what the first door saved.
+    await pick(el, await field(el, 'n', 'channel'), 'email');
+    await pick(el, await field(el, 'n', 'channel'), 'whatsapp');
+    await pick(el, await field(el, 'n', 'notify-mode'), 'options');
+
+    const back = step(el).interactive as Record<string, Record<string, unknown>>;
+    expect(back.type, 'the second door threw the message away').toBe('list');
+    expect(back.header).toEqual({ type: 'text', text: 'Tus huecos' });
+    expect((back.action.sections as { title?: string }[])[0].title).toBe('Jueves');
+  });
+
+  it('does not give one step the message of the other', async () => {
+    const el = await mount([
+      { ...whatsapp({ interactive: list('Elige hueco') })[0] },
+      {
+        ...whatsapp({
+          interactive: {
+            type: 'button',
+            body: { text: '¿Te va bien?' },
+            action: { buttons: [{ type: 'reply', reply: { id: 'ok', title: 'Sí' } }] },
+          },
+        })[0],
+        id: 'n2',
+      },
+    ]);
+    await pick(el, await field(el, 'n', 'notify-mode'), 'text');
+    await pick(el, await field(el, 'n2', 'notify-mode'), 'text');
+    await pick(el, await field(el, 'n', 'notify-mode'), 'options');
+
+    const back = el.document.steps[0] as unknown as Record<string, Record<string, unknown>>;
+    expect((back.interactive as Record<string, unknown>).type, 'the other step’s message came back').toBe('list');
+    expect((back.interactive as Record<string, Record<string, unknown>>).body.text).toBe('Elige hueco');
+    // …and the one still in text mode is untouched.
+    expect('interactive' in (el.document.steps[1] as unknown as Record<string, unknown>)).toBe(false);
+  });
+});

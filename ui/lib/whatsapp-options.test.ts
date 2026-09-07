@@ -10,6 +10,7 @@ import {
   toInteractive,
 } from './whatsapp-options';
 import type { TapOptions } from './whatsapp-options';
+import { patchStep } from './flow-doc';
 import type { FlowDoc, Step } from './flow-doc';
 
 function doc(step: Partial<Step>): FlowDoc {
@@ -658,5 +659,98 @@ describe('switching the mode carries the message across (flows#90)', () => {
     expect(
       (after.steps[1].interactive as Record<string, Record<string, unknown>>).body.text,
     ).toBe('dos');
+  });
+});
+
+/**
+ * **Dar la vuelta a un interruptor y volverlo a dejar donde estaba** (flows#95).
+ *
+ * The half #91 did not reach. `setTapOptions` merges over what the step STILL carries, and the way
+ * out of the options mode has to take `interactive` off the document — the hub refuses a step with
+ * both — so on the way back there is nothing to merge over: a `list` with a header, a footer and
+ * two titled groups came back as one empty button. Only the sentence survived.
+ *
+ * The message therefore has to be REMEMBERED off the document while the step is in text mode, and
+ * handed back on the way in. That memory is the screen's, not the flow's: it lives while the owner
+ * has the editor open, which is exactly as long as «me lo pienso y lo devuelvo» lasts.
+ */
+describe('leaving the options mode and coming back does not destroy the message (flows#95)', () => {
+  const rich = () => ({
+    type: 'list',
+    header: { type: 'text', text: 'Tus huecos' },
+    body: { text: 'Elige hueco' },
+    footer: { text: 'Toca una opción' },
+    x_meta_future: { anything: true },
+    action: {
+      button: 'Ver huecos',
+      sections: [
+        { title: 'Jueves', rows: [{ id: 'j1', title: '10:00' }] },
+        { title: 'Viernes', rows: [{ id: 'v1', title: '17:00', description: 'con Ana' }] },
+      ],
+    },
+  });
+
+  it('gives the whole message back, not a blank button', () => {
+    const before = doc({ interactive: rich() });
+    const remembered = before.steps[0].interactive as Record<string, unknown>;
+    const off = setTapMode(before, 0, false);
+    expect('interactive' in off.steps[0]).toBe(false);
+
+    const back = setTapMode(off, 0, true, remembered).steps[0].interactive as Record<
+      string,
+      unknown
+    >;
+    expect(back.type).toBe('list');
+    expect(back.header).toEqual({ type: 'text', text: 'Tus huecos' });
+    expect(back.footer).toEqual({ text: 'Toca una opción' });
+    expect(back.x_meta_future).toEqual({ anything: true });
+    const action = back.action as Record<string, unknown>;
+    expect(action.button).toBe('Ver huecos');
+    const sections = action.sections as { title?: string; rows: { id: string }[] }[];
+    expect(sections.map((s) => s.title)).toEqual(['Jueves', 'Viernes']);
+    expect(sections.map((s) => s.rows.map((r) => r.id))).toEqual([['j1'], ['v1']]);
+    expect((sections[1].rows[0] as Record<string, unknown>).description).toBe('con Ana');
+  });
+
+  it('takes the sentence as she left it, because she may have edited it meanwhile', () => {
+    const before = doc({ interactive: rich() });
+    const remembered = before.steps[0].interactive as Record<string, unknown>;
+    let mid = setTapMode(before, 0, false);
+    // She rewrites the copy while the step is a plain text message (flows#90 put it there).
+    mid = patchStep(mid, 0, { vars: { text: 'Estos son los huecos' } });
+    const back = setTapMode(mid, 0, true, remembered).steps[0].interactive as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(back.body.text).toBe('Estos son los huecos');
+    // …and everything else is still the message she had.
+    expect(back.type).toBe('list');
+    expect(back.header).toBeTruthy();
+  });
+
+  it('opens blank when there is nothing remembered, exactly as before', () => {
+    const step = setTapMode(doc({ vars: { text: 'hola' } }), 0, true).steps[0];
+    const interactive = step.interactive as Record<string, Record<string, unknown>>;
+    expect(interactive.type).toBe('button');
+    expect(interactive.body.text).toBe('hola');
+    expect((interactive.action.buttons as unknown[]).length).toBe(1);
+  });
+
+  it('does not choke on a memory that is not a message at all', () => {
+    const step = setTapMode(doc({ vars: { text: 'hola' } }), 0, true, 'nope' as never).steps[0];
+    expect(Object.keys(step.interactive as Record<string, unknown>).sort()).toEqual([
+      'action',
+      'body',
+      'type',
+    ]);
+  });
+
+  it('still takes the copy away, remembered message or not', () => {
+    // The reason the key cannot simply stay: the hub answers `conflicting_message_type`.
+    const before = doc({ interactive: rich(), template: 'hello', vars: { text: 'x' } });
+    const remembered = before.steps[0].interactive as Record<string, unknown>;
+    const back = setTapMode(setTapMode(before, 0, false), 0, true, remembered).steps[0];
+    expect('vars' in back).toBe(false);
+    expect('template' in back).toBe(false);
   });
 });
