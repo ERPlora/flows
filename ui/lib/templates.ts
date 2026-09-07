@@ -440,6 +440,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       'appointments.appointments.create': 'tpl.grant.appointmentsCreate',
       'appointments.appointments.list_for_customer': 'tpl.grant.appointmentsListForCustomer',
       'appointments.appointments.cancel': 'tpl.grant.appointmentsCancel',
+      'appointments.appointments.reschedule': 'tpl.grant.appointmentsReschedule',
     },
     build: (t) => ({
       schema_version: SCHEMA_VERSION,
@@ -511,12 +512,20 @@ export const TEMPLATES: readonly FlowTemplate[] = [
         // availability operations only answer, and a `manual` step may read since hub#1595
         // (whatsapp_inbox#55 collapsed the former «gather, then propose» pair).
         //
-        // It also CANCELS (whatsapp_inbox#61): the prompt decides first what the message is asking
-        // for, and books or cancels. Two steps would have cost either an extra billed model turn
-        // or a second flow routed by keyword — and `Op::Contains` is case-sensitive, ANDed and
-        // unnegatable, so «Cancela mi cita» would miss while the booking flow fired anyway. The
-        // branches EXCLUDE each other, so the budget below is untouched: booking chains up to nine
-        // calls, cancelling three.
+        // It also CANCELS and MOVES (whatsapp_inbox#61, #74): the prompt decides first what the
+        // message is asking for, and books, cancels or moves. Two steps would have cost either an
+        // extra billed model turn or a second flow routed by keyword — and `Op::Contains` is
+        // case-sensitive, ANDed and unnegatable, so «Cancela mi cita» would miss while the booking
+        // flow fired anyway. The branches EXCLUDE each other, so the budget below is untouched:
+        // booking chains up to nine calls, moving six and cancelling three.
+        //
+        // Moving is ONE call — `appointments.appointments.reschedule` — and never cancel-then-book:
+        // that spends the cancellation the salon allows the customer, drops the appointment the
+        // salon had in front of it, and leaves whoever wrote in order to KEEP their hour with
+        // nothing when the second half fails. The id always comes out of
+        // `appointments.appointments.list_for_customer`, because unlike cancelling this command
+        // carries no `channel` and no `customer_id` (appointments 1.1.72), so nothing below it can
+        // tell whose appointment it was handed.
         //
         // `max_iters` sits at the kernel's cap on purpose: the hub refuses a document above it, so
         // there is no margin — whoever lengthens the BOOKING chain adds a step instead.
@@ -538,6 +547,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
               'appointments.availability.check',
               'appointments.appointments.create',
               'appointments.appointments.cancel',
+              'appointments.appointments.reschedule',
             ],
           },
           policy: 'manual',
@@ -652,6 +662,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       'appointments.appointments.create': 'tpl.grant.appointmentsCreate',
       'appointments.appointments.list_for_customer': 'tpl.grant.appointmentsListForCustomer',
       'appointments.appointments.cancel': 'tpl.grant.appointmentsCancel',
+      'appointments.appointments.reschedule': 'tpl.grant.appointmentsReschedule',
     },
     build: (t) => ({
       schema_version: SCHEMA_VERSION,
@@ -704,8 +715,10 @@ export const TEMPLATES: readonly FlowTemplate[] = [
         // `auto`, and this is the step the whole family exists for: it books. Named
         // `book_appointment` and not `propose_appointment` because that is what it does — there is
         // no proposal and no tray. Same tools and same budget as the twin (the cap: booking chains
-        // up to nine calls), same «decide first what they are asking for» branch that cancels
-        // instead of booking when that is what the message says.
+        // up to nine calls, moving six), same «decide first what they are asking for» branch that
+        // cancels or moves instead of booking when that is what the message says. With nobody
+        // watching, moving as ONE call matters more here: a cancel-then-book that fails halfway
+        // leaves the customer with no appointment and no salon reading the tray (whatsapp_inbox#74).
         {
           id: 'book_appointment',
           kind: 'ai',
@@ -724,6 +737,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
               'appointments.availability.check',
               'appointments.appointments.create',
               'appointments.appointments.cancel',
+              'appointments.appointments.reschedule',
             ],
           },
           policy: 'auto',

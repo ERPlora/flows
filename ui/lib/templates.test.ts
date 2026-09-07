@@ -452,15 +452,27 @@ const SOURCES: readonly MirrorSource[] = [
     // it is refused whole with `invalid_payload`. Until this landed the gallery kept handing out
     // the version that cannot cancel (flows#64) — and NOTHING here went red, which is why the
     // third pin test below now exists.
-    commit: '0f8eb60f9cdc2f9bafa818dd19fc45d3f2e91e45',
+    // And moved by whatsapp_inbox#74: the proposing step gained MOVING. It had book and cancel and
+    // no way to change an appointment's hour, so «can you change it to Thursday?» fell into the
+    // «anything else» branch — or was read as a new booking and the customer ended up with two.
+    // Moving is `appointments.appointments.reschedule`, ONE call and never cancel-then-book, and
+    // the id always comes out of `list_for_customer` because that command carries no `channel` and
+    // no `customer_id` (appointments 1.1.72), so nothing below it can tell whose appointment it is.
+    // The grants list grows by one (13 → 14) and `reply_to_customer` learns to say that a refused
+    // MOVE leaves the appointment she already had exactly where it was.
+    //
+    // 🔴 Pinned at the branch head while whatsapp_inbox#102 is open: `merge-pr.sh` squashes it, so
+    // the last test of this file goes red naming the squash sha, and this pin is set to that. The
+    // digests do not change with the re-pin.
+    commit: '50658dfaf7d2d41ff100e9f50ed24fa14bb15ec2',
     files: {
       en: 'flows/appointment-from-whatsapp.en.flow.json',
       es: 'flows/appointment-from-whatsapp.es.flow.json',
       grants: 'flows/appointment-from-whatsapp.grants.json',
     },
     digest: {
-      en: '96f1ab71dc27a4519efecc039e5140a92d9fac05917c541caa41fd5118b30af6',
-      es: '32a2112096288db6d93c2051d620ffc93788a8e77982a601a7bab3cda01cc43b',
+      en: '2119e9a89c7df1d5cef5ff6b4ef4b8bc5a4f07c2d5079a27076c631964de3c2e',
+      es: '219531d57fb72433f051d48176164b7e04fa5aa23729ce226b39b408f6d0bff1',
     },
   },
   {
@@ -483,15 +495,20 @@ const SOURCES: readonly MirrorSource[] = [
     // And by whatsapp_inbox#82 (`0f8eb60`), the same identified cancellation as the twin — with
     // nobody watching, here it mattered more: the customer was told nothing and no salon saw the
     // refusal.
-    commit: '0f8eb60f9cdc2f9bafa818dd19fc45d3f2e91e45',
+    // And by whatsapp_inbox#74, the same MOVING as the twin — and here it matters more: with nobody
+    // reading the tray, a cancel-then-book that fails halfway leaves the customer with no
+    // appointment and no salon to notice. Same one call, same id out of `list_for_customer`.
+    //
+    // 🔴 Same branch-head pin as the twin while whatsapp_inbox#102 is open (see above).
+    commit: '50658dfaf7d2d41ff100e9f50ed24fa14bb15ec2',
     files: {
       en: 'flows/appointment-from-whatsapp-unattended.en.flow.json',
       es: 'flows/appointment-from-whatsapp-unattended.es.flow.json',
       grants: 'flows/appointment-from-whatsapp-unattended.grants.json',
     },
     digest: {
-      en: 'bb4b97da3a2856d38ffc08f248d459f924c7f512d1fdb17ad46cce25a8e2d652',
-      es: 'bd4c253874dccaa2de5a35e256d8482a72f8b3b9006f5749b928ad13dbe57887',
+      en: 'e5086d07e4d1a2a5bca8943988de1272e7fbd85a76aced04a4d3ad1b6a1aac78',
+      es: '29efdda91f1ba06215715ebd02b30145383b3dbc34bf6e5b9ac79212f1c44560',
     },
   },
 ] as const;
@@ -727,13 +744,16 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
    * where it is caught — and a grant is the difference between an automation that books and one
    * that writes to a customer without being allowed to.
    *
-   * Thirteen: eleven, plus the two whatsapp_inbox#61 needs to CANCEL — reading what a customer
-   * already has, and cancelling it. (It was twelve before whatsapp_inbox#55 dropped
+   * Fourteen: eleven, plus the two whatsapp_inbox#61 needs to CANCEL — reading what a customer
+   * already has, and cancelling it — plus the one whatsapp_inbox#74 needs to MOVE one. Moving
+   * needs no fifteenth: it reuses the same `list_for_customer` read to know WHICH appointment it
+   * is moving, and the availability trio to know where to move it to. (It was twelve before
+   * whatsapp_inbox#55 dropped
    * `appointments.appointments.conflicting`: `availability.check` already refuses an overlap with
    * the booking gate's own authority, and the reads it does on the way run as the SYSTEM
    * (`preload_reads`), which no grant governs.)
    */
-  it('asks for the thirteen permissions the module’s own grants file lists, and no fourteenth', () => {
+  it('asks for the fourteen permissions the module’s own grants file lists, and no fifteenth', () => {
     expect(
       templateGrants(template!, t)
         .map((g) => `${g.kind} ${g.value}`)
@@ -742,6 +762,7 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
       [
         'command appointments.appointments.cancel',
         'command appointments.appointments.create',
+        'command appointments.appointments.reschedule',
         'command appointments.availability.check',
         'command appointments.availability.day_opening',
         'command appointments.availability.slots',
@@ -851,12 +872,12 @@ describe('WhatsApp → appointment BOOKED, the family that runs with nobody watc
     expect(confirm?.to).toEqual(steps[0].to);
   });
 
-  it('asks for the same thirteen permissions as its attended twin, and not one more', () => {
+  it('asks for the same fourteen permissions as its attended twin, and not one more', () => {
     // Running unattended is a reason to skip the tray, never a reason to want more authority.
     const mine = templateGrants(template!, t).map((g) => `${g.kind} ${g.value}`).sort();
     const theirs = templateGrants(attended!, t).map((g) => `${g.kind} ${g.value}`).sort();
     expect(mine).toEqual(theirs);
-    expect(mine).toHaveLength(13);
+    expect(mine).toHaveLength(14);
   });
 
   it('needs the same five modules, so a hub short of one never sees it', () => {
