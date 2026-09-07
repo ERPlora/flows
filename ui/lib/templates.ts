@@ -771,6 +771,301 @@ export const TEMPLATES: readonly FlowTemplate[] = [
   },
 
   // ── Bars and restaurants ────────────────────────────────────────────────────────────────────
+  /**
+   * **The same automation the salon has, one module over: a table instead of a chair**
+   * (whatsapp_inbox#60).
+   *
+   * A restaurant that connected its WhatsApp found the two cards of a hairdresser and nothing it
+   * could use — «mesa para cuatro mañana a las nueve» was answered by nobody. The module has
+   * published the recipe since whatsapp_inbox#60; this is that recipe, in the only catalogue a hub
+   * reads, because `erplora pack` leaves `flows/` out of the zip (module-toolkit#209) and the hub
+   * reads no `.flow.json` from an installed module (hub#1611). Without a card here the automation
+   * is written, reviewed, merged, published — and unreachable.
+   *
+   * **What is NOT a second design.** The trigger, the four steps, the prompts and the nine
+   * permissions are pinned against the ones the module publishes, by commit and by a hash of the
+   * whole document in both languages, exactly like the appointment pair above.
+   *
+   * **One step fewer than the appointment twin, on purpose.** There is no `know_the_customer`:
+   * `customer_id` is optional on a reservation, so the booking step looks the guest up with
+   * `customers.list` and, when the restaurant does not have them, books the table on the name and
+   * the phone they gave and creates NOBODY. One turn less, one write less, one permission less
+   * than the salon's — an automation has no business adding people to a customer list at 3 AM.
+   *
+   * 🔴 **And it cannot change or cancel a table that already exists** — the reason the prompts say
+   * «somebody from the restaurant will take care of it» instead of doing it.
+   * `reservations.reservations.set_status` and `.update` are `additionalProperties: false` over
+   * `{reservation_id, …}` with no `channel` and no `customer_id`, and the handler only validates
+   * the state machine, never whose row it is; `reservations.reservations.list` filters
+   * `guest_phone` with `like`, so any `reservation_id` is one query away. Handing those tools to a
+   * model that answers a phone number would let a stranger move somebody else's table. It reopens
+   * with ERPlora/reservations#50, the twin of appointments#140.
+   */
+  {
+    id: 'whatsapp-reservation',
+    sector: 'food',
+    icon: 'restaurant-outline',
+    nameKey: 'tpl.waReservation.name',
+    summaryKey: 'tpl.waReservation.summary',
+    plainKey: 'tpl.waReservation.plain',
+    blanks: [
+      { labelKey: 'tpl.waReservation.blankReply', hintKey: 'tpl.waReservation.blankReplyHint' },
+    ],
+    // Three modules, not five: it answers through the conversation (`whatsapp_inbox`), it writes
+    // into the book (`reservations`) and it looks the guest up on the customer list
+    // (`customers`). A restaurant without Reservations cannot run it, which is why the gallery
+    // hides the card rather than offering it greyed out — the same rule that keeps the
+    // hairdresser's appointment cards away from a bar.
+    witnesses: [
+      { event: 'whatsapp_inbox.message.received', module: 'whatsapp_inbox' },
+      { event: 'reservations.reservation.created', module: 'reservations' },
+      { event: 'customer.created', module: 'customers' },
+    ],
+    grantReasons: {
+      whatsapp: 'tpl.grant.notifyWhatsapp',
+      'whatsapp_inbox.conversations.list#contact_phone': 'tpl.grant.recipientWhatsapp',
+      'customers.list': 'tpl.grant.customersList',
+      'reservations.settings.get': 'tpl.grant.reservationsSettings',
+      'reservations.timeslots.list': 'tpl.grant.reservationsTimeslots',
+      'reservations.slots.count_for': 'tpl.grant.reservationsSlotsCount',
+      'reservations.blocked_dates.on_date': 'tpl.grant.reservationsBlockedDates',
+      'reservations.reservations.create': 'tpl.grant.reservationsCreate',
+      'reservations.waitlist.create': 'tpl.grant.reservationsWaitlistCreate',
+    },
+    build: (t) => ({
+      schema_version: SCHEMA_VERSION,
+      triggers: [
+        {
+          kind: 'event',
+          // The same event, the same filter and the same three `neq` as the appointment pair
+          // above, copied rather than reinvented: `direction` and `source` only reach the event
+          // from hub#1621, which no published hub tag carries, and in the kernel an absent path is
+          // `Null` — so an affirmative filter matches NOTHING on a hub at the module's declared
+          // floor, silently. The twin's card carries the long version of the why.
+          event: 'hub.whatsapp.message_received',
+          filter: {
+            'event.text': { neq: '' },
+            'event.direction': { neq: 'outbound' },
+            'event.source': { neq: 'history' },
+          },
+          input: {
+            from: 'event.from',
+            text: 'event.text',
+            wa_message_id: 'event.wa_message_id',
+            received_at: 'event.received_at',
+          },
+        },
+      ],
+      steps: [
+        // Answered in seconds, before anybody at the restaurant has read anything. The recipient is
+        // resolved through the conversation and never written into the document: a template
+        // carrying a phone number would text the wrong person on every hub that installed it.
+        {
+          id: 'acknowledge',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: {
+            query: 'whatsapp_inbox.conversations.list',
+            params: { f_wa_contact_id: 'input.from' },
+            field: 'contact_phone',
+          },
+          template: '',
+          vars: { text: t('tpl.waReservation.ackText') },
+        },
+        // `manual`: it works out what is free and PROPOSES the table, and the write waits in the
+        // approval tray until somebody at the restaurant says yes.
+        //
+        // `on_reject: "continue"` is not a detail — without it a «no» ends the run where it stands
+        // and the guest, already told to expect an answer, never gets one (the twin's
+        // whatsapp_inbox#67).
+        {
+          id: 'book_table',
+          kind: 'ai',
+          prompt: t('tpl.waReservation.bookPrompt'),
+          tools: {
+            queries: [
+              'customers.list',
+              'reservations.settings.get',
+              'reservations.timeslots.list',
+              'reservations.slots.count_for',
+              'reservations.blocked_dates.on_date',
+            ],
+            commands: ['reservations.reservations.create', 'reservations.waitlist.create'],
+          },
+          policy: 'manual',
+          max_iters: 10,
+          on_reject: 'continue',
+        },
+        // The step that knows HOW the restaurant decided and writes what the guest actually reads.
+        // No tools at all, and one iteration: it may only put the outcome of the step before it
+        // into words — the booking words when nothing was refused, and a real «that table cannot
+        // be, tell me another day» when it was.
+        {
+          id: 'reply_to_customer',
+          kind: 'ai',
+          prompt: t('tpl.waReservation.replyPrompt'),
+          policy: 'manual',
+          max_iters: 1,
+        },
+        // What that step wrote, sent as it is.
+        {
+          id: 'confirm_to_customer',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: {
+            query: 'whatsapp_inbox.conversations.list',
+            params: { f_wa_contact_id: 'input.from' },
+            field: 'contact_phone',
+          },
+          template: '',
+          vars: { text: '{{steps.reply_to_customer.text}}' },
+        },
+      ],
+    }),
+  },
+
+  /**
+   * **The same table booking, with nobody watching** (whatsapp_inbox#60).
+   *
+   * The twin above proposes and waits: the write sits in the approval tray until somebody at the
+   * restaurant says yes. That is right for a place with somebody at the pass and wrong for the one
+   * this card is for — the bar whose WhatsApp nobody reads until service is over, where the tray is
+   * not a safety net but where bookings go to expire.
+   *
+   * So the booking step is `auto`: the table is in the book inside the turn and the guest is told
+   * so in the same breath.
+   *
+   * **What does not change, and is the whole reason this is safe enough to ship:** the model never
+   * chooses the hour NOR how many people are coming. It may only book a time the guest asked for,
+   * for the number they said; if the message does not pin down the day, the time AND the party
+   * size, it books nothing and answers with what is really free. With no person to catch it, a bot
+   * that picks the hour seats people while the kitchen is shut, and one that guesses the party size
+   * seats four at a table for two — both found out at the door, in front of the other guests. That
+   * rule lives in the prompt, in both languages, and
+   * `whatsapp_inbox/tests/flow_templates.test.py::hour_choice_problems` is what keeps it there.
+   *
+   * **Install ONE of the two, never both.** They wait on the same event with the same filter, so a
+   * hub running both books every incoming message twice — and the gallery warns before it creates
+   * the second one.
+   */
+  {
+    id: 'whatsapp-reservation-unattended',
+    sector: 'food',
+    // A bookmark against the twin's table setting: this one is already held.
+    icon: 'bookmark-outline',
+    nameKey: 'tpl.waReservationUnattended.name',
+    summaryKey: 'tpl.waReservationUnattended.summary',
+    plainKey: 'tpl.waReservationUnattended.plain',
+    blanks: [
+      {
+        labelKey: 'tpl.waReservationUnattended.blankReply',
+        hintKey: 'tpl.waReservationUnattended.blankReplyHint',
+      },
+    ],
+    // Three modules, not five: it answers through the conversation (`whatsapp_inbox`), it writes
+    // into the book (`reservations`) and it looks the guest up on the customer list
+    // (`customers`). A restaurant without Reservations cannot run it, which is why the gallery
+    // hides the card rather than offering it greyed out — the same rule that keeps the
+    // hairdresser's appointment cards away from a bar.
+    witnesses: [
+      { event: 'whatsapp_inbox.message.received', module: 'whatsapp_inbox' },
+      { event: 'reservations.reservation.created', module: 'reservations' },
+      { event: 'customer.created', module: 'customers' },
+    ],
+    // The same nine as the twin, and deliberately not one more: running unattended is a reason to
+    // skip the tray, never a reason to ask for a permission the attended twin does without.
+    grantReasons: {
+      whatsapp: 'tpl.grant.notifyWhatsapp',
+      'whatsapp_inbox.conversations.list#contact_phone': 'tpl.grant.recipientWhatsapp',
+      'customers.list': 'tpl.grant.customersList',
+      'reservations.settings.get': 'tpl.grant.reservationsSettings',
+      'reservations.timeslots.list': 'tpl.grant.reservationsTimeslots',
+      'reservations.slots.count_for': 'tpl.grant.reservationsSlotsCount',
+      'reservations.blocked_dates.on_date': 'tpl.grant.reservationsBlockedDates',
+      'reservations.reservations.create': 'tpl.grant.reservationsCreate',
+      'reservations.waitlist.create': 'tpl.grant.reservationsWaitlistCreate',
+    },
+    build: (t) => ({
+      schema_version: SCHEMA_VERSION,
+      triggers: [
+        {
+          kind: 'event',
+          // The same event, the same filter and the same three `neq` as the appointment pair
+          // above, copied rather than reinvented: `direction` and `source` only reach the event
+          // from hub#1621, which no published hub tag carries, and in the kernel an absent path is
+          // `Null` — so an affirmative filter matches NOTHING on a hub at the module's declared
+          // floor, silently. The twin's card carries the long version of the why.
+          event: 'hub.whatsapp.message_received',
+          filter: {
+            'event.text': { neq: '' },
+            'event.direction': { neq: 'outbound' },
+            'event.source': { neq: 'history' },
+          },
+          input: {
+            from: 'event.from',
+            text: 'event.text',
+            wa_message_id: 'event.wa_message_id',
+            received_at: 'event.received_at',
+          },
+        },
+      ],
+      steps: [
+        // Answered in seconds, and here it is the only thing that happens before the book is
+        // touched. Its wording promises no person: with this family there is not one.
+        {
+          id: 'acknowledge',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: {
+            query: 'whatsapp_inbox.conversations.list',
+            params: { f_wa_contact_id: 'input.from' },
+            field: 'contact_phone',
+          },
+          template: '',
+          vars: { text: t('tpl.waReservationUnattended.ackText') },
+        },
+        // `auto`, and this is the step the whole family exists for: it books. Same tools and same
+        // budget as the twin, and no `on_reject` because there is nobody to reject anything.
+        //
+        // There is no `reply_to_customer` after it either — with no approval in the middle there is
+        // no outcome to translate, so the booking step writes the guest's words itself and the
+        // prompt ends by demanding they come in the SAME reply as the booking: a table booked with
+        // no words leaves the guest with nothing.
+        {
+          id: 'book_table',
+          kind: 'ai',
+          prompt: t('tpl.waReservationUnattended.bookPrompt'),
+          tools: {
+            queries: [
+              'customers.list',
+              'reservations.settings.get',
+              'reservations.timeslots.list',
+              'reservations.slots.count_for',
+              'reservations.blocked_dates.on_date',
+            ],
+            commands: ['reservations.reservations.create', 'reservations.waitlist.create'],
+          },
+          policy: 'auto',
+          max_iters: 10,
+        },
+        // What the booking step wrote, sent as it is: with no approval in the middle this is the
+        // guest's ONLY notice that the table exists.
+        {
+          id: 'confirm_to_customer',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: {
+            query: 'whatsapp_inbox.conversations.list',
+            params: { f_wa_contact_id: 'input.from' },
+            field: 'contact_phone',
+          },
+          template: '',
+          vars: { text: '{{steps.book_table.text}}' },
+        },
+      ],
+    }),
+  },
+
   {
     id: 'big-party-reservation',
     sector: 'food',

@@ -531,6 +531,65 @@ const SOURCES: readonly MirrorSource[] = [
       es: 'bd4c253874dccaa2de5a35e256d8482a72f8b3b9006f5749b928ad13dbe57887',
     },
   },
+  {
+    template: 'whatsapp-reservation',
+    module: 'whatsapp_inbox',
+    // whatsapp_inbox#60, squash-merged as `6a8e1d7`: the same recipe one module over, writing into
+    // `reservations` instead of `appointments`. A restaurant that connected its number was offered
+    // the two cards of a hairdresser and nothing it could use, and the module's own battery went
+    // green over it — every rule there judges the documents that EXIST, and the missing one is not
+    // a document anything can miss. `shipped_recipe_problems` is the guard that closed it there;
+    // the last test of this file is the one that closes it HERE, and it is what went red naming
+    // these two families the day the source landed.
+    //
+    // 🔴 Four steps and NOT five: there is no `know_the_customer`. `customer_id` is optional on a
+    // reservation, so the booking step looks the guest up with `customers.list` and, when the
+    // restaurant does not have them, books on the name and phone they gave and creates NOBODY —
+    // one write and one permission fewer than the salon's twin (nine grants against fourteen).
+    //
+    // 🔴 And it hands NO tool that could touch a table that already exists.
+    // `reservations.reservations.set_status` and `.update` take `{reservation_id, …}` with
+    // `additionalProperties: false`, no `channel` and no `customer_id`, and the handler only
+    // validates the state machine — never whose row it is. With
+    // `reservations.reservations.list` filtering `guest_phone` with `like`, any id is one query
+    // away, so a model answering a phone number could move a stranger's table. Both families
+    // answer «somebody from the restaurant will take care of it» instead, and the module's battery
+    // pins that with `unowned_table_problems`. It reopens with ERPlora/reservations#50 — the twin
+    // of appointments#140, and the same shape as appointments#142 for `reschedule`.
+    commit: '6a8e1d7910af7ba2e0b276601fc03e3bd46015ae',
+    files: {
+      en: 'flows/reservation-from-whatsapp.en.flow.json',
+      es: 'flows/reservation-from-whatsapp.es.flow.json',
+      grants: 'flows/reservation-from-whatsapp.grants.json',
+    },
+    digest: {
+      en: '6ae2ee8e9b8476335b83e32c58e64cb0f056fb69d28f2d8e071df5b2db482721',
+      es: '48c26dc29ddb6a465ab6f453cd8eafe52c3234f769f4703b1886194164e6b887',
+    },
+  },
+  {
+    template: 'whatsapp-reservation-unattended',
+    module: 'whatsapp_inbox',
+    // The unattended half of the same source commit: three steps, the booking one on `auto`, and
+    // no `reply_to_customer` because with no approval in the middle there is no outcome to put
+    // into words — the booking step writes the guest's message itself, in the same reply.
+    //
+    // What keeps it shippable is a paragraph of prompt, pinned in both languages by the module's
+    // `hour_choice_problems`: the model never chooses the hour NOR the party size. Its own
+    // sentence, not the salon's — «You never choose the hour or how many people are coming. They
+    // do.» — because the harm has one more field here: an hour nobody asked for seats people while
+    // the kitchen is shut, and a party size nobody said seats four at a table for two.
+    commit: '6a8e1d7910af7ba2e0b276601fc03e3bd46015ae',
+    files: {
+      en: 'flows/reservation-from-whatsapp-unattended.en.flow.json',
+      es: 'flows/reservation-from-whatsapp-unattended.es.flow.json',
+      grants: 'flows/reservation-from-whatsapp-unattended.grants.json',
+    },
+    digest: {
+      en: '8a2229fabb0f3c6105c7a43fcd466df05b76264fc7245614836c01677caa4d98',
+      es: 'f8de23188bd2d749fb6a7161b082fd0deeff1939bd8be97397a72156061375d1',
+    },
+  },
 ] as const;
 
 /** The family this file was written around, and the one most of the tests below name. */
