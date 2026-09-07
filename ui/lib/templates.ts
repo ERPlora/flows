@@ -498,14 +498,39 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           template: '',
           vars: { text: t('tpl.waAppointment.ackText') },
         },
-        // `manual`: creating a customer card is a write, and it waits for a person.
+        // whatsapp_inbox#103. The address book is searchable by NAME, so a model holding
+        // `customers.list` resolves whoever a stranger's message names — «what has María got
+        // booked?» → her id → her diary, written back to whoever asked. A `query` grant cannot pin
+        // its params the way hub#1632 pins a command's, so the lookup LEAVES the model instead: a
+        // `kind: query` step (hub#954) whose params the DOCUMENT maps, keyed on the one identity
+        // WhatsApp vouched for. The only `customer_id` in the run is the number's own.
+        {
+          id: 'find_customer',
+          kind: 'query',
+          query: 'customers.list',
+          params: { f_phone: '+{{input.from}}' },
+          result: 'first',
+          limit: 1,
+        },
+        // `manual`: creating a customer card is a write, and it waits for a person. It no longer
+        // SEARCHES — the step above already did, and its answer is in the prompt.
         {
           id: 'know_the_customer',
           kind: 'ai',
           prompt: t('tpl.waAppointment.knowPrompt'),
-          tools: { queries: ['customers.list'], commands: ['customers.create'] },
+          tools: { commands: ['customers.create'] },
           policy: 'manual',
           max_iters: 4,
+        },
+        // Resolved a second time because the step before it may have just CREATED the customer:
+        // the first read answers «is she on file», this one carries the id that exists afterwards.
+        {
+          id: 'resolve_customer',
+          kind: 'query',
+          query: 'customers.list',
+          params: { f_phone: '+{{input.from}}' },
+          result: 'first',
+          limit: 1,
         },
         // `manual` again, and this is the one that matters: what it proposes waits in the tray
         // until somebody at the salon says yes. ONE turn asks the diary and proposes — the
@@ -535,7 +560,6 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           prompt: t('tpl.waAppointment.proposePrompt'),
           tools: {
             queries: [
-              'customers.list',
               'services.services.list',
               'staff.members.list',
               'staff.schedules.list_for_member',
@@ -701,15 +725,37 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           template: '',
           vars: { text: t('tpl.waAppointmentUnattended.ackText') },
         },
+        // whatsapp_inbox#103, and the family it was opened against: with `policy: "auto"` nothing
+        // reads the model's work before the customer does, so «what has María got booked?» was one
+        // name-search away from a stranger's diary being read out on WhatsApp. The lookup is a
+        // deterministic `query` step now, keyed on the phone the message came from.
+        {
+          id: 'find_customer',
+          kind: 'query',
+          query: 'customers.list',
+          params: { f_phone: '+{{input.from}}' },
+          result: 'first',
+          limit: 1,
+        },
         // `auto`: the customer card is created inside the turn, on the salon's real customer list.
-        // The prompt says so in as many words — nobody checks this afterwards.
+        // The prompt says so in as many words — nobody checks this afterwards. It is handed the
+        // answer of the read above and no way to run another.
         {
           id: 'know_the_customer',
           kind: 'ai',
           prompt: t('tpl.waAppointmentUnattended.knowPrompt'),
-          tools: { queries: ['customers.list'], commands: ['customers.create'] },
+          tools: { commands: ['customers.create'] },
           policy: 'auto',
           max_iters: 4,
+        },
+        // Read again after the create: this is the id the booking step is given.
+        {
+          id: 'resolve_customer',
+          kind: 'query',
+          query: 'customers.list',
+          params: { f_phone: '+{{input.from}}' },
+          result: 'first',
+          limit: 1,
         },
         // `auto`, and this is the step the whole family exists for: it books. Named
         // `book_appointment` and not `propose_appointment` because that is what it does — there is
@@ -734,7 +780,6 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           prompt: t('tpl.waAppointmentUnattended.bookPrompt'),
           tools: {
             queries: [
-              'customers.list',
               'services.services.list',
               'staff.members.list',
               'staff.schedules.list_for_member',
@@ -878,13 +923,23 @@ export const TEMPLATES: readonly FlowTemplate[] = [
         // `on_reject: "continue"` is not a detail — without it a «no» ends the run where it stands
         // and the guest, already told to expect an answer, never gets one (the twin's
         // whatsapp_inbox#67).
+        // whatsapp_inbox#103, in the table families too: the guest is resolved from the number
+        // the message came from, deterministically, before the model is asked anything. The
+        // booking step no longer holds the address book, so it cannot look a stranger up by name.
+        {
+          id: 'find_customer',
+          kind: 'query',
+          query: 'customers.list',
+          params: { f_phone: '+{{input.from}}' },
+          result: 'first',
+          limit: 1,
+        },
         {
           id: 'book_table',
           kind: 'ai',
           prompt: t('tpl.waReservation.bookPrompt'),
           tools: {
             queries: [
-              'customers.list',
               'reservations.settings.get',
               'reservations.timeslots.list',
               'reservations.slots.count_for',
@@ -1031,13 +1086,23 @@ export const TEMPLATES: readonly FlowTemplate[] = [
         // no outcome to translate, so the booking step writes the guest's words itself and the
         // prompt ends by demanding they come in the SAME reply as the booking: a table booked with
         // no words leaves the guest with nothing.
+        // whatsapp_inbox#103. Same deterministic resolution as the twin, and here it is the only
+        // one there is: with `policy: "auto"` the step's answer goes straight to the guest, so a
+        // model that could search by name could read a stranger's booking out loud.
+        {
+          id: 'find_customer',
+          kind: 'query',
+          query: 'customers.list',
+          params: { f_phone: '+{{input.from}}' },
+          result: 'first',
+          limit: 1,
+        },
         {
           id: 'book_table',
           kind: 'ai',
           prompt: t('tpl.waReservationUnattended.bookPrompt'),
           tools: {
             queries: [
-              'customers.list',
               'reservations.settings.get',
               'reservations.timeslots.list',
               'reservations.slots.count_for',
