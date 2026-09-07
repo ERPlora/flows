@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import './erp-flows-gallery';
@@ -271,25 +272,44 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
  * catalogue does not have. Same rule the mirror tests in `ui/lib/templates.test.ts` apply to the
  * neighbour's flow documents.
  */
-function emitterSource(): string | null {
+const EMITTER_PATH = 'ui/lib/whatsapp-uses.ts';
+
+function emitterSource(): { source: string; where: string } | null {
   const modules = resolve(__dirname, '../../../..');
+  const canonical = join(modules, 'whatsapp_inbox');
+  if (existsSync(canonical)) {
+    try {
+      return {
+        source: execFileSync('git', ['-C', canonical, 'show', `origin/main:${EMITTER_PATH}`], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }),
+        where: 'whatsapp_inbox@origin/main',
+      };
+    } catch {
+      // No `origin/main` fetched, or the emitter is not on it yet. The `where` label below reports
+      // whichever source actually answered, so a fallback is never silent.
+    }
+  }
   for (const dir of ['whatsapp_inbox', 'whatsapp_inbox-wt-59']) {
-    const file = join(modules, dir, 'ui/lib/whatsapp-uses.ts');
-    if (existsSync(file)) return file;
+    const file = join(modules, dir, EMITTER_PATH);
+    if (existsSync(file)) return { source: readFileSync(file, 'utf8'), where: file };
   }
   return null;
 }
 
 describe('the module that emits the shortcut and the gallery that reads it agree (whatsapp_inbox#59)', () => {
-  const file = emitterSource();
-  const where = file ? `read from ${file}` : 'SKIPPED: no whatsapp_inbox checkout beside this module';
+  const emitter = emitterSource();
+  const where = emitter
+    ? `read from ${emitter.where}`
+    : 'SKIPPED: no whatsapp_inbox checkout beside this module';
 
-  it.skipIf(!file)(`names the parameter this gallery reads (${where})`, () => {
-    expect(readFileSync(file!, 'utf8')).toContain('?template=');
+  it.skipIf(!emitter)(`names the parameter this gallery reads (${where})`, () => {
+    expect(emitter!.source).toContain('?template=');
   });
 
-  it.skipIf(!file)(`only offers cards this gallery has (${where})`, () => {
-    const source = readFileSync(file!, 'utf8');
+  it.skipIf(!emitter)(`only offers cards this gallery has (${where})`, () => {
+    const source = emitter!.source;
     const uses = source.slice(source.indexOf('WHATSAPP_USES'));
     const ids = [...uses.matchAll(/^\s{4}id: '([^']+)',$/gm)].map((m) => m[1]);
     expect(ids.length, 'the emitter offers no use at all — this guard is reading the wrong thing').toBeGreaterThan(0);
