@@ -46,9 +46,9 @@ const tEs = (key: string): string => lookup(es, key) ?? key;
 
 /** Every i18n key a template hands to `t()`. */
 const keysOf = (template: (typeof TEMPLATES)[number]): string[] => [
-  template.nameKey,
-  template.summaryKey,
-  template.plainKey,
+  ...[template.nameKey, template.summaryKey, template.plainKey].filter(
+    (key): key is string => !!key,
+  ),
   ...template.blanks.flatMap((b) => [b.labelKey, b.hintKey]),
   ...Object.values(template.grantReasons),
 ];
@@ -61,6 +61,21 @@ describe('the template catalogue', () => {
   it('gives every template a sector the gallery knows how to group', () => {
     for (const template of TEMPLATES) {
       expect(SECTORS).toContain(template.sector);
+    }
+  });
+
+  /**
+   * flows#98 opened `sector` and the three text keys because a card the HUB serves has neither: its
+   * title travels inside the module's document and its heading is the app it came with. Nothing
+   * written in this file may take that door — a card here without a `nameKey` would render blank.
+   */
+  it('gives every card written HERE its own texts, whatever the type now allows', () => {
+    for (const template of TEMPLATES) {
+      expect(template.nameKey, template.id).toBeTruthy();
+      expect(template.summaryKey, template.id).toBeTruthy();
+      expect(template.plainKey, template.id).toBeTruthy();
+      expect(template.source, `${template.id} is written here, it cannot claim a module served it`)
+        .toBeUndefined();
     }
   });
 
@@ -1148,8 +1163,8 @@ describe('WhatsApp → appointment BOOKED, the family that runs with nobody watc
     // automation twice. Asserted on the meaning, not the prose: each locale must say, in its own
     // words, that it books on its own, and must not promise a review.
     for (const [lang, translate] of [['en', t], ['es', tEs]] as const) {
-      const summary = translate(template!.summaryKey);
-      const plain = translate(template!.plainKey);
+      const summary = translate(template!.summaryKey!);
+      const plain = translate(template!.plainKey!);
       expect(summary, `${lang}: the summary is still the i18n key`).not.toBe(template!.summaryKey);
       const promise = lang === 'en' ? /no review|on its own|nobody/i : /sin revisión|ella sola|nadie/i;
       expect(summary + plain, `${lang}: the card does not say nobody reviews it`).toMatch(promise);
@@ -1489,6 +1504,31 @@ describe('every family whatsapp_inbox publishes has a card in this gallery (what
       families.filter((f) => !mirrored.has(f)),
       'published by whatsapp_inbox and mirrored by no card: an owner cannot install it',
     ).toEqual([]);
+  });
+
+  /**
+   * **The pin and the card say the same thing about what is mirrored** (flows#98).
+   *
+   * `mergeTemplates` retires a hand copy by reading `mirrors` off the card in production, and this
+   * list of pins is what keeps those copies honest against the source. Two places naming the same
+   * pairing is exactly the arrangement this issue is about, so they are checked against each other:
+   * a card that loses its `mirrors` stops being retired and quietly comes back as a second copy on
+   * every hub that serves the family — with all four pin tests still green.
+   */
+  it('marks in PRODUCTION the very family each pin mirrors', () => {
+    for (const s of SOURCES) {
+      const card = TEMPLATES.find((tpl) => tpl.id === s.template);
+      expect(card?.mirrors, `${s.template} is pinned to a published family but is not marked as a copy of it`)
+        .toEqual({ module: s.module, family: s.files.en.replace('flows/', '').replace('.en.flow.json', '') });
+    }
+    // And nothing is marked as a copy of something no pin watches: a mirror nobody checks against
+    // the source is the drift this catalogue has already shipped twice.
+    for (const tpl of TEMPLATES.filter((c) => c.mirrors)) {
+      expect(
+        SOURCES.find((s) => s.template === tpl.id),
+        `${tpl.id} says it mirrors ${tpl.mirrors?.family} and no pin watches that family`,
+      ).toBeTruthy();
+    }
   });
 
   it('has a real card behind every pin, and one card per pin', () => {

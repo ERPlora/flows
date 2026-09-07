@@ -73,14 +73,56 @@ const NEED_FACT: Record<TemplateNeed, keyof SchemaFacts> = {
 
 export interface FlowTemplate {
   id: string;
-  sector: Sector;
+  /**
+   * The family this card is grouped under, and only cards WRITTEN here have one (flows#98).
+   *
+   * A card the hub serves comes from an installed module, so its heading is that module rather
+   * than a trade: grouping «WhatsApp → appointment» under beauty on a hub that also books tables
+   * would hide it from the restaurant that has the app installed and running.
+   */
+  sector?: Sector;
   /** `ion-icon` name (registered by the module build, never a loose SVG). */
   icon: string;
-  nameKey: string;
+  /**
+   * Where the card's texts come from, for a card written in this catalogue: an i18n key each.
+   *
+   * Optional since flows#98 because a card the hub serves carries its title INSIDE the document
+   * the module published, already in the owner's language — there is no key of ours to look up.
+   * Read them through {@link templateName}/{@link templateSummary}/{@link templatePlain}, never
+   * directly, or a served card prints an empty string where its name should be.
+   */
+  nameKey?: string;
   /** One line for the card. */
-  summaryKey: string;
+  summaryKey?: string;
   /** The whole automation as a sentence, for the panel before it is created. */
-  plainKey: string;
+  plainKey?: string;
+  /** The title a SERVED card carries, written by the module in the owner's language (flows#98). */
+  name?: string;
+  /**
+   * The module and family a SERVED card came from — what lets the gallery say where it is from.
+   *
+   * Present exactly when the hub served the card (`GET /api/hub/flows/templates`), absent on
+   * everything written in this file.
+   */
+  source?: { readonly module: string; readonly family: string };
+  /**
+   * The family this card is a HAND COPY of, on a card written here that duplicates a module's own
+   * recipe (flows#52 → flows#98).
+   *
+   * Until hub#1645 a module's `flows/` folder could not reach any hub, so the WhatsApp recipes
+   * were mirrored into this catalogue verbatim. On a hub that serves them there would be TWO cards
+   * for one automation, so {@link mergeTemplates} drops the copy in favour of the original — and
+   * on the fleet that does not serve anything yet the copy is still the only way in.
+   */
+  mirrors?: { readonly module: string; readonly family: string };
+  /**
+   * The permissions a SERVED card will ask for, as the module declared them in `<family>.grants.json`.
+   *
+   * A card written here derives them from its own document ({@link templateGrants}); a served one
+   * cannot, because the module may declare a narrower list than the document reads as — and the
+   * module's list is the one `erplora validate` checked against the recipe it ships.
+   */
+  grants?: readonly Grant[];
   blanks: readonly TemplateBlank[];
   witnesses: readonly TemplateWitness[];
   /** Why each command is needed, keyed by command name. Shown BEFORE the flow exists. */
@@ -480,6 +522,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
    */
   {
     id: 'whatsapp-appointment',
+    mirrors: { module: 'whatsapp_inbox', family: 'appointment-from-whatsapp' },
     sector: 'beauty',
     icon: 'calendar-number-outline',
     nameKey: 'tpl.waAppointment.name',
@@ -718,6 +761,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
    */
   {
     id: 'whatsapp-appointment-unattended',
+    mirrors: { module: 'whatsapp_inbox', family: 'appointment-from-whatsapp-unattended' },
     sector: 'beauty',
     // The list she TAPS (`interactive`, hub#1633) and the slots the model hands over (`output`,
     // hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it is refused
@@ -1009,6 +1053,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
    */
   {
     id: 'whatsapp-reservation',
+    mirrors: { module: 'whatsapp_inbox', family: 'reservation-from-whatsapp' },
     sector: 'food',
     icon: 'restaurant-outline',
     nameKey: 'tpl.waReservation.name',
@@ -1166,6 +1211,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
    */
   {
     id: 'whatsapp-reservation-unattended',
+    mirrors: { module: 'whatsapp_inbox', family: 'reservation-from-whatsapp-unattended' },
     sector: 'food',
     // A bookmark against the twin's table setting: this one is already held.
     icon: 'bookmark-outline',
@@ -1591,17 +1637,60 @@ export function templateInstallation<T extends InstalledFlowFacts>(
 export function flowsWorthAsking<T extends { definition: Record<string, unknown> }>(
   flows: readonly T[],
   t: Translator,
+  catalogue: readonly FlowTemplate[] = TEMPLATES,
 ): T[] {
-  return flows.filter((flow) => TEMPLATES.some((template) => isCandidateFor(template, t, flow)));
+  return flows.filter((flow) => catalogue.some((template) => isCandidateFor(template, t, flow)));
 }
 
-export function templateById(id: string): FlowTemplate | undefined {
-  return TEMPLATES.find((tpl) => tpl.id === id);
+/**
+ * The card an id names, out of the catalogue that is actually on screen (flows#98).
+ *
+ * The catalogue is a parameter and not this file's constant because half of it may have come from
+ * the hub: a deep link naming a served card — or the retired mirror it replaced — has to resolve,
+ * and against the written catalogue alone it resolves to nothing and the gallery opens empty.
+ */
+export function templateById(
+  id: string,
+  catalogue: readonly FlowTemplate[] = TEMPLATES,
+): FlowTemplate | undefined {
+  return catalogue.find((tpl) => tpl.id === id);
 }
 
-/** The templates of one sector, in catalogue order. */
-export function templatesOf(sector: Sector): FlowTemplate[] {
-  return TEMPLATES.filter((tpl) => tpl.sector === sector);
+/** The templates of one sector, in catalogue order. A served card has no sector and is not here. */
+export function templatesOf(
+  sector: Sector,
+  catalogue: readonly FlowTemplate[] = TEMPLATES,
+): FlowTemplate[] {
+  return catalogue.filter((tpl) => tpl.sector === sector);
+}
+
+/**
+ * **The card's title, whoever wrote it** (flows#98).
+ *
+ * A card written here keeps its texts in the catalogue and resolves them through `t`; a card the
+ * hub served carries them inside the document its module published, already translated. Reading
+ * `nameKey` straight would print an empty string on every served card.
+ */
+export function templateName(template: FlowTemplate, t: Translator): string {
+  return template.name ?? (template.nameKey ? t(template.nameKey) : template.id);
+}
+
+/** The one line under the card's title — for a served card, the app it came with. */
+export function templateSummary(template: FlowTemplate, t: Translator): string {
+  if (template.source) return t('ui.tplFromApp', { app: moduleName(template.source.module, t) });
+  return template.summaryKey ? t(template.summaryKey) : '';
+}
+
+/**
+ * The whole automation as a sentence, for the panel before it is created.
+ *
+ * A served card has no sentence of ours to show — the module wrote the document, not a description
+ * of it — so what the panel says is where it came from, and the STEPS are read out of the document
+ * itself by `describeStep`, which is the same reading the editor gives any other flow.
+ */
+export function templatePlain(template: FlowTemplate, t: Translator): string {
+  if (template.source) return t('ui.tplFromAppPlain', { app: moduleName(template.source.module, t) });
+  return template.plainKey ? t(template.plainKey) : '';
 }
 
 /** The document, ready to save. */
@@ -1617,6 +1706,11 @@ export function buildTemplate(template: FlowTemplate, t: Translator): FlowDoc {
  * screen right up until the automation silently does nothing.
  */
 export function templateGrants(template: FlowTemplate, t: Translator): Grant[] {
+  // flows#98 — a served card asks for what its module DECLARED in `<family>.grants.json`, which is
+  // the list `erplora validate` checked against the recipe. Deriving them again here would be a
+  // second opinion about somebody else's automation, and a narrower declared list — a module that
+  // deliberately does not ask for something its document could reach — would be widened by us.
+  if (template.grants) return template.grants.map((grant) => ({ ...grant }));
   const derived = requiredGrants(buildTemplate(template, t));
   // flows#80 — the limits the card declares, laid onto the permissions it derived. `setGrantPin`
   // and not a hand-rolled merge on purpose: it is the same function the Permissions screen writes
@@ -1668,10 +1762,25 @@ export function availableTemplates(
   sector: Sector,
   known: Readonly<Record<string, boolean>>,
   facts: SchemaFacts = schemaFacts(undefined),
+  catalogue: readonly FlowTemplate[] = TEMPLATES,
 ): FlowTemplate[] {
-  return templatesOf(sector).filter(
-    (tpl) => missingModules(tpl, known).length === 0 && coreTakes(tpl, facts),
-  );
+  return templatesOf(sector, catalogue).filter((tpl) => runnableHere(tpl, known, facts));
+}
+
+/**
+ * Whether this hub can run this card at all — its modules are here and its core parses it.
+ *
+ * Exported because the served cards do not live in a sector (they are grouped by the app they came
+ * with), so {@link availableTemplates} never sees them and the same two checks have to be reachable
+ * on their own. Same function, so a card cannot be judged by one rule in the sector list and
+ * another under its app's heading.
+ */
+export function runnableHere(
+  template: FlowTemplate,
+  known: Readonly<Record<string, boolean>>,
+  facts: SchemaFacts = schemaFacts(undefined),
+): boolean {
+  return missingModules(template, known).length === 0 && coreTakes(template, facts);
 }
 
 /**
@@ -1731,4 +1840,45 @@ const MODULE_LABELS: Readonly<Record<string, string>> = {
 export function moduleName(id: string, t: Translator): string {
   const key = MODULE_LABELS[id];
   return key ? t(key) : id;
+}
+
+/**
+ * **The catalogue on screen once the hub has said what its modules bring** (flows#98, hub#1611).
+ *
+ * A module ships its automations in its own `flows/` folder and the hub serves them since
+ * hub#1645. Four cards in this file are hand copies of WhatsApp recipes made back when that door
+ * did not exist, so on a hub that serves them the owner would be shown the same automation twice —
+ * two cards, one of them a snapshot of whatever the module looked like the day it was copied.
+ *
+ * The copy gives way to the original, never the other way round: the module's version is the one
+ * that ships with the module the hub actually has installed.
+ *
+ * 🔴 **The retired card's id keeps working**, and that is not a nicety. `?template=…` is an address
+ * other modules publish — `whatsapp_inbox` pushes `whatsapp-appointment` from its own settings
+ * screen — so dropping the card without leaving a forwarding address turns a link inside the
+ * product into a gallery that opens on nothing.
+ */
+export interface MergedCatalogue {
+  /** What to paint: the written cards minus the retired copies, then the served ones. */
+  cards: FlowTemplate[];
+  /** `<id of the retired copy>` → `<id of the card that replaced it>`, for deep links already out there. */
+  aliases: Record<string, string>;
+}
+
+export function mergeTemplates(
+  local: readonly FlowTemplate[],
+  fromModules: readonly FlowTemplate[],
+): MergedCatalogue {
+  const aliases: Record<string, string> = {};
+  const retired = new Set<string>();
+  for (const served of fromModules) {
+    if (!served.source) continue;
+    for (const tpl of local) {
+      if (tpl.mirrors?.module !== served.source.module) continue;
+      if (tpl.mirrors.family !== served.source.family) continue;
+      retired.add(tpl.id);
+      aliases[tpl.id] = served.id;
+    }
+  }
+  return { cards: [...local.filter((tpl) => !retired.has(tpl.id)), ...fromModules], aliases };
 }
