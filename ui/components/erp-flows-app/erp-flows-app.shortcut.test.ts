@@ -65,7 +65,14 @@ function fakeClient() {
       update: vi.fn(async (id: string, f: unknown) => ({ id, ...(f as object) })),
       remove: vi.fn(async () => ({})),
       grants: vi.fn(async () => []),
-      replaceGrants: vi.fn(async () => []),
+      // A hub that KEEPS what it is handed, which is what a hub does — same shape as the editor's
+      // fixtures. The card this file drives (`whatsapp-appointment`) installs with pinned
+      // permissions, and `applyDeclaredLimits` writes them, reads them back and — fail-closed since
+      // flows#86 — rolls the grant back and refuses to move the owner on when the limit did not
+      // survive. A stub answering `[]` is a hub that stores nothing, so «Usar esta» would correctly
+      // never reach the editor and every test below would go red about SHORTCUTS, which is not
+      // what any of them is asking.
+      replaceGrants: vi.fn(async (_id: string, g: unknown) => g),
       runs: vi.fn(async () => []),
       getRun: vi.fn(async () => ({ steps: [] })),
       run: vi.fn(async () => ({})),
