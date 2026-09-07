@@ -6579,6 +6579,7 @@ function templateFromSearch(search) {
   const id = new URLSearchParams(search).get("template") ?? "";
   return templateById(id) ? id : "";
 }
+var isCommandGrant = (row) => typeof row === "object" && row !== null && row.kind === "command" && typeof row.value === "string";
 var ErpFlowsGallery = class extends i3 {
   constructor() {
     super(...arguments);
@@ -6888,7 +6889,8 @@ var ErpFlowsGallery = class extends i3 {
       candidates.map(async (flow) => {
         try {
           const grants = await read.call(this.client?.flows, flow.id);
-          return [flow.id, grants.filter((g3) => g3.kind === "command").map((g3) => g3.value)];
+          if (!Array.isArray(grants)) return null;
+          return [flow.id, grants.filter(isCommandGrant).map((g3) => g3.value)];
         } catch {
           return null;
         }

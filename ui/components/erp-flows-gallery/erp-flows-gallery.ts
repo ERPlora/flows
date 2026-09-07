@@ -69,6 +69,26 @@ export function templateFromSearch(search: string): string {
  * dead on each side at 1440 with the CTA orphaned in the corner. Below 480px it collapses to the
  * one column a phone already had. Nothing here is narrower than a fingertip.
  */
+
+/**
+ * **One row of the hub's grants answer that is a command this flow may run** (flows#60).
+ *
+ * Checked instead of assumed, because this is the hub's answer and not ours, and because the two
+ * ways of getting it wrong both end in a wrong badge. Reading `.kind` off a `null` THROWS, and the
+ * catch around the call would swallow the whole flow's grants for one bad row — silently unbadging
+ * a card the owner really has. And a row that is not a command is not what identifies the
+ * automation: a hub holding only the card's READ permission never built it, so letting a `query`
+ * through would badge a card whose automation does not exist.
+ *
+ * A row that is not an object with `kind: 'command'` and a string `value` costs that row, and only
+ * that row.
+ */
+const isCommandGrant = (row: unknown): row is { kind: 'command'; value: string } =>
+  typeof row === 'object' &&
+  row !== null &&
+  (row as { kind?: unknown }).kind === 'command' &&
+  typeof (row as { value?: unknown }).value === 'string';
+
 export class ErpFlowsGallery extends LitElement {
   static styles = css`
     :host {
@@ -412,8 +432,11 @@ export class ErpFlowsGallery extends LitElement {
     const held = await Promise.all(
       candidates.map(async (flow) => {
         try {
-          const grants = await read.call(this.client?.flows, flow.id);
-          return [flow.id, grants.filter((g) => g.kind === 'command').map((g) => g.value)] as const;
+          const grants: unknown = await read.call(this.client?.flows, flow.id);
+          // Not a list at all is «not asked», not «holds nothing»: an unreadable answer must never
+          // become the claim that the owner authorised this automation for nothing.
+          if (!Array.isArray(grants)) return null;
+          return [flow.id, grants.filter(isCommandGrant).map((g) => g.value)] as const;
         } catch {
           return null;
         }

@@ -203,6 +203,48 @@ describe('what the badge costs, and what happens when the hub will not answer', 
     expect([...asked]).toEqual(['f1']);
   });
 
+  it('keeps the badge when the hub mixes rows it cannot read into the grants', async () => {
+    // What comes back from `flows.grants` is the hub's answer, not ours, and reading `.kind` off a
+    // `null` throws — which the catch swallows, losing the WHOLE flow's grants and silently
+    // unbadging a card the owner really does have. One unreadable row must cost that row and
+    // nothing else, and nothing that is not a `{kind:'command', value:<string>}` may become a
+    // command: a read, or a number, matched against a template's commands is a wrong badge.
+    const client = hub([installedFlow()], {
+      flows: {
+        list: vi.fn(async () => [installedFlow()]),
+        grants: vi.fn(async () => [
+          null,
+          'tasks.tasks.create',
+          { kind: 'query', value: 'tasks.tasks.list' },
+          { kind: 'command' },
+          { kind: 'command', value: 42 },
+          { kind: 'command', value: 'tasks.tasks.create' },
+        ]),
+      },
+    });
+    const el = await mount(client);
+    const badge = card(el, 'no-show-followup')?.querySelector('ok-status-pill');
+    expect(badge?.getAttribute('label'), 'one unreadable row lost the whole flow').toBe(t('ui.active'));
+    expect(card(el, 'no-show-followup')?.getAttribute('data-installed')).toBe('active');
+  });
+
+  it('does not call a card «Active» off a READ permission that merely shares its name', async () => {
+    // The other half of the guard, and the one a «junk is ignored» test alone leaves alive. The
+    // grant here is the card's own command name held as a `query`: the same string, a different
+    // decision. Letting it through reads as «Active» — an automation the owner never built — when
+    // the flow listens and can still do nothing, which is «Unfinished».
+    const client = hub([installedFlow()], {
+      flows: {
+        list: vi.fn(async () => [installedFlow()]),
+        grants: vi.fn(async () => [null, { kind: 'query', value: 'tasks.tasks.create' }]),
+      },
+    });
+    const el = await mount(client);
+    const cardEl = card(el, 'no-show-followup');
+    expect(cardEl?.querySelector('ok-status-pill')?.getAttribute('label')).toBe(t('ui.tplUnfinished'));
+    expect(cardEl?.getAttribute('data-installed'), 'a read permission is not the automation').toBe('unfinished');
+  });
+
   it('shows the gallery unbadged when the hub refuses to hand over grants', async () => {
     const client = hub([installedFlow()], {
       flows: {

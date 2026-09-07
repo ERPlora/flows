@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { TEMPLATES, templateById, buildTemplate, templateInstallation, templateCommands } from './templates';
+import {
+  TEMPLATES,
+  templateById,
+  buildTemplate,
+  templateInstallation,
+  templateCommands,
+  templateGrants,
+} from './templates';
 import en from '../../locales/en.json';
 
 /** The translator, reduced to the lookup a document needs. */
@@ -13,17 +20,27 @@ const t = (key: string): string => {
 
 const tpl = (id: string) => templateById(id)!;
 
-/** A flow as the hub hands it back, built from a template's own document. */
+/**
+ * A flow as the hub hands it back, built from a template's own document.
+ *
+ * `enabled: 'absent'` builds the row an OLDER hub sends: no `enabled` key at all. That is a third
+ * thing, distinct from `true` and from `false`, and it has to be buildable here — a helper that
+ * collapses it to `true` makes the case unreachable and leaves «treat a missing field as off»
+ * untested, which is the shape of bug that would silently unbadge the whole fleet on the floor.
+ */
 const flowOf = (
   id: string,
-  over: { id?: string; name?: string; enabled?: boolean; commands?: readonly string[] } = {},
-) => ({
-  id: over.id ?? 'f1',
-  name: over.name ?? `${id} flow`,
-  enabled: over.enabled ?? true,
-  definition: buildTemplate(tpl(id), t) as unknown as Record<string, unknown>,
-  commands: over.commands,
-});
+  over: { id?: string; name?: string; enabled?: boolean | 'absent'; commands?: readonly string[] } = {},
+) => {
+  const enabled = over.enabled ?? true;
+  return {
+    id: over.id ?? 'f1',
+    name: over.name ?? `${id} flow`,
+    ...(enabled === 'absent' ? {} : { enabled }),
+    definition: buildTemplate(tpl(id), t) as unknown as Record<string, unknown>,
+    commands: over.commands,
+  };
+};
 
 /**
  * **«Do I already have this one?», asked of the hub's own flows** (flows#60).
@@ -54,6 +71,17 @@ describe('a template this hub already runs', () => {
     // the one that is on. Handing them the paused copy reads as «it is off» about a hub that is
     // acting on every no-show.
     expect(templateInstallation(template, t, [off, on]).flow).toBe(on);
+  });
+
+  it('still recognises the one an older hub sends with no «enabled» key at all', () => {
+    // The floor, and the reason the predicate is `!== false` and not `=== true`. A hub that
+    // predates the field sends the row WITHOUT it, and a missing field read as «off» is exactly how
+    // wi#90 nearly switched an automation off across every hub on v1.1.15: exclude what you KNOW is
+    // off, never demand proof of being on.
+    const template = tpl('no-show-followup');
+    const flow = flowOf('no-show-followup', { enabled: 'absent', commands: ['tasks.tasks.create'] });
+    expect('enabled' in flow, 'the helper must build a row WITHOUT the key, not one holding undefined').toBe(false);
+    expect(templateInstallation(template, t, [flow])).toEqual({ state: 'active', flow });
   });
 
   it('is «unfinished» when it was created and never granted anything', () => {
@@ -118,5 +146,19 @@ describe('a template this hub already runs', () => {
     // The two WhatsApp appointment families are the reason this is a SET and not one name: they
     // ask for the same thirteen.
     expect(templateCommands(tpl('whatsapp-appointment'), t).length).toBeGreaterThan(1);
+  });
+
+  it('does not take what a card may READ for something it can DO', () => {
+    // The WhatsApp cards ask for four kinds of grant — `notify`, `recipient_query`, `query` and
+    // `command`. Only the last is what the automation DOES, and only the last identifies it: a hub
+    // whose flow merely holds the appointment LOOKUP has not built this automation.
+    const template = tpl('whatsapp-appointment');
+    const grants = templateGrants(template, t);
+    const reads = grants.filter((grant) => grant.kind !== 'command').map((grant) => grant.value);
+    expect(reads.length, 'this card must carry non-command grants or the case proves nothing').toBeGreaterThan(0);
+
+    const commands = templateCommands(template, t);
+    expect(commands.filter((value) => reads.includes(value))).toEqual([]);
+    expect(commands.length).toBeLessThan(grants.length);
   });
 });
