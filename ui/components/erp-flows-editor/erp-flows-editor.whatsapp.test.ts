@@ -474,3 +474,63 @@ describe('an option the customer taps is laid out as its own card (flows#75)', (
     ).toBeNull();
   });
 });
+
+/**
+ * **The message the owner already typed does not disappear when she changes her mind** (flows#90).
+ *
+ * She writes «Tenemos estos huecos libres esta semana», then realises she would rather the client
+ * TAPPED an answer than typed one. The copy has to go out of the document — the hub refuses a step
+ * carrying both, `conflicting_message_type` — but that is a reason to MOVE it, not to lose it:
+ * there is no undo on this screen, so what goes is gone and has to be typed again.
+ */
+describe('changing the mode keeps the sentence that was already written (flows#90)', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  /** What the box on screen actually shows, read from the parts the picker composes. */
+  const shown = (box: Element | null | undefined): string => {
+    expect(box, 'the box is not on the screen at all').toBeTruthy();
+    const parts =
+      (box as unknown as { parts?: { kind: string; text?: string; path?: string }[] }).parts ?? [];
+    return parts.map((p) => (p.kind === 'field' ? `{{${p.path}}}` : (p.text ?? ''))).join('');
+  };
+
+  it('opens the options with the copy she had just written, not an empty box', async () => {
+    const el = await mount(whatsapp({ vars: { text: 'Tenemos huecos el jueves' } }));
+    await pick(el, (await panelOf(el)).querySelector('select[data-field="notify-mode"]'), 'options');
+    const body = (step(el).interactive as Record<string, Record<string, unknown>>).body;
+    expect(body.text).toBe('Tenemos huecos el jueves');
+    const panel = el.renderRoot.querySelector('[data-node="n"] .panel')!;
+    expect(shown(panel.querySelector('erp-flows-value[data-field="tap-body"]'))).toBe(
+      'Tenemos huecos el jueves',
+    );
+  });
+
+  it('hands the message back when she returns to plain text', async () => {
+    const el = await mount(withOptions());
+    await pick(el, (await panelOf(el)).querySelector('select[data-field="notify-mode"]'), 'text');
+    expect((step(el).vars as Record<string, unknown>).text).toBe('¿Cuándo te viene bien?');
+    const panel = el.renderRoot.querySelector('[data-node="n"] .panel')!;
+    expect(shown(panel.querySelector('erp-flows-value[data-field="var-text"]'))).toBe(
+      '¿Cuándo te viene bien?',
+    );
+  });
+
+  it('carries a composed message across, pills and all', async () => {
+    const el = await mount(whatsapp({ vars: { text: 'Hola {{input.name}}' } }));
+    await pick(el, (await panelOf(el)).querySelector('select[data-field="notify-mode"]'), 'options');
+    const body = (step(el).interactive as Record<string, Record<string, unknown>>).body;
+    expect(body.text).toBe('Hola {{input.name}}');
+  });
+
+  /**
+   * The same loss through the other door: the options only exist on WhatsApp, so picking email
+   * takes them away — and used to take the sentence with them, on a panel that then showed an
+   * empty message box.
+   */
+  it('keeps the message when she moves the step to email instead', async () => {
+    const el = await mount(withOptions());
+    await pick(el, (await panelOf(el)).querySelector('select[data-field="channel"]'), 'email');
+    expect('interactive' in step(el)).toBe(false);
+    expect((step(el).vars as Record<string, unknown>).text).toBe('¿Cuándo te viene bien?');
+  });
+});

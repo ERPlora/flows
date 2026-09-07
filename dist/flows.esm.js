@@ -2936,6 +2936,20 @@ function setTapOptions(doc, index, options) {
     "vars"
   ]);
 }
+function setTapMode(doc, index, wants) {
+  const step = doc.steps[index];
+  if (!step) return doc;
+  if (wants) {
+    return setTapOptions(doc, index, {
+      ...blankTapOptions("button"),
+      body: copy(obj(step.vars)?.text)
+    });
+  }
+  const off = setTapOptions(doc, index, null);
+  const body = readTapOptions(step)?.body;
+  if (!textOf(body)) return off;
+  return patchStep(off, index, { vars: { ...obj(step.vars) ?? {}, text: body } });
+}
 
 // ui/lib/trigger-catalog.ts
 var TRIGGER_CATALOG = [
@@ -5368,7 +5382,7 @@ var ErpFlowsEditor = class extends i3 {
           @change=${(e4) => {
       const channel = e4.target.value;
       const next = patchStep(this.document, index, { channel });
-      this.setDoc(channel === "whatsapp" ? next : setTapOptions(next, index, null));
+      this.setDoc(channel === "whatsapp" ? next : setTapMode(next, index, false));
     }}
         >
           <!-- Two options, and sms is not one of them: it has no transport anywhere and is
@@ -5416,9 +5430,7 @@ var ErpFlowsEditor = class extends i3 {
               .value=${taps ? "options" : "text"}
               @change=${(e4) => {
       const wants = e4.target.value === "options";
-      this.setDoc(
-        setTapOptions(this.document, index, wants ? blankTapOptions("button") : null)
-      );
+      this.setDoc(setTapMode(this.document, index, wants));
     }}
             >
               ${option("text", this.t("ui.notifyModeText"), taps ? "options" : "text")}
