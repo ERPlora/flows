@@ -122,6 +122,32 @@ describe('the gallery offers what the installed apps bring (flows#98)', () => {
     expect(text(el)).toContain('WhatsApp → appointment');
   });
 
+  /**
+   * 🔴 **No card repeats the heading it is standing under** (flows#98, measured on the real bundle).
+   *
+   * The four recipes WhatsApp brings are painted in one section titled «Comes with WhatsApp Inbox».
+   * With the app's name also printed under every card's title, the screen said the same six words
+   * five times down one column — the visual bench showed it at 1440, 834 and 390. Provenance is
+   * read once, in the heading, and in full inside the panel; the line under a title is for what
+   * the recipe IS.
+   */
+  it('does not repeat the app’s name under every card of the app’s own section', async () => {
+    const el = await mount(
+      hub({ rows: [servedRow(), servedRow({ family: 'reservation-from-whatsapp' })] }),
+    );
+    const section = el.renderRoot.querySelector('section[data-module="whatsapp_inbox"]')!;
+    const heading = (section.querySelector('h3')?.textContent ?? '').trim();
+    expect(heading, 'the section has no heading — this test would prove nothing').toBeTruthy();
+    const cards = [...section.querySelectorAll('[data-template]')];
+    expect(cards.length).toBe(2);
+    for (const c of cards) {
+      expect(
+        c.textContent ?? '',
+        `${c.getAttribute('data-template')} repeats the heading it is already under`,
+      ).not.toContain(heading);
+    }
+  });
+
   it('drops the hand copy of the family the module now serves', async () => {
     const el = await mount(hub({ rows: [servedRow({ ...MIRROR.mirrors })] }));
     expect(card(el, MIRROR.id), 'two cards for one automation').toBeFalsy();

@@ -948,6 +948,9 @@ export class ErpFlowsGallery extends LitElement {
 
   private renderCard(template: FlowTemplate) {
     const open = this.landsOn(this.picked) === template.id;
+    // A card with nothing to say under its title leaves the line out rather than printing an empty
+    // one: an empty node still takes its margin and opens a gap the owner reads as a missing word.
+    const summary = templateSummary(template, this.t);
     const { state } = this.installationOf(template);
     return html`<div
       class="card"
@@ -964,7 +967,7 @@ export class ErpFlowsGallery extends LitElement {
         <ion-icon name=${template.icon} aria-hidden="true"></ion-icon>
         <span class="grow">
           <span class="name">${templateName(template, this.t)}</span>
-          <span class="summary">${templateSummary(template, this.t)}</span>
+          ${summary ? html`<span class="summary">${summary}</span>` : nothing}
         </span>
         ${this.renderInstalledPill(state)}
       </button>

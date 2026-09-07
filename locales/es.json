@@ -618,7 +618,6 @@
     "timeLabel": "Hora",
     "tplBlanksTitle": "Lo que decides tú",
     "tplCreatedPaused": "Se crea en pausa. No pasa nada hasta que la enciendas.",
-    "tplFromApp": "Viene con {app}",
     "tplFromAppPlain": "Esta automatización viene con {app}, la aplicación que tienes instalada. La escribieron quienes hicieron la aplicación, y se crea apagada como cualquier otra.",
     "tplFromAppSection": "Viene con {app}",
     "tplGrantLimited": "Solo con {fields} — no puede pedir nada más.",

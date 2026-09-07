@@ -1675,9 +1675,18 @@ export function templateName(template: FlowTemplate, t: Translator): string {
   return template.name ?? (template.nameKey ? t(template.nameKey) : template.id);
 }
 
-/** The one line under the card's title — for a served card, the app it came with. */
+/**
+ * The one line under the card's title, or `''` when there is none to write.
+ *
+ * A SERVED card has none, and that is deliberate (flows#98): it is only ever painted under the
+ * heading of the app that brought it, which already reads «Comes with WhatsApp Inbox». Repeating
+ * that under each title put the same sentence on every card of the column and told the owner
+ * nothing they had not just read. Where it came from is said once in the heading and in full in
+ * the panel ({@link templatePlain}); this line is for what the recipe IS, and a module that ships
+ * no description of its own has nothing to put here.
+ */
 export function templateSummary(template: FlowTemplate, t: Translator): string {
-  if (template.source) return t('ui.tplFromApp', { app: moduleName(template.source.module, t) });
+  if (template.source) return '';
   return template.summaryKey ? t(template.summaryKey) : '';
 }
 

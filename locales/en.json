@@ -618,7 +618,6 @@
     "timeLabel": "Time",
     "tplBlanksTitle": "What you decide",
     "tplCreatedPaused": "It is created paused. Nothing happens until you turn it on.",
-    "tplFromApp": "Comes with {app}",
     "tplFromAppPlain": "This automation comes with {app}, the app you have installed. It was written by the people who made the app, and it is created switched off like any other.",
     "tplFromAppSection": "Comes with {app}",
     "tplGrantLimited": "Only with {fields} — it cannot ask for anything else.",

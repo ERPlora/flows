@@ -52,8 +52,24 @@ describe('the automations a module brings, as the hub serves them (flows#98)', (
     expect(card.source).toEqual({ module: 'whatsapp_inbox', family: 'appointment-from-whatsapp' });
     // The name is the document's, already written in the owner's language by the module.
     expect(templateName(card, t)).toBe('WhatsApp → propuesta de cita');
-    // …and the card says which app it came from, which is the whole point of naming the source.
-    expect(templateSummary(card, t)).toContain(t('ui.mod_whatsapp_inbox'));
+    // Where it came from is `source`, read by the gallery to file it under its app's heading —
+    // NOT a sentence repeated on the card itself (see the test below).
+    expect(templateSummary(card, t)).toBe('');
+  });
+
+  /**
+   * 🔴 **The card does NOT repeat where it came from** (measured on the real bundle, flows#98).
+   *
+   * A served card is only ever painted under the heading of the app that brought it, and that
+   * heading already reads «Comes with WhatsApp Inbox». Printing the same sentence again under
+   * every card's title showed the owner the same six words five times down one column and said
+   * nothing new — the provenance is read once, above, and in full in the panel
+   * ({@link templatePlain}). The line under the title is for what a recipe IS, and a module that
+   * ships no description of its own has nothing to put there.
+   */
+  it('leaves the one-line summary empty: the app’s heading already says where it came from', () => {
+    const [card] = moduleTemplates([row()], 'en');
+    expect(templateSummary(card, t)).toBe('');
   });
 
   /**

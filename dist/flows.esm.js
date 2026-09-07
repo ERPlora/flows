@@ -8086,7 +8086,7 @@ function templateName(template, t3) {
   return template.name ?? (template.nameKey ? t3(template.nameKey) : template.id);
 }
 function templateSummary(template, t3) {
-  if (template.source) return t3("ui.tplFromApp", { app: moduleName(template.source.module, t3) });
+  if (template.source) return "";
   return template.summaryKey ? t3(template.summaryKey) : "";
 }
 function templatePlain(template, t3) {
@@ -8940,6 +8940,7 @@ var ErpFlowsGallery = class extends i3 {
   }
   renderCard(template) {
     const open = this.landsOn(this.picked) === template.id;
+    const summary = templateSummary(template, this.t);
     const { state } = this.installationOf(template);
     return b2`<div
       class="card"
@@ -8956,7 +8957,7 @@ var ErpFlowsGallery = class extends i3 {
         <ion-icon name=${template.icon} aria-hidden="true"></ion-icon>
         <span class="grow">
           <span class="name">${templateName(template, this.t)}</span>
-          <span class="summary">${templateSummary(template, this.t)}</span>
+          ${summary ? b2`<span class="summary">${summary}</span>` : A}
         </span>
         ${this.renderInstalledPill(state)}
       </button>
@@ -10870,7 +10871,6 @@ var es_default = {
     timeLabel: "Hora",
     tplBlanksTitle: "Lo que decides t\xFA",
     tplCreatedPaused: "Se crea en pausa. No pasa nada hasta que la enciendas.",
-    tplFromApp: "Viene con {app}",
     tplFromAppPlain: "Esta automatizaci\xF3n viene con {app}, la aplicaci\xF3n que tienes instalada. La escribieron quienes hicieron la aplicaci\xF3n, y se crea apagada como cualquier otra.",
     tplFromAppSection: "Viene con {app}",
     tplGrantLimited: "Solo con {fields} \u2014 no puede pedir nada m\xE1s.",
@@ -11776,7 +11776,6 @@ var en_default = {
     timeLabel: "Time",
     tplBlanksTitle: "What you decide",
     tplCreatedPaused: "It is created paused. Nothing happens until you turn it on.",
-    tplFromApp: "Comes with {app}",
     tplFromAppPlain: "This automation comes with {app}, the app you have installed. It was written by the people who made the app, and it is created switched off like any other.",
     tplFromAppSection: "Comes with {app}",
     tplGrantLimited: "Only with {fields} \u2014 it cannot ask for anything else.",
