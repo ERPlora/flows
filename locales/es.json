@@ -381,6 +381,8 @@
     "evsZone": "una zona",
     "evtPhrase": "{action} {subject}",
     "field": "Dato",
+    "fieldReplyId": "La opción que tocó",
+    "fieldReplyTitle": "Lo que decía la opción",
     "filterAt": "Una fecha",
     "filterCron": "El reloj",
     "filterEvent": "Algo que pasa",

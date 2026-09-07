@@ -71,7 +71,7 @@ import {
   describeStep,
   describeRunStep,
   describeTrigger,
-  humaniseField,
+  fieldPhrase,
   readCronTime,
   readSchedule,
   runOutcome,
@@ -79,7 +79,7 @@ import {
 } from '../../lib/plain-language';
 import type { RunRow, RunStepRow, Schedule, Translator } from '../../lib/plain-language';
 import { catalogEntry } from '../../lib/trigger-catalog';
-import { groupByFamily, loadEventCatalog } from '../../lib/event-catalog';
+import { groupByFamily, loadEventCatalog, mergeContractFields } from '../../lib/event-catalog';
 import type { EventCatalog } from '../../lib/event-catalog';
 import { eventPhrase } from '../../lib/event-phrasing';
 import { inputFromShape, simulate } from '../../lib/simulate';
@@ -1007,7 +1007,10 @@ export class ErpFlowsEditor extends LitElement {
       return;
     }
     try {
-      this.shape = await this.client.events.shape(event);
+      // The contract's own fields go in beside the observed ones (flows#75): the shape endpoint
+      // answers with traffic this hub has SEEN, and `reply_id` is not in any sample until somebody
+      // taps — which is the automation being built right now.
+      this.shape = mergeContractFields(await this.client.events.shape(event), this.interactiveNotify);
     } catch {
       // `not_found` means this hub has never heard of the event. The picker then says «nothing to
       // pick from», which is true, instead of the editor refusing to open.
@@ -1268,7 +1271,7 @@ export class ErpFlowsEditor extends LitElement {
 
   /** The words a pill shows: `input.customer.name` → «Customer › Name». */
   private readonly fieldLabel = (path: string): string =>
-    humaniseField(path.replace(/^(input|event|steps)\./, ''));
+    fieldPhrase(path.replace(/^(input|event|steps)\./, ''), this.t);
 
   /** What the owner reads for an event: the hand-written phrase, or the composed one (flows#41). */
   private eventLabel(event: string | undefined): string {

@@ -12,7 +12,9 @@ import {
   readCronTime,
   humaniseField,
   describeSample,
+  fieldPhrase,
 } from './plain-language';
+import es from '../../locales/es.json';
 
 // The catalogue is not what is under test — the CHOICE of sentence is. A fake translator that
 // echoes the key and its params makes that choice visible and keeps the assertions readable in a
@@ -406,5 +408,34 @@ describe('the example beside a field, which is what removes half the doubt', () 
 
   it('does not pretend an object or a list has a value', () => {
     expect(describeSample({ path: 'lines', type: 'array', items: 3, redacted: false, truncated: false, seen_in: 5 }, t)).toBe('');
+  });
+});
+
+describe('the fields a tap comes home in, in the owner\'s words (flows#75)', () => {
+  /**
+   * `humaniseField` is mechanical on purpose — a translated dictionary of every field of every
+   * module would be wrong for exactly the fields nobody thought of. But it turns `reply_id` into
+   * «Reply id», which is not something anybody says, and these two are not somebody's field: they
+   * are the CORE's contract for what a tap brings back, so they can be named once and for all.
+   */
+  it('names them the way the owner would say them', () => {
+    expect(fieldPhrase('reply_id', t)).toBe('ui.fieldReplyId');
+    expect(fieldPhrase('reply_title', t)).toBe('ui.fieldReplyTitle');
+  });
+
+  // The catalogue check next door proves the KEY exists in both languages. This one proves the
+  // owner reads a sentence rather than a key, in the language they actually use: a phrase whose
+  // English is right and whose Spanish was never written ships as `ui.fieldReplyId` printed on a
+  // dropdown, and nothing else in this suite would notice.
+  it('reads as Spanish on the screen the owner is looking at', () => {
+    const spanish = (key: string): string =>
+      (es as unknown as { ui: Record<string, string> }).ui[key.replace(/^ui\./, '')];
+    expect(fieldPhrase('reply_id', spanish)).toBe('La opción que tocó');
+    expect(fieldPhrase('reply_title', spanish)).toBe('Lo que decía la opción');
+  });
+
+  it('leaves every other field to the mechanical rule', () => {
+    expect(fieldPhrase('customer.first_name', t)).toBe('Customer › First name');
+    expect(fieldPhrase('', t)).toBe('');
   });
 });

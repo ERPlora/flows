@@ -37,6 +37,7 @@
  * pass — is the one outcome that would make this feature worse than nothing.
  */
 import type { Condition, FlowDoc, Operator, Step, Trigger } from './flow-doc';
+import { readTapOptions } from './whatsapp-options';
 import type { EventShape } from './hub-flows';
 
 /**
@@ -424,6 +425,21 @@ function stepValues(step: Step, scope: unknown): SimulatedValue[] {
     add('prompt', step.prompt ?? '');
   } else if (step.kind === 'notify') {
     for (const [key, value] of Object.entries(step.vars ?? {})) add(key, value);
+    // A step with options carries no `vars` at all — the copy lives in `interactive.body.text`
+    // and the rest of what would be sent is in the options. Reading only `vars` showed that step
+    // as a BLANK card, which is the one answer this tab must never give about a message that has
+    // just been written.
+    const taps = readTapOptions(step);
+    if (taps) {
+      add('text', taps.body);
+      if (taps.kind === 'list') add('button', taps.openLabel);
+      taps.options.forEach((opt, i) => {
+        add(`${i + 1}`, opt.title);
+        if (opt.description !== undefined && opt.description !== '') {
+          add(`${i + 1}.`, opt.description);
+        }
+      });
+    }
   } else if (step.kind === 'approval') {
     // The question as it would be ASKED: the kernel templates title and summary when it creates
     // the request, so this is exactly what the tray would show.

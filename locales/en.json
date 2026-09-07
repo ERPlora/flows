@@ -381,6 +381,8 @@
     "evsZone": "a zone",
     "evtPhrase": "{subject} {action}",
     "field": "Field",
+    "fieldReplyId": "The option they tapped",
+    "fieldReplyTitle": "What the option said",
     "filterAt": "A date",
     "filterCron": "The clock",
     "filterEvent": "Something happening",

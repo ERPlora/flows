@@ -23,7 +23,7 @@
 import { catalogEntry, type TriggerCatalogEntry } from './trigger-catalog';
 import { eventFamily } from './event-phrasing';
 import type { Translator } from './plain-language';
-import type { EventCatalogEntry } from './hub-flows';
+import type { EventCatalogEntry, EventFieldShape, EventShape } from './hub-flows';
 
 /** One entry of the «when this happens» dropdown, ready to render. */
 export interface TriggerOption {
@@ -136,4 +136,52 @@ export function groupByFamily(options: readonly TriggerOption[], t: Translator):
     group.options.push(option);
   }
   return groups;
+}
+
+// ── The fields a tap comes home in ────────────────────────────────────────────────────────────
+
+/** The core event a WhatsApp message arrives as (`inbound_poll.rs::EVENT_NAME`). */
+export const WHATSAPP_MESSAGE_EVENT = 'hub.whatsapp.message_received';
+
+/**
+ * What the payload carries when the customer tapped one of the options a `notify` offered
+ * (hub#1633): the id that was set on screen, and the words that were on it.
+ */
+export const TAP_REPLY_FIELDS = ['reply_id', 'reply_title'] as const;
+
+/**
+ * **The fields the CONTRACT guarantees, added to the ones this hub has actually seen.**
+ *
+ * `GET /api/hub/events/shape` answers with observed traffic, which is the right answer to «what
+ * does this event really look like» and the wrong one here: until somebody taps an option for the
+ * first time, `reply_id` is not in any sample, so the picker cannot offer it — and the automation
+ * that would PRODUCE the first tap is exactly the one being built. The chicken cannot be picked
+ * until the egg has been laid.
+ *
+ * Two limits keep this from becoming the hand-written catalogue this module deleted in flows#8:
+ *
+ * - only where the hub said it can send options at all (`supported`), so it never names a field
+ *   an older core would not put in the payload, and
+ * - only where the hub has not spoken. A field the shape reports wins, with its real sample and
+ *   its real count — this fills a silence, it does not correct the hub.
+ */
+export function mergeContractFields(
+  shape: EventShape | null | undefined,
+  supported: boolean,
+): EventShape | null {
+  if (!shape) return null;
+  if (!supported || shape.event_name !== WHATSAPP_MESSAGE_EVENT) return shape;
+  const known = new Set(shape.fields.map((f) => f.path));
+  const missing: EventFieldShape[] = TAP_REPLY_FIELDS.filter((path) => !known.has(path)).map(
+    (path) => ({
+      path,
+      type: 'string',
+      redacted: false,
+      truncated: false,
+      // Nothing has been seen, and saying so is the honest half: the picker reads it as «not
+      // always there», which is what a message nobody tapped really brings.
+      seen_in: 0,
+    }),
+  );
+  return missing.length ? { ...shape, fields: [...shape.fields, ...missing] } : shape;
 }

@@ -10,6 +10,7 @@ import {
   simulate,
 } from './simulate';
 import type { EventShape } from './hub-flows';
+import type { FlowDoc } from './flow-doc';
 
 const shape = (fields: Partial<EventShape['fields'][number]>[], over: Partial<EventShape> = {}): EventShape => ({
   event_name: 'sale.completed',
@@ -378,5 +379,56 @@ describe('the sentinels are exactly the strings they claim to be', () => {
   it('and neither is a string a payload could plausibly contain on its own', () => {
     expect(REDACTED).not.toBe('redacted');
     expect(REDACTED.includes(' ')).toBe(false);
+  });
+});
+
+describe('a message with options, in the preview (flows#75)', () => {
+  const tapping = (): FlowDoc => ({
+    schema_version: 1,
+    triggers: [{ kind: 'event', event: 'hub.whatsapp.message_received' }],
+    steps: [
+      {
+        id: 'ask',
+        kind: 'notify',
+        channel: 'whatsapp',
+        to: { query: 'customers.customer.get', params: {}, field: 'phone' },
+        interactive: {
+          type: 'list',
+          body: { text: 'Hola {{input.name}}, ¿cuándo te viene bien?' },
+          action: {
+            button: 'Ver los huecos',
+            sections: [
+              {
+                rows: [
+                  { id: 'slot_1', title: 'Mañana a las {{input.hour}}', description: 'Con {{input.pro}}' },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ],
+  });
+
+  /**
+   * Before this, «Pruébalo» mapped `step.vars` and nothing else, so a step with options and no
+   * copy showed as a BLANK card — the one screen whose whole job is answering «what would this
+   * actually send» answering «nothing» about the message that has just been written.
+   */
+  it('shows the message and every option, resolved', () => {
+    const run = simulate(tapping(), { name: 'Ana', hour: '10:00', pro: 'Marta' });
+    const values = run.steps[0].values.map((v) => v.text);
+    expect(values).toContain('Hola Ana, ¿cuándo te viene bien?');
+    expect(values).toContain('Mañana a las 10:00');
+    expect(values).toContain('Con Marta');
+    expect(values).toContain('Ver los huecos');
+  });
+
+  // The same verdict the copy gets: a mapping that resolves to nothing is the fault this tab
+  // exists to surface, and an option whose label came out empty is a button with no words on it.
+  it('marks an option whose label resolved to nothing', () => {
+    const run = simulate(tapping(), { name: 'Ana' });
+    const blanks = run.steps[0].values.filter((v) => v.blank).map((v) => v.label);
+    expect(blanks.length).toBeGreaterThan(0);
   });
 });

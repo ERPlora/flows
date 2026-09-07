@@ -362,3 +362,64 @@ describe('the limits are told to the owner, never enforced on them', () => {
     expect(panel.textContent).toContain('ui.tapDuplicateId:same');
   });
 });
+
+describe('what the tap comes home as, in the list of things to check', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  /**
+   * The other half of the feature, and the half that makes it useful: offering the options is
+   * pointless if the guard that reacts to them cannot name the field. The shape endpoint answers
+   * with observed traffic, so on a hub where nobody has tapped yet `reply_id` is in no sample —
+   * and the automation that would produce the first tap is the one being written.
+   */
+  const tapClient = () => {
+    const client = fakeClient();
+    client.events.shape = vi.fn(async () => ({
+      event_name: 'hub.whatsapp.message_received',
+      declared_by: ['core'],
+      samples: 4,
+      fields: [
+        { path: 'text', type: 'string', sample: 'hola', redacted: false, truncated: false, seen_in: 4 },
+      ],
+    })) as never;
+    return client;
+  };
+
+  async function mountOn(supported: boolean) {
+    const el = document.createElement('erp-flows-editor') as ErpFlowsEditor;
+    el.client = tapClient() as never;
+    el.t = ((k: string, p?: Record<string, unknown>) =>
+      p ? `${k}:${Object.values(p).join('|')}` : k) as never;
+    el.interactiveNotify = supported;
+    el.flow = {
+      id: 'f1',
+      name: 'Test',
+      enabled: false,
+      definition: {
+        schema_version: 1,
+        triggers: [{ kind: 'event', event: 'hub.whatsapp.message_received' }],
+        steps: [{ id: 'n', kind: 'condition', when: {} }],
+      },
+    } as never;
+    document.body.appendChild(el);
+    await settle(el);
+    return el;
+  }
+
+  const pickerPaths = (el: ErpFlowsEditor): string[] => {
+    const picker = el.renderRoot.querySelector('erp-flows-field-picker') as unknown as {
+      shape: { fields: { path: string }[] } | null;
+    };
+    return (picker.shape?.fields ?? []).map((f) => f.path);
+  };
+
+  it('offers «the option they tapped» to a later check, before anyone has tapped', async () => {
+    const el = await mountOn(true);
+    expect(pickerPaths(el)).toEqual(['text', 'reply_id', 'reply_title']);
+  });
+
+  it('does not offer them on a hub that could never have sent the options', async () => {
+    const el = await mountOn(false);
+    expect(pickerPaths(el)).toEqual(['text']);
+  });
+});

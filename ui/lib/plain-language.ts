@@ -403,6 +403,25 @@ export function humaniseField(path: string): string {
 }
 
 /**
+ * **The handful of fields that are the CORE's contract, said the way an owner says them.**
+ *
+ * {@link humaniseField} stays the rule for everything else, and deliberately: a translated
+ * dictionary of every field of every module would be wrong for exactly the fields nobody thought
+ * of. But it turns `reply_id` into «Reply id», and these two are not somebody's column — they are
+ * what the kernel promises a tap comes home as (hub#1633), the same argument that gives an event
+ * a hand-written phrase in `event-phrasing.ts` instead of a composed one.
+ */
+const FIELD_PHRASES: Readonly<Record<string, string>> = {
+  reply_id: 'ui.fieldReplyId',
+  reply_title: 'ui.fieldReplyTitle',
+};
+
+export function fieldPhrase(path: string, t: Translator): string {
+  const key = FIELD_PHRASES[path];
+  return key ? t(key) : humaniseField(path);
+}
+
+/**
  * The example beside a field: **a real value from this hub**, which is what turns «pick a field»
  * into «pick this one, it says 42,50 €».
  *
