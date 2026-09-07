@@ -1652,6 +1652,49 @@ describe('a card installs the permission it PROMISED, not the wide one next to i
     expect(grantAllowsCall(grant, { appointment_id: 'a1' })).toBe(false);
   });
 
+  /**
+   * **The attended twin, and the SAME two limits** (flows#99, whatsapp_inbox#107).
+   *
+   * The tray is not a permission boundary. What waits there is a draft written FOR THE CUSTOMER —
+   * «I have cancelled your Thursday, see you next week» — and not the detail of the call underneath
+   * it, so the person approving reads a sentence and authorises an operation they were never shown.
+   * A cancellation on the salon's behalf skips the ownership check, the notice period and
+   * `allow_customer_cancellation`; a move on the salon's behalf skips the ownership check too. Both
+   * are one `channel` away, and `channel` DEFAULTS to `staff` in either command's schema.
+   *
+   * Pinned here and not only in the module: while hub#1654 is open the sidecar's `payload` never
+   * leaves the hub, and this copy is what the gallery installs — either as the card itself, or
+   * through `withCopiedPins` onto the served twin.
+   */
+  const ATTENDED_PINNED: [string, Record<string, unknown>][] = [
+    ['appointments.appointments.cancel', { appointment_id: 'a1' }],
+    ['appointments.appointments.reschedule', { appointment_id: 'a1', start_datetime: '2026-09-10T10:00:00Z' }],
+  ];
+
+  it.each(ATTENDED_PINNED)('carries the customer limit onto %s', (command) => {
+    const grant = grantFor('whatsapp-appointment', command);
+    expect(grant, `the attended card asks for ${command}`).toBeTruthy();
+    expect(grantPin(grant!)).toEqual({ channel: 'customer' });
+  });
+
+  // 🔴 The half that proves the limit is a CONTAINMENT and not decoration: asserting only that the
+  // recipe's own call gets through passes just as well with no pin at all.
+  it.each(ATTENDED_PINNED)('refuses %s asked for on the salon’s behalf', (command, call) => {
+    const grant = grantFor('whatsapp-appointment', command)!;
+    expect(grantAllowsCall(grant, { ...call, channel: 'customer', customer_id: 'c1' })).toBe(true);
+    expect(grantAllowsCall(grant, { ...call, channel: 'staff' })).toBe(false);
+    // The same refusal by omission — which is the shape a model actually sends when nothing asked
+    // it for a channel, and the reason a `default: "staff"` schema needs the pin to hold.
+    expect(grantAllowsCall(grant, call)).toBe(false);
+  });
+
+  it('narrows nothing else on the attended card', () => {
+    const pinned = templateGrants(templateById('whatsapp-appointment')!, t)
+      .filter((g) => Object.keys(grantPin(g)).length > 0)
+      .map((g) => `${g.kind} ${g.value}`);
+    expect(pinned).toEqual(ATTENDED_PINNED.map(([command]) => `command ${command}`));
+  });
+
   // The other side of the same coin: nothing else on the card silently narrows. A pin that spread
   // would break the recipe rather than contain it.
   it('leaves every other permission of that card exactly as wide as it was', () => {
