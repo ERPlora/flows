@@ -26,6 +26,24 @@ import type { Condition, Trigger } from './flow-doc';
 /** The CORE's WhatsApp event (`crates/server/src/inbound_poll.rs`), not the module's. */
 export const WHATSAPP_MESSAGE_EVENT = 'hub.whatsapp.message_received';
 
+/**
+ * The MODULE's re-emission of that same message (flows#67).
+ *
+ * `whatsapp_inbox._ingest_inbound_message` is a manifest listener on the event above, and a
+ * manifest listener has no mapping layer: the relay hands the core payload straight to the command
+ * and the command's `emit` writes that same bound payload into the outbox. So this event carries
+ * `direction` and `source` exactly when the core carries them — and an automation waiting on it
+ * answers the owner's own echo and Meta's 180 days of backlog for exactly the same reason, one hop
+ * later. The task card of flows#67 is the one that did.
+ */
+export const WHATSAPP_MODULE_MESSAGE_EVENT = 'whatsapp_inbox.message.received';
+
+/** Both doors the same message comes through. A trigger on either inherits the same two problems. */
+const WHATSAPP_MESSAGE_EVENTS: readonly string[] = [
+  WHATSAPP_MESSAGE_EVENT,
+  WHATSAPP_MODULE_MESSAGE_EVENT,
+];
+
 /** An automation that answers the owner's own replies and Meta's 180 days of backlog. */
 export const ECHO_AND_BACKLOG = 'whatsapp_echo_and_backlog';
 
@@ -73,7 +91,7 @@ function isGuarded(filter: Condition | undefined, path: string): boolean {
 }
 
 const isWhatsappTrigger = (trigger: Trigger): boolean =>
-  trigger?.kind === 'event' && trigger?.event === WHATSAPP_MESSAGE_EVENT;
+  trigger?.kind === 'event' && WHATSAPP_MESSAGE_EVENTS.includes(trigger?.event as string);
 
 const answersEchoAndBacklog = (trigger: Trigger): boolean =>
   isWhatsappTrigger(trigger) && ECHO_GUARDS.some(([path]) => !isGuarded(trigger.filter, path));

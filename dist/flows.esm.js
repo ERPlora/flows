@@ -2075,28 +2075,64 @@ function describeDelay(seconds, t3) {
 function plural(t3, base, count) {
   return t3(count === 1 ? `${base}One` : base, { count });
 }
-function dailyCron(time) {
-  const [h3, m3] = time.split(":");
-  return `${Number(m3)} ${Number(h3)} * * *`;
+function hhmm(time) {
+  const parts = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
+  if (!parts) return null;
+  const h3 = Number(parts[1]);
+  const m3 = Number(parts[2]);
+  if (h3 > 23 || m3 > 59) return null;
+  return { m: m3, h: h3 };
 }
-function readDailyCron(cron) {
+function readSchedule(cron) {
   const parts = cron.trim().split(/\s+/);
   if (parts.length !== 5) return null;
   const [m3, h3, dom, mon, dow] = parts;
-  if (dom !== "*" || mon !== "*" || dow !== "*") return null;
+  if (mon !== "*") return null;
   if (!/^\d{1,2}$/.test(m3) || !/^\d{1,2}$/.test(h3)) return null;
-  const mi = Number(m3);
-  const hi = Number(h3);
-  if (mi > 59 || hi > 23) return null;
-  return `${String(hi).padStart(2, "0")}:${String(mi).padStart(2, "0")}`;
+  const at2 = hhmm(`${h3}:${m3.padStart(2, "0")}`);
+  if (!at2) return null;
+  const time = `${String(at2.h).padStart(2, "0")}:${String(at2.m).padStart(2, "0")}`;
+  if (dom === "*" && dow === "*") return { every: "day", time };
+  if (dom === "*") {
+    if (!/^[0-7]$/.test(dow)) return null;
+    return { every: "week", time, weekday: Number(dow) % 7 };
+  }
+  if (dow === "*") {
+    if (!/^\d{1,2}$/.test(dom)) return null;
+    const day = Number(dom);
+    if (day < 1 || day > 31) return null;
+    return { every: "month", time, monthday: day };
+  }
+  return null;
+}
+function readCronTime(cron) {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const at2 = hhmm(`${parts[1]}:${parts[0].padStart(2, "0")}`);
+  if (!at2) return null;
+  return `${String(at2.h).padStart(2, "0")}:${String(at2.m).padStart(2, "0")}`;
+}
+function scheduleCron(schedule) {
+  const at2 = hhmm(schedule.time) ?? { m: 0, h: 9 };
+  const dom = schedule.every === "month" ? String(schedule.monthday) : "*";
+  const dow = schedule.every === "week" ? String(schedule.weekday) : "*";
+  return `${at2.m} ${at2.h} ${dom} * ${dow}`;
 }
 function describeTrigger(trigger, t3, label) {
   switch (trigger.kind) {
     case "event":
       return t3("ui.triggerEvent", { event: label || trigger.event || "" });
     case "cron": {
-      const time = readDailyCron(trigger.cron ?? "");
-      return time ? t3("ui.triggerDaily", { time }) : t3("ui.triggerCron", { cron: trigger.cron ?? "" });
+      const schedule = readSchedule(trigger.cron ?? "");
+      if (schedule?.every === "day") return t3("ui.triggerDaily", { time: schedule.time });
+      if (schedule?.every === "week")
+        return t3("ui.triggerWeekly", {
+          day: t3(`ui.weekday${schedule.weekday}`),
+          time: schedule.time
+        });
+      if (schedule?.every === "month")
+        return t3("ui.triggerMonthly", { day: schedule.monthday, time: schedule.time });
+      return t3("ui.triggerCron", { cron: trigger.cron ?? "" });
     }
     case "at":
       return t3("ui.triggerAt", { when: trigger.at ?? "" });
@@ -3539,6 +3575,20 @@ function clamp(value, min, max, fallback) {
 function option(value, label, current) {
   return b2`<option value=${value} ?selected=${value === current}>${label}</option>`;
 }
+var DEFAULT_SCHEDULE = { every: "day", time: "09:00" };
+var WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+var MONTH_DAYS = Array.from({ length: 31 }, (_2, i4) => i4 + 1);
+function retime(schedule, every) {
+  if (every === schedule.every) return schedule;
+  if (every === "day") return { every: "day", time: schedule.time };
+  if (every === "week")
+    return { every: "week", time: schedule.time, weekday: schedule.every === "week" ? schedule.weekday : 1 };
+  return {
+    every: "month",
+    time: schedule.time,
+    monthday: schedule.every === "month" ? schedule.monthday : 1
+  };
+}
 function eventOption(value, label, current) {
   return b2`<option value=${value} title=${value} ?selected=${value === current}>${label}</option>`;
 }
@@ -4374,7 +4424,9 @@ var ErpFlowsEditor = class extends i3 {
     this.openStep = next.steps[next.steps.length - 1].id;
   }
   setTrigger(patch) {
-    this.setDoc(patchTrigger(this.document, { ...this.trigger, ...patch }));
+    const next = { ...this.trigger, ...patch };
+    if (next.kind === "cron" && !(next.cron ?? "").trim()) next.cron = scheduleCron(DEFAULT_SCHEDULE);
+    this.setDoc(patchTrigger(this.document, next));
     void this.loadShape();
   }
   /**
@@ -4464,8 +4516,11 @@ var ErpFlowsEditor = class extends i3 {
           >
             <span class="grow">
               <span class="eyebrow">${this.t("ui.whenThisHappens")}</span>
+              <!-- One sentence, one author: describeTrigger is what the card in the list and
+                   the gallery already read, so «every Friday at 18:00» cannot say one thing here
+                   and another there (flows#77). -->
               <span class="title"
-                >${trigger.kind === "event" ? this.t("ui.triggerEvent", { event: this.eventLabel(trigger.event) }) : trigger.kind === "cron" ? readDailyCron(trigger.cron ?? "") ? this.t("ui.triggerDaily", { time: readDailyCron(trigger.cron ?? "") }) : this.t("ui.triggerCron", { cron: trigger.cron ?? "" }) : trigger.kind === "at" ? this.t("ui.triggerAt", { when: trigger.at ?? "" }) : this.t("ui.triggerManual")}</span
+                >${describeTrigger(trigger, this.t, this.eventLabel(trigger.event))}</span
               >
             </span>
           </button>
@@ -4491,16 +4546,7 @@ var ErpFlowsEditor = class extends i3 {
         </select>
       </div>
       ${trigger.kind === "event" ? this.renderEventChoice(trigger) : A}
-      ${trigger.kind === "cron" ? b2`<div class="field">
-            <label for="trigger-time">${this.t("ui.timeLabel")}</label>
-            <input
-              id="trigger-time"
-              type="time"
-              .value=${readDailyCron(trigger.cron ?? "") ?? ""}
-              @change=${(e4) => this.setTrigger({ cron: dailyCron(e4.target.value || "09:00") })}
-            />
-            <span class="hint">${this.t("ui.cronLabel")}: ${trigger.cron ?? ""}</span>
-          </div>` : A}
+      ${trigger.kind === "cron" ? this.renderCronPanel(trigger) : A}
       ${trigger.kind === "at" ? b2`<div class="field">
             <label for="trigger-at">${this.t("ui.atLabel")}</label>
             <input
@@ -4512,6 +4558,109 @@ var ErpFlowsEditor = class extends i3 {
     }}
             />
           </div>` : A}
+    `;
+  }
+  /**
+   * **The schedule of a `cron` trigger** (flows#77).
+   *
+   * There used to be one control here for every schedule there is — a time box — and it did two
+   * wrong things to «every Friday at 18:00»: it drew itself EMPTY, because it could only read
+   * `M H * * *`, and on the first keystroke it wrote `M H * * *` back. The owner meant to move
+   * the hour and silently moved how often the automation runs, with nothing to undo it.
+   *
+   * So the panel now says the whole schedule — how often, which day, what time — which is the
+   * shape every scheduler an owner has already used offers (Zapier, Make, Power Automate, Odoo's
+   * scheduled actions). Three shapes, and no more: daily, weekly, monthly.
+   *
+   * 🔴 And the important half is what it does with the FOURTH shape. `0 9 * * MON-FRI` and a step
+   * expression are schedules the kernel runs perfectly well and these controls cannot say. Those
+   * get **no editing control at all** — the expression is shown as it is and kept as it is. There
+   * is nothing on screen to touch that could flatten it, which is the actual fix: refusing to
+   * READ one (which the old code already did) is worthless while the WRITE side still overwrites
+   * it. Replacing one is a button that says it replaces it.
+   */
+  renderCronPanel(trigger) {
+    const raw = (trigger.cron ?? "").trim();
+    const schedule = raw ? readSchedule(raw) : DEFAULT_SCHEDULE;
+    if (!schedule) return this.renderKeptCron(raw);
+    const write = (next) => this.setTrigger({ cron: scheduleCron(next) });
+    return b2`
+      <div class="field">
+        <label for="trigger-every">${this.t("ui.cronEvery")}</label>
+        <select
+          id="trigger-every"
+          data-field="cron-every"
+          .value=${schedule.every}
+          @change=${(e4) => write(retime(schedule, e4.target.value))}
+        >
+          ${option("day", this.t("ui.cronEveryDay"), schedule.every)}
+          ${option("week", this.t("ui.cronEveryWeek"), schedule.every)}
+          ${option("month", this.t("ui.cronEveryMonth"), schedule.every)}
+        </select>
+      </div>
+      ${schedule.every === "week" ? b2`<div class="field">
+            <label for="trigger-weekday">${this.t("ui.cronWeekday")}</label>
+            <select
+              id="trigger-weekday"
+              data-field="cron-weekday"
+              .value=${String(schedule.weekday)}
+              @change=${(e4) => write({ ...schedule, weekday: Number(e4.target.value) })}
+            >
+              <!-- Monday first: the week of a shop starts on Monday in every locale this ships
+                   in, even though crontab numbers Sunday 0. The VALUE stays crontab's. -->
+              ${WEEKDAY_ORDER.map(
+      (d3) => option(String(d3), this.t(`ui.weekday${d3}`), String(schedule.weekday))
+    )}
+            </select>
+          </div>` : A}
+      ${schedule.every === "month" ? b2`<div class="field">
+            <label for="trigger-monthday">${this.t("ui.cronMonthday")}</label>
+            <select
+              id="trigger-monthday"
+              data-field="cron-monthday"
+              .value=${String(schedule.monthday)}
+              @change=${(e4) => write({ ...schedule, monthday: Number(e4.target.value) })}
+            >
+              ${MONTH_DAYS.map(
+      (d3) => option(String(d3), String(d3), String(schedule.monthday))
+    )}
+            </select>
+            <span class="hint">${this.t("ui.cronMonthdayHint")}</span>
+          </div>` : A}
+      <div class="field">
+        <label for="trigger-time">${this.t("ui.timeLabel")}</label>
+        <input
+          id="trigger-time"
+          data-field="trigger-time"
+          type="time"
+          .value=${schedule.time}
+          @change=${(e4) => write({ ...schedule, time: e4.target.value || schedule.time })}
+        />
+        <span class="hint">${this.t("ui.cronLabel")}: ${scheduleCron(schedule)}</span>
+      </div>
+    `;
+  }
+  /** A schedule this screen cannot draw: shown, kept, and replaced only on purpose (flows#77). */
+  renderKeptCron(cron) {
+    return b2`
+      <div class="field">
+        <label>${this.t("ui.cronLabel")}</label>
+        <code class="kept-cron" data-field="cron-raw">${cron}</code>
+        <ok-inline-feedback tone="warning" icon="information-circle-outline"
+          >${this.t("ui.cronKept")}</ok-inline-feedback
+        >
+        <div class="adders" style="margin-left:0">
+          <button
+            type="button"
+            data-act="cron-simplify"
+            @click=${() => this.setTrigger({
+      cron: scheduleCron({ every: "day", time: readCronTime(cron) ?? "09:00" })
+    })}
+          >
+            ${this.t("ui.cronSimplify")}
+          </button>
+        </div>
+      </div>
     `;
   }
   /**
@@ -6151,7 +6300,37 @@ var TEMPLATES = [
     grantReasons: { "tasks.tasks.create": "tpl.grant.tasksCreate" },
     build: (t3) => ({
       schema_version: SCHEMA_VERSION2,
-      triggers: [{ kind: "event", event: "whatsapp_inbox.message.received" }],
+      triggers: [
+        {
+          kind: "event",
+          // The MODULE's event, not the core's — and it inherits the same two problems one hop
+          // later (flows#67). `whatsapp_inbox._ingest_inbound_message` is a manifest listener on
+          // `hub.whatsapp.message_received`, and a manifest listener has no mapping layer: the
+          // relay hands the core payload straight to the command and the command's `emit` writes
+          // that same bound payload to the outbox. So from hub#1621 this event carries the OWNER's
+          // own replies, echoed back from the WhatsApp Business app on her phone, and the 180 days
+          // of backlog Meta delivers the moment the number is connected. Unguarded that is a task
+          // per message she types herself and a task per conversation anybody had in March — the
+          // list this card exists to keep short, buried on the day the fleet updates.
+          //
+          // 🔴 `neq` and never `eq`, the SAME reason as the appointment pair below: those two
+          // fields reach the event only from hub#1621, which no published tag carries (`v1.1.15`
+          // is the newest). In the kernel an absent path is `Null` and `json_eq(Null, x)` is false
+          // (`crates/runtime/src/flows/def.rs`), so an affirmative clause matches NOTHING on the
+          // fleet as it stands — no run, no error, no log. We EXCLUDE what is bad; we never
+          // REQUIRE what is good.
+          //
+          // No `event.text` clause on purpose. Its neighbour filters an empty body because every
+          // reply IT sends is billed by Meta; this card only writes a task, and a customer who
+          // sends a photo, a voice note or a location has written to the shop just as much as one
+          // who types.
+          event: "whatsapp_inbox.message.received",
+          filter: {
+            "event.direction": { neq: "outbound" },
+            "event.source": { neq: "history" }
+          }
+        }
+      ],
       steps: [
         run("s1", "tasks.tasks.create", {
           title: t3("tpl.whatsapp.taskTitle"),
@@ -8984,6 +9163,11 @@ function copyName(name, taken, t3) {
 
 // ui/lib/flow-checkup.ts
 var WHATSAPP_MESSAGE_EVENT = "hub.whatsapp.message_received";
+var WHATSAPP_MODULE_MESSAGE_EVENT = "whatsapp_inbox.message.received";
+var WHATSAPP_MESSAGE_EVENTS = [
+  WHATSAPP_MESSAGE_EVENT,
+  WHATSAPP_MODULE_MESSAGE_EVENT
+];
 var ECHO_AND_BACKLOG = "whatsapp_echo_and_backlog";
 var ECHO_GUARDS = [
   ["event.direction", "outbound"],
@@ -8994,7 +9178,7 @@ function isGuarded(filter, path) {
   const clause = filter?.[path];
   return isRecord(clause) && Object.keys(clause).length > 0;
 }
-var isWhatsappTrigger = (trigger) => trigger?.kind === "event" && trigger?.event === WHATSAPP_MESSAGE_EVENT;
+var isWhatsappTrigger = (trigger) => trigger?.kind === "event" && WHATSAPP_MESSAGE_EVENTS.includes(trigger?.event);
 var answersEchoAndBacklog = (trigger) => isWhatsappTrigger(trigger) && ECHO_GUARDS.some(([path]) => !isGuarded(trigger.filter, path));
 function flowProblems(definition) {
   const doc = readDoc(definition);
@@ -9278,10 +9462,10 @@ var es_default = {
     copyOf: "Copia de {name}",
     copyMade: "Copiada, y la copia est\xE1 en pausa. No lleva ninguno de los permisos de la original: conc\xE9dele lo que necesite antes de encenderla.",
     copySecrets: "Sale fuera usando: {names}. Comprueba que son los correctos para la copia.",
-    checkupEchoTitle: "Esta automatizaci\xF3n contesta a tus propios mensajes",
-    checkupEchoBody: "Se mont\xF3 antes de que lo corrigi\xE9ramos, as\xED que tambi\xE9n responde a lo que escribes t\xFA desde tu m\xF3vil y a conversaciones de hace meses. Actual\xEDzala y solo contestar\xE1 a lo que escriba un cliente ahora. No cambia nada m\xE1s de ella.",
+    checkupEchoTitle: "Esta automatizaci\xF3n tambi\xE9n salta con tus propios mensajes",
+    checkupEchoBody: "Se mont\xF3 antes de que lo corrigi\xE9ramos, as\xED que tambi\xE9n salta con lo que escribes t\xFA desde tu m\xF3vil y con conversaciones de hace meses. Actual\xEDzala y solo saltar\xE1 con lo que escriba un cliente ahora. No cambia nada m\xE1s de ella.",
     checkupEchoFix: "Actualizarla",
-    checkupFixed: "\xAB{name}\xBB ya solo contesta a lo que escribe un cliente.",
+    checkupFixed: "\xAB{name}\xBB ya solo salta con lo que escribe un cliente.",
     checkupNotFixed: "No hemos podido actualizar esta automatizaci\xF3n: el hub la ha guardado sin el cambio. Vuelve a intentarlo en un momento y avisa a soporte si sigue pasando.",
     active: "Activa",
     paused: "En pausa",
@@ -9305,7 +9489,7 @@ var es_default = {
     triggerAt: "Una vez, el {when}",
     triggerManual: "Solo cuando pulses Ejecutar",
     triggerKindEvent: "Pasa algo",
-    triggerKindCron: "Todos los d\xEDas, a una hora",
+    triggerKindCron: "Seg\xFAn un horario",
     triggerKindAt: "Una vez, en una fecha y hora",
     triggerKindManual: "Solo a mano",
     eventPick: "Elige qu\xE9 pasa",
@@ -9855,7 +10039,25 @@ var es_default = {
     evStaffDeactivated: "se desactiva a alguien del equipo",
     mod_services: "Servicios",
     tplHiddenModule: "Hay automatizaciones ocultas: necesitan el m\xF3dulo {modules}, y este hub no lo tiene. Inst\xE1lalo desde el marketplace y recarga esta pantalla.",
-    tplHiddenModules: "Hay automatizaciones ocultas: necesitan los m\xF3dulos {modules}, y este hub no los tiene. Inst\xE1lalos desde el marketplace y recarga esta pantalla."
+    tplHiddenModules: "Hay automatizaciones ocultas: necesitan los m\xF3dulos {modules}, y este hub no los tiene. Inst\xE1lalos desde el marketplace y recarga esta pantalla.",
+    triggerWeekly: "Todos los {day} a las {time}",
+    triggerMonthly: "Cada mes, el d\xEDa {day} a las {time}",
+    cronEvery: "Cada cu\xE1nto",
+    cronEveryDay: "Todos los d\xEDas",
+    cronEveryWeek: "Todas las semanas",
+    cronEveryMonth: "Todos los meses",
+    cronWeekday: "D\xEDa de la semana",
+    cronMonthday: "D\xEDa del mes",
+    cronMonthdayHint: "Un mes m\xE1s corto que el d\xEDa que elijas se lo salta, as\xED que el d\xEDa 31 no salta en febrero.",
+    cronKept: "Este horario tiene m\xE1s detalle del que esta pantalla sabe dibujar, as\xED que se muestra tal cual y se deja tal cual. Nada de aqu\xED lo puede cambiar sin querer.",
+    cronSimplify: "Cambiarlo por un horario sencillo",
+    weekday0: "domingos",
+    weekday1: "lunes",
+    weekday2: "martes",
+    weekday3: "mi\xE9rcoles",
+    weekday4: "jueves",
+    weekday5: "viernes",
+    weekday6: "s\xE1bados"
   },
   tpl: {
     author: "Automatizaciones",
@@ -10128,10 +10330,10 @@ var en_default = {
     copyOf: "Copy of {name}",
     copyMade: "Copied, and the copy is paused. It carries none of the original's permissions \u2014 allow what it needs before turning it on.",
     copySecrets: "It reaches out using: {names}. Check those are the right ones for the copy.",
-    checkupEchoTitle: "This automation replies to your own messages",
-    checkupEchoBody: "It was set up before we corrected it, so it also answers the replies you send from your own phone and conversations from months ago. Update it and it will only answer what a customer writes now. Nothing else about it changes.",
+    checkupEchoTitle: "This automation also runs on your own messages",
+    checkupEchoBody: "It was set up before we corrected it, so it also reacts to the replies you send from your own phone and to conversations from months ago. Update it and it will only react to what a customer writes now. Nothing else about it changes.",
     checkupEchoFix: "Update it",
-    checkupFixed: "\u201C{name}\u201D now only replies to what a customer writes.",
+    checkupFixed: "\u201C{name}\u201D now only reacts to what a customer writes.",
     checkupNotFixed: "We could not update this automation: the hub saved it without the change. Try again in a moment, and tell support if it keeps happening.",
     active: "Active",
     paused: "Paused",
@@ -10155,7 +10357,7 @@ var en_default = {
     triggerAt: "Once, on {when}",
     triggerManual: "Only when you press Run",
     triggerKindEvent: "Something happens",
-    triggerKindCron: "Every day, at a time",
+    triggerKindCron: "On a schedule",
     triggerKindAt: "Once, at a date and time",
     triggerKindManual: "Only by hand",
     eventPick: "Pick what happens",
@@ -10705,7 +10907,25 @@ var en_default = {
     evStaffDeactivated: "a staff member is deactivated",
     mod_services: "Services",
     tplHiddenModule: "Some automations are hidden: they need the {modules} module, and this hub does not have it. Install it from the marketplace and reload this screen.",
-    tplHiddenModules: "Some automations are hidden: they need the {modules} modules, and this hub does not have them. Install them from the marketplace and reload this screen."
+    tplHiddenModules: "Some automations are hidden: they need the {modules} modules, and this hub does not have them. Install them from the marketplace and reload this screen.",
+    triggerWeekly: "Every {day} at {time}",
+    triggerMonthly: "Every month on day {day} at {time}",
+    cronEvery: "How often",
+    cronEveryDay: "Every day",
+    cronEveryWeek: "Every week",
+    cronEveryMonth: "Every month",
+    cronWeekday: "Day of the week",
+    cronMonthday: "Day of the month",
+    cronMonthdayHint: "A month shorter than the day you pick simply skips it, so day 31 does not run in February.",
+    cronKept: "This schedule is more detailed than this screen can draw, so it is shown as it is and left exactly as it is. Nothing here can change it by accident.",
+    cronSimplify: "Replace it with a simple schedule",
+    weekday0: "Sunday",
+    weekday1: "Monday",
+    weekday2: "Tuesday",
+    weekday3: "Wednesday",
+    weekday4: "Thursday",
+    weekday5: "Friday",
+    weekday6: "Saturday"
   },
   tpl: {
     author: "Automations",
