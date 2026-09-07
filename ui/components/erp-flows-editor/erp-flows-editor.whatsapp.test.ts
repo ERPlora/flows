@@ -762,3 +762,84 @@ describe('the trip through email keeps the message too (flows#95)', () => {
     expect((restored.action.sections as { title?: string }[])[0].title).toBe('Jueves');
   });
 });
+
+/**
+ * **The two doors, taken one after the other** (flows#95).
+ *
+ * The message is written down on the way OUT, and there are two ways out — the mode and the
+ * channel. Taken in a row they are not the same trip twice: she flips to plain text to reread the
+ * sentence on its own, and only THEN decides this one should go by email. The channel door then
+ * finds a step carrying nothing, and a screen that wrote that nothing down would erase what the
+ * mode door had just saved — the bug of this issue again, by the long way round.
+ *
+ * And the memory belongs to a STEP, not to the editor: an automation that sends two WhatsApp
+ * messages has two of them on screen at once.
+ */
+describe('the memory survives the second door and stays with its own step (flows#95)', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  const list = (text: string) => ({
+    type: 'list',
+    header: { type: 'text', text: 'Tus huecos' },
+    body: { text },
+    action: {
+      button: 'Ver huecos',
+      sections: [{ title: 'Jueves', rows: [{ id: 'j1', title: '10:00' }] }],
+    },
+  });
+
+  /** The panel of a given card, opening it only if it is not the one already open. */
+  const panelFor = async (el: ErpFlowsEditor, node: string): Promise<Element> => {
+    const open = el.renderRoot.querySelector(`[data-node="${node}"] .panel`);
+    if (open) return open;
+    const opener = el.renderRoot.querySelector(`[data-node="${node}"] button.open`) as HTMLButtonElement;
+    expect(opener, `the card ${node} has no way to open it`).toBeTruthy();
+    opener.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, cancelable: true }));
+    await settle(el);
+    return el.renderRoot.querySelector(`[data-node="${node}"] .panel`)!;
+  };
+
+  const field = async (el: ErpFlowsEditor, node: string, name: string): Promise<Element | null> =>
+    (await panelFor(el, node)).querySelector(`select[data-field="${name}"]`);
+
+  it('keeps it when the email detour starts from plain text', async () => {
+    const el = await mount(whatsapp({ interactive: list('Elige hueco') }));
+    // Out through the mode door first: the message is now only in the screen's memory.
+    await pick(el, await field(el, 'n', 'notify-mode'), 'text');
+    // …and only now does she decide it should be an email. The step carries nothing to remember;
+    // writing that down would throw away what the first door saved.
+    await pick(el, await field(el, 'n', 'channel'), 'email');
+    await pick(el, await field(el, 'n', 'channel'), 'whatsapp');
+    await pick(el, await field(el, 'n', 'notify-mode'), 'options');
+
+    const back = step(el).interactive as Record<string, Record<string, unknown>>;
+    expect(back.type, 'the second door threw the message away').toBe('list');
+    expect(back.header).toEqual({ type: 'text', text: 'Tus huecos' });
+    expect((back.action.sections as { title?: string }[])[0].title).toBe('Jueves');
+  });
+
+  it('does not give one step the message of the other', async () => {
+    const el = await mount([
+      { ...whatsapp({ interactive: list('Elige hueco') })[0] },
+      {
+        ...whatsapp({
+          interactive: {
+            type: 'button',
+            body: { text: '¿Te va bien?' },
+            action: { buttons: [{ type: 'reply', reply: { id: 'ok', title: 'Sí' } }] },
+          },
+        })[0],
+        id: 'n2',
+      },
+    ]);
+    await pick(el, await field(el, 'n', 'notify-mode'), 'text');
+    await pick(el, await field(el, 'n2', 'notify-mode'), 'text');
+    await pick(el, await field(el, 'n', 'notify-mode'), 'options');
+
+    const back = el.document.steps[0] as unknown as Record<string, Record<string, unknown>>;
+    expect((back.interactive as Record<string, unknown>).type, 'the other step’s message came back').toBe('list');
+    expect((back.interactive as Record<string, Record<string, unknown>>).body.text).toBe('Elige hueco');
+    // …and the one still in text mode is untouched.
+    expect('interactive' in (el.document.steps[1] as unknown as Record<string, unknown>)).toBe(false);
+  });
+});
