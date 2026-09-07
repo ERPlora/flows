@@ -164,6 +164,36 @@ describe('the limits an owner can put on a permission (flows#66)', () => {
     expect(sent).toEqual([{ kind: 'command', value: CANCEL }]);
   });
 
+  it('keeps every OTHER permission when the limits of one are saved', async () => {
+    // Saving a limit re-sends the whole list, exactly as revoking does — `PUT …/grants` replaces.
+    // A save that sent only the row being edited would not narrow that permission: it would
+    // silently REVOKE every other one the flow holds, and the screen would come back saying so
+    // only after the fact. The pins of those others have to survive the trip too.
+    const client = fakeClient({
+      flows: {
+        grants: vi.fn(async () => [
+          { id: 'g1', kind: 'command', value: CANCEL },
+          { id: 'g2', kind: 'command', value: 'tasks.task.create', payload: { source: 'flow' } },
+          { id: 'g3', kind: 'http', value: 'https://api.example.com/*' },
+          { id: 'g4', kind: 'notify', value: 'whatsapp' },
+        ]),
+        replaceGrants: vi.fn(async (_id: string, g: unknown) => g),
+      },
+    });
+    const el = await permissionsTab(client);
+    await click(el, `[data-grant="command ${CANCEL}"] [data-act="limits"]`);
+    await type(el, `[data-grant="command ${CANCEL}"] [data-field="pin-name"]`, 'channel');
+    await type(el, `[data-grant="command ${CANCEL}"] [data-field="pin-value"]`, 'customer');
+    await click(el, `[data-grant="command ${CANCEL}"] [data-act="save-limits"]`);
+    const [, sent] = client.flows.replaceGrants.mock.calls[0] as [string, unknown];
+    expect(sent).toEqual([
+      { kind: 'command', value: CANCEL, payload: { channel: 'customer' } },
+      { kind: 'command', value: 'tasks.task.create', payload: { source: 'flow' } },
+      { kind: 'http', value: 'https://api.example.com/*' },
+      { kind: 'notify', value: 'whatsapp' },
+    ]);
+  });
+
   it('keeps a limit when an unrelated permission is withdrawn', async () => {
     // The regression this whole panel can cause: `PUT …/grants` is a complete REPLACE, so every
     // action here re-sends every grant. Losing the pin on the way would turn «may cancel as the
