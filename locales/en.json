@@ -17,7 +17,7 @@
     "retry": "Try again",
     "unnamed": "Untitled automation",
     "errGeneric": "Something went wrong. Nothing was saved.",
-    "errLimitNotApplied": "The recipe was installed, but this hub could not store the limit on its permissions. Grant them on the Permissions screen and set the limit there before turning the automation on.",
+    "errLimitNotApplied": "The recipe was installed and left switched off, with no permission granted: this hub could not store the limit it needs. Turning it on with the wide permission would let it do more than the recipe promises.",
     "listTitle": "Automations",
     "newAutomation": "New automation",
     "emptyTitle": "Nothing is automated yet",
