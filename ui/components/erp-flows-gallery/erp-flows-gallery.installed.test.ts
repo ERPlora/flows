@@ -211,11 +211,9 @@ describe('what the badge costs, and what happens when the hub will not answer', 
     };
     const client = hub([unrelated, installedFlow()]);
     await mount(client);
-    // The ids asked about, not how many times: the element loads once on connect and again when
-    // the shell hands it a client, which is how `list` and `probe` have always behaved (flows#69).
-    // What this pins is that the question is asked about the candidate and about nothing else.
-    const asked = new Set(client.flows.grants.mock.calls.map((call) => call[0]));
-    expect([...asked]).toEqual(['f1']);
+    // Counted, not just listed: the double load this used to have to work around is gone
+    // (flows#69), so «asked about the candidate and nothing else» can be pinned exactly.
+    expect(client.flows.grants.mock.calls.map((call) => call[0])).toEqual(['f1']);
   });
 
   it('asks about a flow that comes round on a card’s schedule too', async () => {
@@ -224,8 +222,10 @@ describe('what the badge costs, and what happens when the hub will not answer', 
     // for stays «not asked yet» and badges nothing.
     const client = hub([weeklyFlow()]);
     await mount(client);
-    const asked = new Set(client.flows.grants.mock.calls.map((call) => call[0]));
-    expect([...asked], 'the calendar card never got its second half').toEqual(['f7']);
+    expect(
+      client.flows.grants.mock.calls.map((call) => call[0]),
+      'the calendar card never got its second half',
+    ).toEqual(['f7']);
   });
 
   it('badges the calendar card the owner already set up, on the card itself', async () => {
@@ -402,5 +402,77 @@ describe('the screen opens the automation the gallery points at', () => {
     expect(editor, 'the gallery asked for a flow and the screen stayed on the gallery').toBeTruthy();
     expect((editor as unknown as { flow: { id: string } }).flow.id).toBe('f1');
     expect((editor as unknown as { tab: string }).tab).toBe('permissions');
+  });
+});
+
+/**
+ * **What opening Automations costs the hub** (flows#69).
+ *
+ * The screen asked for everything TWICE — the flow list, the shape of every witness event and,
+ * since flows#60, one grants call per candidate — because the load ran on connect and again on the
+ * first render, where the shell handing over the client counts as a change. Nothing showed wrong;
+ * it just took two round trips to settle and charged a busy hub double for the most expensive of
+ * the three.
+ */
+describe('opening the gallery', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  it('asks the hub once, not twice', async () => {
+    const client = hub([installedFlow()]);
+    await mount(client);
+    expect(client.flows.list, 'the flow list').toHaveBeenCalledTimes(1);
+    expect(client.flows.grants, 'the permissions of the one candidate').toHaveBeenCalledTimes(1);
+    const events = client.events.shape.mock.calls.map((call) => call[0]);
+    expect(events.length, 'one question per witness event and no more').toBe(
+      new Set(events).size,
+    );
+  });
+
+  it('starts asking the moment it goes on screen, not a render later', async () => {
+    // The complaint is that the screen takes too long to settle, so WHEN the asking starts is part
+    // of the fix and not an implementation detail: the load begins as the element is attached,
+    // with the client the shell already put on it, rather than waiting for the first render to
+    // notice that same client arrived.
+    const client = hub([installedFlow()]);
+    const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+    el.client = client as never;
+    el.t = t;
+    document.body.appendChild(el);
+    expect(client.flows.list, 'nothing was asked until a render happened').toHaveBeenCalledTimes(1);
+    await settle(el);
+    expect(client.flows.list, 'and the render asked it all over again').toHaveBeenCalledTimes(1);
+  });
+
+  it('still loads when the shell hands the client over after the element is on screen', async () => {
+    // The other order, and the reason this cannot be fixed by deleting the reactive half: an
+    // element mounted before its client has nothing to ask on connect, so the load has to happen
+    // when the client arrives or the screen stays empty for ever.
+    const el = await mount(null);
+    const client = hub([installedFlow()]);
+    el.client = client as never;
+    await settle(el);
+    expect(client.flows.list, 'the client arrived and nobody asked').toHaveBeenCalledTimes(1);
+    expect(card(el, 'no-show-followup')?.dataset.installed).toBe('active');
+  });
+
+  it('asks again when the shell swaps in a different hub', async () => {
+    const first = hub([installedFlow()]);
+    const el = await mount(first);
+    const second = hub([installedFlow({ id: 'f4' })]);
+    el.client = second as never;
+    await settle(el);
+    expect(second.flows.list, 'a different hub was never asked').toHaveBeenCalledTimes(1);
+    expect(first.flows.list, 'the old hub was asked again').toHaveBeenCalledTimes(1);
+  });
+
+  it('does not ask a second time when the shell re-sets the same client', async () => {
+    // Lit calls `updated` for any property that changes, and a parent that re-renders can hand
+    // over the very same object again. Same client, same answers: asking is a round trip for
+    // nothing on the screen the owner opens most.
+    const client = hub([installedFlow()]);
+    const el = await mount(client);
+    el.requestUpdate('client', null);
+    await settle(el);
+    expect(client.flows.list).toHaveBeenCalledTimes(1);
   });
 });
