@@ -16,7 +16,9 @@
  *   somewhere else — a module template, a recipe, the API — carries a `header`, a `footer` and
  *   groups with a title that this screen has no box for, and rebuilding the object from the form
  *   deleted them in silence on a save asked for to change ONE label. **Saving can never lose a key
- *   it does not understand.**
+ *   it does not understand**, and that holds at EVERY level: the message, the `action`, a section
+ *   (title included, with one group as with five), a row, a reply and Meta's envelope around it.
+ *   The only keys that go are the ones belonging to the shape the owner switched AWAY from.
  * - **The limits are the SaaS's to enforce**, before the paid call, answering `too_many_options`,
  *   `duplicate_option_id` and `invalid_option`. {@link tapOptionProblems} does not re-implement
  *   them: it WARNS with the same names, so the owner finds out while typing rather than after a
@@ -49,12 +51,23 @@ export interface TapOption {
   /** `list` only. Meta has no description on a button. */
   description?: unknown;
   /**
-   * `list` only, and only when the message arrived with MORE THAN ONE section: which group this
-   * row came from, so writing it back can put it there again (flows#91). There is no control for
-   * it — the screen edits a flat list of rows on purpose, ten rows being ten rows wherever they
-   * sit. It is carried, not edited.
+   * `list` only, and only when the groups carry something of their own — more than one of them, or
+   * a single one with a title: which group this row came from, so writing it back can put it there
+   * again (flows#91). There is no control for it — the screen edits a flat list of rows on purpose,
+   * ten rows being ten rows wherever they sit. It is carried, not edited.
    */
   group?: number;
+  /**
+   * What THIS option carried that the screen has no box for: the row's own keys on a `list`, the
+   * reply's on a `button`. Carried, not edited — and only present when there was something, so an
+   * ordinary option is still written as the two or three keys Meta defines.
+   */
+  rest?: Record<string, unknown>;
+  /**
+   * `button` only: what Meta's envelope around the reply carried besides `type` and `reply`. It
+   * belongs to the button shape, so a change of kind leaves it behind — same as `action.button`.
+   */
+  frame?: Record<string, unknown>;
 }
 
 export interface TapOptions {
@@ -103,22 +116,32 @@ export function readTapOptions(step: Step): TapOptions | null {
     for (const button of buttons) {
       const reply = obj(obj(button)?.reply);
       if (!reply) continue;
-      options.push({ id: typeof reply.id === 'string' ? reply.id : '', title: copy(reply.title) });
+      const rest = carried(reply, REPLY_KEYS);
+      const frame = carried(button, BUTTON_KEYS);
+      options.push({
+        id: typeof reply.id === 'string' ? reply.id : '',
+        title: copy(reply.title),
+        ...(rest ? { rest } : {}),
+        ...(frame ? { frame } : {}),
+      });
     }
   } else {
     const sections = Array.isArray(action.sections) ? action.sections : [];
     // Only when there is more than one: a single section is what this screen writes, and tagging
-    // its rows would put a key in every ordinary document to say «the one group».
+    // its rows would put a key in every ordinary document to say «the one group». A single section
+    // that DOES carry a title is not a second case — {@link toSections} keeps it whole.
     const grouped = sections.length > 1;
     for (const [at, section] of sections.entries()) {
       const rows = Array.isArray(obj(section)?.rows) ? (obj(section)!.rows as unknown[]) : [];
       for (const raw of rows) {
         const row = obj(raw);
         if (!row) continue;
+        const rest = carried(row, ROW_KEYS);
         const option: TapOption = {
           id: typeof row.id === 'string' ? row.id : '',
           title: copy(row.title),
           ...(grouped ? { group: at } : {}),
+          ...(rest ? { rest } : {}),
         };
         // Absent, never empty: a description Meta never received is not the same as one the owner
         // deliberately cleared, and writing `""` back would send a blank second line.
@@ -137,25 +160,55 @@ export function readTapOptions(step: Step): TapOptions | null {
   };
 }
 
-/** A row of a `list`, as Meta reads it. */
+/**
+ * A row of a `list`, as Meta reads it — the option's own keys first, so the three the screen edits
+ * always win. `description` is modelled, so an empty one means «she took it away»: it is NOT
+ * brought back from what the row used to carry.
+ */
 function toRow(option: TapOption): Record<string, unknown> {
   return {
+    ...option.rest,
     id: option.id,
     title: option.title,
     ...(textOf(option.description) ? { description: option.description } : {}),
   };
 }
 
+/** A button, as Meta reads it: its envelope, and the reply the owner actually edits. */
+function toButton(option: TapOption): Record<string, unknown> {
+  return {
+    ...option.frame,
+    type: 'reply',
+    reply: { ...option.rest, id: option.id, title: option.title },
+  };
+}
+
 /**
- * Everything the action carried EXCEPT the keys that belong to the other shape.
+ * Everything an object carried EXCEPT the keys named — the one tool this file preserves with.
  *
- * Keeping the unknown is not keeping the wrong: `sections` on a `type: button` message is a key
- * Meta never defined there, and it is the proxy that pays for finding out.
+ * Used two ways, and both matter. On an `action` it DROPS the keys of the other shape, because
+ * keeping the unknown is not keeping the wrong: `sections` on a `type: button` message is a key
+ * Meta never defined there, and it is the proxy that pays for finding out. On a row, a reply or a
+ * section it names the keys the screen DOES model, so what is left is exactly what has to survive.
  */
-function actionWithout(action: Record<string, unknown>, drop: readonly string[]): Record<string, unknown> {
+function without(source: unknown, drop: readonly string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(action)) if (!drop.includes(key)) out[key] = value;
+  for (const [key, value] of Object.entries(obj(source) ?? {})) {
+    if (!drop.includes(key)) out[key] = value;
+  }
   return out;
+}
+
+/** The keys this screen models, per shape. Everything else is carried untouched. */
+const ROW_KEYS = ['id', 'title', 'description'] as const;
+const REPLY_KEYS = ['id', 'title'] as const;
+const BUTTON_KEYS = ['type', 'reply'] as const;
+const SECTION_KEYS = ['rows'] as const;
+
+/** Whatever is left over, or nothing at all — an empty object would be a key on every option. */
+function carried(source: unknown, modelled: readonly string[]): Record<string, unknown> | undefined {
+  const rest = without(source, modelled);
+  return Object.keys(rest).length ? rest : undefined;
 }
 
 /**
@@ -165,17 +218,21 @@ function actionWithout(action: Record<string, unknown>, drop: readonly string[])
  * it is on screen: at the end. A group she emptied is dropped rather than sent empty.
  */
 function toSections(options: TapOption[], original: unknown): Record<string, unknown>[] {
-  const flat = [{ rows: options.map(toRow) }];
-  const groups = options.map((o) => (typeof o.group === 'number' ? o.group : -1));
-  const last = Math.max(...groups);
   const sections = Array.isArray(original) ? original : [];
-  if (last < 0 || !sections.length) return flat;
+  // ONE section, and it keeps whatever the first one carried: Meta paints a `title` on a single
+  // section just the same, so «only one group» is no reason to write it nameless (flows#91).
+  const flat = (): Record<string, unknown>[] => [
+    { ...without(sections[0], SECTION_KEYS), rows: options.map(toRow) },
+  ];
+  const groups = options.map((o) => (typeof o.group === 'number' ? o.group : -1));
+  const last = Math.max(-1, ...groups);
+  if (last < 0) return flat();
   const out: Record<string, unknown>[] = [];
   for (const [at, section] of sections.entries()) {
     const rows = options.filter((_, i) => (groups[i] < 0 ? last : groups[i]) === at).map(toRow);
     if (rows.length) out.push({ ...(obj(section) ?? {}), rows });
   }
-  return out.length ? out : flat;
+  return out.length ? out : flat();
 }
 
 /**
@@ -198,11 +255,8 @@ export function toInteractive(
       type: 'button',
       body,
       action: {
-        ...actionWithout(action, ['button', 'sections']),
-        buttons: options.options.map((o) => ({
-          type: 'reply',
-          reply: { id: o.id, title: o.title },
-        })),
+        ...without(action, ['button', 'sections']),
+        buttons: options.options.map(toButton),
       },
     };
   }
@@ -211,7 +265,7 @@ export function toInteractive(
     type: 'list',
     body,
     action: {
-      ...actionWithout(action, ['buttons']),
+      ...without(action, ['buttons']),
       button: options.openLabel,
       sections: toSections(options.options, action.sections),
     },

@@ -460,3 +460,110 @@ describe('the group a row came from is carried, never shown (flows#91)', () => {
     expect(read!.options).toEqual([{ id: 'a', title: 'A' }]);
   });
 });
+
+/**
+ * **The promise has to hold at every level of the message** (revisión de la PR de flows#91).
+ *
+ * The first pass kept the header, the footer and the titles of TWO groups, and stopped one level
+ * short in two places the reviewer measured:
+ *
+ * - a list with **one** group that has a title: nothing tagged the rows, so writing back produced
+ *   a nameless section. Meta paints that title with a single section too, and a recipe offering
+ *   «Mañana» and nothing else is the most likely shape of the one consumer there is (wi#101).
+ * - a key **inside a row** — or inside a button's reply — was rebuilt away, which is the very
+ *   thing the file's docblock says in bold cannot happen.
+ */
+describe('nothing is lost inside a group or inside an option either (flows#91)', () => {
+  const listWith = (sections: unknown[]) => ({
+    type: 'list',
+    body: { text: '¿Cuándo?' },
+    action: { button: 'Ver', sections },
+  });
+
+  const edited = (interactive: Record<string, unknown>, edit = (o: TapOptions): TapOptions => o) => {
+    const before = doc({ interactive });
+    return setTapOptions(before, 0, edit(readTapOptions(before.steps[0])!)).steps[0]
+      .interactive as Record<string, unknown>;
+  };
+
+  const sectionsOf = (interactive: Record<string, unknown>) =>
+    (interactive.action as Record<string, unknown>).sections as Record<string, unknown>[];
+
+  it('keeps the title of a SINGLE group, which Meta paints just the same', () => {
+    const after = edited(
+      listWith([
+        {
+          title: 'Mañana',
+          x_section_future: 'kept',
+          rows: [{ id: 'm1', title: '10:00' }],
+        },
+      ]),
+      (o) => ({ ...o, options: o.options.map((opt) => ({ ...opt, title: '10:30' })) }),
+    );
+    const sections = sectionsOf(after);
+    expect(sections).toHaveLength(1);
+    expect(sections[0].title).toBe('Mañana');
+    expect(sections[0].x_section_future).toBe('kept');
+    expect((sections[0].rows as Record<string, unknown>[])[0].title).toBe('10:30');
+  });
+
+  it('keeps a key the screen has no box for INSIDE a row', () => {
+    const after = edited(
+      listWith([{ rows: [{ id: 'm1', title: '10:00', x_row_future: { deep: true } }] }]),
+      (o) => ({ ...o, options: o.options.map((opt) => ({ ...opt, title: '10:30' })) }),
+    );
+    const row = (sectionsOf(after)[0].rows as Record<string, unknown>[])[0];
+    expect(row.x_row_future).toEqual({ deep: true });
+    expect(row.title).toBe('10:30');
+  });
+
+  it('keeps one inside a button’s reply, and one on the button itself', () => {
+    const after = edited(
+      {
+        type: 'button',
+        body: { text: 'Elige' },
+        action: {
+          buttons: [
+            { type: 'reply', x_button_future: 1, reply: { id: 'a', title: 'A', x_reply_future: 2 } },
+          ],
+        },
+      },
+      (o) => ({ ...o, options: o.options.map((opt) => ({ ...opt, title: 'B' })) }),
+    );
+    const button = ((after.action as Record<string, unknown>).buttons as Record<string, unknown>[])[0];
+    expect(button.x_button_future).toBe(1);
+    expect(button.type).toBe('reply');
+    const reply = button.reply as Record<string, unknown>;
+    expect(reply).toEqual({ id: 'a', title: 'B', x_reply_future: 2 });
+  });
+
+  it('does NOT bring back a description the owner cleared', () => {
+    // The whole point of carrying only what the screen does not model: `description` it DOES
+    // model, so an empty one means «she took it away», not «use the old one».
+    const after = edited(
+      listWith([{ rows: [{ id: 'm1', title: '10:00', description: 'con Ana', x: 1 }] }]),
+      (o) => ({ ...o, options: o.options.map((opt) => ({ ...opt, description: '' })) }),
+    );
+    const row = (sectionsOf(after)[0].rows as Record<string, unknown>[])[0];
+    expect(row.description).toBeUndefined();
+    expect(row.x).toBe(1);
+  });
+
+  it('carries an option’s own key across a change of kind, without landing it on the wrapper', () => {
+    const after = edited(
+      listWith([{ title: 'Mañana', rows: [{ id: 'm1', title: '10:00', x_row_future: 9 }] }]),
+      (o) => ({ ...o, kind: 'button' }),
+    );
+    const button = ((after.action as Record<string, unknown>).buttons as Record<string, unknown>[])[0];
+    expect(button.reply).toEqual({ id: 'm1', title: '10:00', x_row_future: 9 });
+    // The row's own keys belong to the option, not to Meta's envelope around it.
+    expect(Object.keys(button).sort()).toEqual(['reply', 'type']);
+  });
+
+  it('writes the ordinary row and the ordinary button with nothing extra on them', () => {
+    const clean = edited(listWith([{ rows: [{ id: 'm1', title: '10:00' }] }]));
+    const row = (sectionsOf(clean)[0].rows as Record<string, unknown>[])[0];
+    expect(Object.keys(row).sort()).toEqual(['id', 'title']);
+    expect(Object.keys(sectionsOf(clean)[0]).sort()).toEqual(['rows']);
+  });
+});

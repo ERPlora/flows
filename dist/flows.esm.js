@@ -2848,7 +2848,14 @@ function readTapOptions(step) {
     for (const button of buttons) {
       const reply = obj(obj(button)?.reply);
       if (!reply) continue;
-      options.push({ id: typeof reply.id === "string" ? reply.id : "", title: copy(reply.title) });
+      const rest = carried(reply, REPLY_KEYS);
+      const frame = carried(button, BUTTON_KEYS);
+      options.push({
+        id: typeof reply.id === "string" ? reply.id : "",
+        title: copy(reply.title),
+        ...rest ? { rest } : {},
+        ...frame ? { frame } : {}
+      });
     }
   } else {
     const sections = Array.isArray(action.sections) ? action.sections : [];
@@ -2858,10 +2865,12 @@ function readTapOptions(step) {
       for (const raw of rows) {
         const row = obj(raw);
         if (!row) continue;
+        const rest = carried(row, ROW_KEYS);
         const option2 = {
           id: typeof row.id === "string" ? row.id : "",
           title: copy(row.title),
-          ...grouped ? { group: at2 } : {}
+          ...grouped ? { group: at2 } : {},
+          ...rest ? { rest } : {}
         };
         if (typeof row.description === "string" && row.description !== "") {
           option2.description = row.description;
@@ -2879,28 +2888,48 @@ function readTapOptions(step) {
 }
 function toRow(option2) {
   return {
+    ...option2.rest,
     id: option2.id,
     title: option2.title,
     ...textOf(option2.description) ? { description: option2.description } : {}
   };
 }
-function actionWithout(action, drop) {
+function toButton(option2) {
+  return {
+    ...option2.frame,
+    type: "reply",
+    reply: { ...option2.rest, id: option2.id, title: option2.title }
+  };
+}
+function without(source, drop) {
   const out = {};
-  for (const [key2, value] of Object.entries(action)) if (!drop.includes(key2)) out[key2] = value;
+  for (const [key2, value] of Object.entries(obj(source) ?? {})) {
+    if (!drop.includes(key2)) out[key2] = value;
+  }
   return out;
 }
+var ROW_KEYS = ["id", "title", "description"];
+var REPLY_KEYS = ["id", "title"];
+var BUTTON_KEYS = ["type", "reply"];
+var SECTION_KEYS = ["rows"];
+function carried(source, modelled) {
+  const rest = without(source, modelled);
+  return Object.keys(rest).length ? rest : void 0;
+}
 function toSections(options, original) {
-  const flat = [{ rows: options.map(toRow) }];
-  const groups = options.map((o6) => typeof o6.group === "number" ? o6.group : -1);
-  const last = Math.max(...groups);
   const sections = Array.isArray(original) ? original : [];
-  if (last < 0 || !sections.length) return flat;
+  const flat = () => [
+    { ...without(sections[0], SECTION_KEYS), rows: options.map(toRow) }
+  ];
+  const groups = options.map((o6) => typeof o6.group === "number" ? o6.group : -1);
+  const last = Math.max(-1, ...groups);
+  if (last < 0) return flat();
   const out = [];
   for (const [at2, section] of sections.entries()) {
     const rows = options.filter((_2, i4) => (groups[i4] < 0 ? last : groups[i4]) === at2).map(toRow);
     if (rows.length) out.push({ ...obj(section) ?? {}, rows });
   }
-  return out.length ? out : flat;
+  return out.length ? out : flat();
 }
 function toInteractive(options, original) {
   const base = original ?? {};
@@ -2912,11 +2941,8 @@ function toInteractive(options, original) {
       type: "button",
       body,
       action: {
-        ...actionWithout(action, ["button", "sections"]),
-        buttons: options.options.map((o6) => ({
-          type: "reply",
-          reply: { id: o6.id, title: o6.title }
-        }))
+        ...without(action, ["button", "sections"]),
+        buttons: options.options.map(toButton)
       }
     };
   }
@@ -2925,7 +2951,7 @@ function toInteractive(options, original) {
     type: "list",
     body,
     action: {
-      ...actionWithout(action, ["buttons"]),
+      ...without(action, ["buttons"]),
       button: options.openLabel,
       sections: toSections(options.options, action.sections)
     }
