@@ -219,12 +219,19 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
   });
 
   /**
-   * And it stays closed while the address bar still names it. A shortcut is served ONCE: a
-   * `popstate` the shell fires for its own reasons — a back, a forward, a tab restored — must not
-   * put back the card the owner just shut, because from the seat that is a card that will not
-   * close.
+   * The same shortcut, tapped again, opens the card again — even though the address did not
+   * change.
+   *
+   * The shell keeps a module's screen alive when the owner leaves it (`ModuleView.vue`, hub#1099)
+   * and, on the way back, re-creates the element ONLY when `route.fullPath` differs from the one it
+   * mounted. So the second time the owner taps «Set it up» in Settings → WhatsApp, this very
+   * instance is what comes back on screen, and the `popstate` the shortcut fires is the only word
+   * it gets. Answering «that card was already served once» is the original complaint all over
+   * again: a tap that lands on the gallery with nothing open. A navigation that names a card opens
+   * the card; closing it is something the owner does BETWEEN navigations, and it holds until the
+   * next one (the test above pins that a plain re-render never re-opens it).
    */
-  it('does not re-open it when the shell navigates to the same address again', async () => {
+  it('opens the card again when the owner comes back through the same shortcut', async () => {
     landOn(`?template=${LINKED}`);
     const el = await mount();
     el.open(LINKED);
@@ -232,7 +239,48 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
     expect(openPanels(el)).toBe(0);
     window.dispatchEvent(new PopStateEvent('popstate'));
     await settle(el);
-    expect(openPanels(el), 'the same shortcut was served twice').toBe(0);
+    expect(panel(el, LINKED), 'the second tap on the same shortcut opened nothing').toBeTruthy();
+  });
+
+  /** «Opened» is not «found» the second time either: the card is brought on screen again. */
+  it('brings the card on screen again on that second visit', async () => {
+    const scrolled: string[] = [];
+    (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = function (
+      this: HTMLElement,
+    ) {
+      scrolled.push(this.dataset?.template ?? '');
+    };
+    landOn(`?template=${LINKED}`);
+    const el = await mount();
+    el.open(LINKED);
+    await settle(el);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await settle(el);
+    expect(scrolled, 'the card was left below the fold the second time').toEqual([LINKED, LINKED]);
+  });
+
+  /**
+   * The card may still be open from the first visit when the same shortcut arrives again. It is
+   * brought on screen in THAT cycle, not remembered as «still to reveal» and sprung on the owner
+   * the next time anything else re-renders — which, from the seat, is the gallery scrolling away
+   * from the card they just picked.
+   */
+  it('serves a shortcut whose card is still open without dragging the owner back to it later', async () => {
+    const scrolled: string[] = [];
+    (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = function (
+      this: HTMLElement,
+    ) {
+      scrolled.push(this.dataset?.template ?? '');
+    };
+    landOn(`?template=${LINKED}`);
+    const el = await mount();
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await settle(el);
+    expect(panel(el, LINKED)).toBeTruthy();
+    expect(scrolled, 'the second visit did not bring the open card on screen').toEqual([LINKED, LINKED]);
+    el.open('welcome-new-customer');
+    await settle(el);
+    expect(scrolled, 'the owner picked another card and was scrolled back to the linked one').toEqual([LINKED, LINKED]);
   });
 
   /**

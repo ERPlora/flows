@@ -266,13 +266,20 @@ export class ErpFlowsGallery extends LitElement {
   @state() private error = '';
 
   /**
-   * The id `?template=` last asked for and this screen already served, so a shortcut is honoured
-   * ONCE. The URL says where the owner was sent; it does not say what the screen must keep
-   * showing, and re-reading it on every render is how a card becomes impossible to close.
+   * The card the last shortcut named, so {@link reveal} knows what to bring on screen once it
+   * exists.
+   *
+   * A shortcut is served on every NAVIGATION that names it — mount and `popstate` — and never on a
+   * render: the URL says where the owner was sent, not what the screen must keep showing, and
+   * re-reading it on every render is how a card becomes impossible to close. It is served again on
+   * the same address on purpose: the shell keeps this element alive when the owner leaves the
+   * module (`ModuleView.vue`, hub#1099) and only re-creates it when `route.fullPath` changes, so
+   * the second tap on the same «Set it up» reaches this same instance through `popstate`, with
+   * the same URL. Ignoring it would be the original complaint again.
    */
   private linked = '';
 
-  /** The linked card, once it has been brought on screen. Same «once» as {@link linked}. */
+  /** The linked card, once it has been brought on screen. Reset each time a shortcut is served. */
   private revealed = '';
 
   private readonly onPopState = (): void => this.followShortcut();
@@ -317,10 +324,14 @@ export class ErpFlowsGallery extends LitElement {
     } catch {
       return; // No address bar, no shortcut. Still a gallery.
     }
-    if (!id || id === this.linked) return;
+    if (!id) return;
     this.linked = id;
+    this.revealed = '';
     this.picked = id;
     this.error = '';
+    // `picked` may already be this card (opened on the first visit, never shut): still a cycle, so
+    // `reveal()` runs now and marks it, instead of scrolling to it on some unrelated later render.
+    this.requestUpdate();
   }
 
   /**
