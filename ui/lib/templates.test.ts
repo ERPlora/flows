@@ -957,6 +957,32 @@ describe.each(SOURCES)(
         `digests do not change.`,
     ).toBe(true);
   });
+
+  /**
+   * **…and it has to be the commit that actually CARRIES these documents.** The test above only
+   * asks whether the pin is an ancestor of `main`, and once a commit lands that stays true for
+   * ever — so a re-sync that updated the digests and forgot the `commit` kept a green suite while
+   * the pin named a commit whose documents were the OLD ones. Measured on whatsapp_inbox#90: with
+   * the cards and both digests correct and the pin left at the previous sha, all 74 tests here
+   * passed. Nothing else can catch it — the neighbour test reads the checkout's WORKING TREE, not
+   * the pinned commit, so it agrees with a pin that is years stale.
+   *
+   * That matters because the `commit` is the only thing that says WHICH version of the source a
+   * reader should diff against when the two drift (whatsapp_inbox#73). A pin that points at the
+   * wrong document sends them to compare against something that was never mirrored.
+   */
+  it.skipIf(main === null || !pinned)(`names the commit those digests were taken from (${state})`, () => {
+    for (const lang of ['en', 'es'] as const) {
+      const body = git('show', `${mirror.commit}:${mirror.files[lang]}`);
+      expect(body, `${mirror.files[lang]} is not in ${mirror.commit.slice(0, 7)}`).not.toBeNull();
+      expect(
+        digest(JSON.parse(body!) as Record<string, unknown>),
+        `${mirror.template} pins ${mirror.commit.slice(0, 7)}, but the ${lang} document AT that ` +
+          `commit is not the one these digests describe: the digests were re-taken and the ` +
+          `\`commit\` was left behind. Set it to the commit the documents actually come from.`,
+      ).toBe(mirror.digest[lang]);
+    }
+  });
   },
 );
 
