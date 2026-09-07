@@ -476,6 +476,87 @@ describe('an option the customer taps is laid out as its own card (flows#75)', (
 });
 
 /**
+ * **A message this screen did not compose survives being edited on it** (flows#91).
+ *
+ * The recipe wi#101 installs writes a `list` with a header, a footer and two groups the customer
+ * reads as «Mañana» and «Tarde». The owner opens it to change one label — the only thing she came
+ * to do — and the save used to hand Meta a rebuilt `{type, body, action}`: no header, no footer,
+ * one nameless group. Nothing failed, nothing warned; the message simply stopped being the message
+ * that was designed.
+ */
+describe('an interactive that came from outside is not rebuilt from the form (flows#91)', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  const fromOutside = () =>
+    whatsapp({
+      interactive: {
+        type: 'list',
+        header: { type: 'text', text: 'Tus huecos' },
+        body: { text: '¿Cuándo te viene bien?' },
+        footer: { text: 'Responde tocando una opción' },
+        x_meta_future: { anything: true },
+        action: {
+          button: 'Ver huecos',
+          sections: [
+            { title: 'Mañana', rows: [{ id: 'm1', title: '10:00' }, { id: 'm2', title: '11:00' }] },
+            { title: 'Tarde', rows: [{ id: 't1', title: '17:00' }] },
+          ],
+        },
+      },
+    });
+
+  const interactiveOf = (el: ErpFlowsEditor): Record<string, unknown> =>
+    step(el).interactive as Record<string, unknown>;
+
+  it('keeps the header, the footer and the group titles when she edits one label', async () => {
+    const el = await mount(fromOutside());
+    const panel = await panelOf(el);
+    await compose(el, panel.querySelector('erp-flows-value[data-field="tap-title-0"]'), [
+      { kind: 'text', text: '10:30' },
+    ]);
+    const after = interactiveOf(el);
+    expect(after.header, 'the header the client saw is gone').toEqual({
+      type: 'text',
+      text: 'Tus huecos',
+    });
+    expect(after.footer, 'the footer the client saw is gone').toEqual({
+      text: 'Responde tocando una opción',
+    });
+    expect(after.x_meta_future, 'a key this screen does not know was deleted').toEqual({
+      anything: true,
+    });
+    const sections = (after.action as Record<string, unknown>).sections as {
+      title?: string;
+      rows: { id: string; title: unknown }[];
+    }[];
+    expect(sections.map((s) => s.title)).toEqual(['Mañana', 'Tarde']);
+    expect(sections[0].rows[0].title).toBe('10:30');
+  });
+
+  it('keeps them when she adds a row and when she removes one', async () => {
+    const el = await mount(fromOutside());
+    let panel = await panelOf(el);
+    (panel.querySelector('[data-act="add-tap-option"]') as HTMLElement | null)?.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, composed: true }),
+    );
+    await settle(el);
+    panel = el.renderRoot.querySelector('[data-node="n"] .panel')!;
+    (panel.querySelector('[data-act="remove-tap-option-0"]') as HTMLElement | null)?.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, composed: true }),
+    );
+    await settle(el);
+    const after = interactiveOf(el);
+    const sections = (after.action as Record<string, unknown>).sections as {
+      title?: string;
+      rows: { id: string }[];
+    }[];
+    expect(sections.map((s) => s.title)).toEqual(['Mañana', 'Tarde']);
+    expect(sections.map((s) => s.rows.map((r) => r.id))).toEqual([['m2'], ['t1', '']]);
+    expect(after.header).toBeTruthy();
+  });
+});
+
+/**
  * **The message the owner already typed does not disappear when she changes her mind** (flows#90).
  *
  * She writes «Tenemos estos huecos libres esta semana», then realises she would rather the client
