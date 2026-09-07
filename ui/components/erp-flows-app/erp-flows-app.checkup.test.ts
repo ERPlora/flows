@@ -163,6 +163,28 @@ describe('telling the owner her automation is the one that answers itself', () =
   });
 
   /**
+   * **The warning may only leave the row because the HUB kept the fix.**
+   *
+   * `PUT /flows/{id}` revalidates the document and re-seeds the triggers, and what comes back is
+   * what is stored — a core that dropped the two clauses would leave the salon exactly as exposed
+   * as before. Believing our own copy here is how the screen tells her it is fixed while her
+   * WhatsApp keeps answering itself, which is worse than never having offered the button.
+   */
+  it('keeps the warning when the hub stores a document that still has the flaw', async () => {
+    const client = fakeClient();
+    client.flows.update = vi.fn(async (id: string, f: Record<string, unknown>) => ({
+      id,
+      ...f,
+      definition: beforeTheFix(),
+    })) as never;
+    const el = await mount(client);
+    await click(el, warningOn(el, 'old')!.querySelector('[data-act="checkup-fix"]'));
+    expect(warningOn(el, 'old')).toBeTruthy();
+    // And it must not read as one that did: no «all fixed» banner on a repair that did not take.
+    expect(el.renderRoot.querySelector('[data-notice]')).toBeNull();
+  });
+
+  /**
    * A repair that fails must not look like one that worked. The row keeps its warning and the
    * screen says so — the alternative is an owner who believes her WhatsApp is fixed and finds out
    * from a customer that it is not.

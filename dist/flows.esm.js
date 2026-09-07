@@ -8478,6 +8478,7 @@ var es_default = {
     checkupEchoBody: "Se mont\xF3 antes de que lo corrigi\xE9ramos, as\xED que tambi\xE9n responde a lo que escribes t\xFA desde tu m\xF3vil y a conversaciones de hace meses. Actual\xEDzala y solo contestar\xE1 a lo que escriba un cliente ahora. No cambia nada m\xE1s de ella.",
     checkupEchoFix: "Actualizarla",
     checkupFixed: "\xAB{name}\xBB ya solo contesta a lo que escribe un cliente.",
+    checkupNotFixed: "No hemos podido actualizar esta automatizaci\xF3n: el hub la ha guardado sin el cambio. Vuelve a intentarlo en un momento y avisa a soporte si sigue pasando.",
     active: "Activa",
     paused: "En pausa",
     activate: "Activar",
@@ -9288,6 +9289,7 @@ var en_default = {
     checkupEchoBody: "It was set up before we corrected it, so it also answers the replies you send from your own phone and conversations from months ago. Update it and it will only answer what a customer writes now. Nothing else about it changes.",
     checkupEchoFix: "Update it",
     checkupFixed: "\u201C{name}\u201D now only replies to what a customer writes.",
+    checkupNotFixed: "We could not update this automation: the hub saved it without the change. Try again in a moment, and tell support if it keeps happening.",
     active: "Active",
     paused: "Paused",
     activate: "Activate",
@@ -10622,8 +10624,11 @@ var ErpFlowsApp = class extends i3 {
         enabled: flow.enabled,
         definition
       });
-      this.flows = this.flows.map((f3) => f3.id === flow.id ? { ...f3, ...saved, definition } : f3);
-      this.notice = this.t("ui.checkupFixed", { name: flow.name || this.t("ui.unnamed") });
+      const stored = saved && typeof saved.definition === "object" && saved.definition ? saved.definition : definition;
+      this.flows = this.flows.map((f3) => f3.id === flow.id ? { ...f3, ...saved, definition: stored } : f3);
+      const left = flowProblems(stored).some((p3) => p3.id === problem.id);
+      if (left) this.error = this.t("ui.checkupNotFixed");
+      else this.notice = this.t("ui.checkupFixed", { name: flow.name || this.t("ui.unnamed") });
     } catch (e4) {
       this.error = e4?.message || this.t("ui.errGeneric");
     } finally {

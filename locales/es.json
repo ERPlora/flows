@@ -56,6 +56,7 @@
     "checkupEchoBody": "Se montó antes de que lo corrigiéramos, así que también responde a lo que escribes tú desde tu móvil y a conversaciones de hace meses. Actualízala y solo contestará a lo que escriba un cliente ahora. No cambia nada más de ella.",
     "checkupEchoFix": "Actualizarla",
     "checkupFixed": "«{name}» ya solo contesta a lo que escribe un cliente.",
+    "checkupNotFixed": "No hemos podido actualizar esta automatización: el hub la ha guardado sin el cambio. Vuelve a intentarlo en un momento y avisa a soporte si sigue pasando.",
     "active": "Activa",
     "paused": "En pausa",
     "activate": "Activar",

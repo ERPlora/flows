@@ -722,8 +722,16 @@ export class ErpFlowsApp extends LitElement {
         enabled: flow.enabled,
         definition,
       });
-      this.flows = this.flows.map((f) => (f.id === flow.id ? { ...f, ...saved, definition } : f));
-      this.notice = this.t('ui.checkupFixed', { name: flow.name || this.t('ui.unnamed') });
+      // What the hub ECHOED, never what we sent. `PUT /flows/{id}` revalidates the document and
+      // re-seeds the triggers, so a core that dropped the clauses leaves the business exactly as
+      // exposed as before — and a row that took the warning off on our own copy would be telling
+      // her it is fixed while her WhatsApp keeps answering itself.
+      const stored =
+        saved && typeof saved.definition === 'object' && saved.definition ? saved.definition : definition;
+      this.flows = this.flows.map((f) => (f.id === flow.id ? { ...f, ...saved, definition: stored } : f));
+      const left = flowProblems(stored).some((p) => p.id === problem.id);
+      if (left) this.error = this.t('ui.checkupNotFixed');
+      else this.notice = this.t('ui.checkupFixed', { name: flow.name || this.t('ui.unnamed') });
     } catch (e) {
       this.error = (e as Error)?.message || this.t('ui.errGeneric');
     } finally {

@@ -56,6 +56,7 @@
     "checkupEchoBody": "It was set up before we corrected it, so it also answers the replies you send from your own phone and conversations from months ago. Update it and it will only answer what a customer writes now. Nothing else about it changes.",
     "checkupEchoFix": "Update it",
     "checkupFixed": "“{name}” now only replies to what a customer writes.",
+    "checkupNotFixed": "We could not update this automation: the hub saved it without the change. Try again in a moment, and tell support if it keeps happening.",
     "active": "Active",
     "paused": "Paused",
     "activate": "Activate",
