@@ -170,6 +170,34 @@ describe('a card is only «brought on screen» when there is a screen (flows#58)
     expect(scrolled).toEqual([LINKED]);
   });
 
+  /**
+   * Two taps on «Configurar» before the page has come back — for two DIFFERENT cards, which is
+   * what Settings → WhatsApp offers: «Reservar citas» and «Reservar mesa» are two shortcuts to the
+   * same gallery. The card that gets brought on screen is the one the owner asked for LAST; the
+   * first one is not what they are waiting to see any more.
+   */
+  it('shows the card of the second shortcut, not the one before it', async () => {
+    landOn(`?template=${LINKED}`);
+    const page = cachedPage();
+    const el = await mountIn(page);
+    const other = [...el.renderRoot.querySelectorAll('[data-template]')]
+      .map((c) => (c as HTMLElement).dataset.template ?? '')
+      .find((id) => id && id !== LINKED) as string;
+    expect(other, 'the catalogue rendered a single card: there is no second shortcut to test').toBeTruthy();
+
+    landOn(`?template=${other}`);
+    window.dispatchEvent(new Event('popstate'));
+    await settle(el);
+    expect(scrolled, 'it scrolled while the page was still hidden').toEqual([]);
+
+    page.style.display = '';
+    for (const observer of FakeResizeObserver.instances) {
+      if (!observer.disconnected && observer.observed.some((x) => x.isConnected)) observer.fire();
+    }
+    await settle(el);
+    expect(scrolled, 'the card of the second shortcut never came on screen').toEqual([other]);
+  });
+
   it('stops watching when it leaves the screen', async () => {
     landOn(`?template=${LINKED}`);
     const el = await mountIn(cachedPage());
