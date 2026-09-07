@@ -209,9 +209,26 @@ describe('a template this hub already runs', () => {
     // A cron this gallery does not understand is not a match and must never be guessed into one:
     // silence leaves the card exactly as it was, a wrong badge sends the owner to somebody else's
     // automation.
-    for (const cron of ['', '0 18 * * 5 7', 'every friday', '@weekly']) {
+    for (const cron of ['', '0 18 * * 5 7', 'every friday', '@weekly', 'a b * * 5']) {
       const flow = scheduledFlow(cron, ['tasks.tasks.create']);
       expect(templateInstallation(tpl('friday-week-review'), t, [flow]), cron).toEqual({
+        state: 'absent',
+      });
+    }
+  });
+
+  it('does not read a schedule that comes round less often than the card', () => {
+    // `0 18 15 * *` is the 15th of the month and `0 18 * 6 5` the Fridays of June. Neither comes
+    // round every week, so neither is the weekly review nor the morning check — reading only the
+    // clock fields would flatten all three into one and badge a card off an automation that runs
+    // eleven times a year.
+    const monthly = scheduledFlow('0 18 15 * *', ['tasks.tasks.create']);
+    const yearly = scheduledFlow('0 18 * 6 5', ['tasks.tasks.create'], 'f2');
+    for (const id of ['friday-week-review', 'morning-agenda-check']) {
+      expect(templateInstallation(tpl(id), t, [monthly]), `${id} vs monthly`).toEqual({
+        state: 'absent',
+      });
+      expect(templateInstallation(tpl(id), t, [yearly]), `${id} vs yearly`).toEqual({
         state: 'absent',
       });
     }
