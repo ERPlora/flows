@@ -2713,9 +2713,53 @@ function mergeGrants(live, add, revoke) {
     const k2 = key(g3);
     if (revoked.has(k2) || seen.has(k2)) continue;
     seen.add(k2);
-    out.push({ kind: g3.kind, value: g3.value });
+    out.push(withPin(g3, grantPin(g3)));
   }
   return out;
+}
+function canPinPayload(kind) {
+  return kind === "command";
+}
+function grantPin(grant) {
+  const raw = grant.payload;
+  if (!canPinPayload(grant.kind) || !raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return { ...raw };
+}
+function withPin(grant, pin) {
+  const kept = canPinPayload(grant.kind) ? pin : {};
+  return Object.keys(kept).length ? { kind: grant.kind, value: grant.value, payload: kept } : { kind: grant.kind, value: grant.value };
+}
+function setGrantPin(live, target, pin) {
+  const wanted = key(target);
+  return live.map((g3) => withPin(g3, key(g3) === wanted ? pin : grantPin(g3)));
+}
+function readPinRows(rows) {
+  const out = {};
+  for (const [rawField, rawValue] of rows) {
+    const field = rawField.trim();
+    if (!field) continue;
+    out[field] = pinValue(rawValue);
+  }
+  return out;
+}
+function pinRows(grant) {
+  return Object.entries(grantPin(grant)).map(([field, value]) => [field, pinText(value)]);
+}
+function pinValue(text) {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+    }
+  }
+  return scalar(text);
+}
+function pinText(value) {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") return JSON.stringify(value);
+  return String(value);
 }
 function queryOutputs(step) {
   const base = [`steps.${step.id}.found`, `steps.${step.id}.count`];
@@ -3487,6 +3531,7 @@ function guardRows(when) {
   return rows;
 }
 var BASE_ROLES = ["admin", "manager", "employee"];
+var grantKey = (g3) => `${g3.kind} ${g3.value}`;
 function clamp(value, min, max, fallback) {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, Math.round(value)));
@@ -3521,6 +3566,9 @@ var ErpFlowsEditor = class extends i3 {
     this.tab = "editor";
     this.openStep = null;
     this.grants = [];
+    this.limitsOpen = [];
+    this.pinDrafts = {};
+    this.savingLimits = "";
     this.runs = [];
     this.runSteps = {};
     this.shape = null;
@@ -3950,6 +3998,34 @@ var ErpFlowsEditor = class extends i3 {
       min-width: 0;
       overflow-wrap: anywhere;
     }
+    /* One permission and its limits, as a single block: the fold has to read as belonging to the
+       row above it and not as another permission of its own. */
+    .grant-block {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .grant .pinned {
+      font-style: normal;
+      color: var(--ok-text-muted, #6b675c);
+      overflow-wrap: anywhere;
+    }
+    .limits {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      /* Indented under its own permission on a desktop; flush on a phone, where 1.25rem of the
+         390px it has left is a column of text that wraps every other word. */
+      padding: 0 0 0.2rem 0;
+      border-left: 2px solid var(--ok-border, #d7d5cc);
+      margin-left: 0.4rem;
+      padding-left: 0.6rem;
+    }
+    @media (min-width: 560px) {
+      .limits {
+        margin-left: 1.25rem;
+      }
+    }
     .run {
       border: 1px solid var(--ok-border, #d7d5cc);
       border-radius: var(--ok-radius-sm, 10px);
@@ -4237,6 +4313,51 @@ var ErpFlowsEditor = class extends i3 {
     } catch (e4) {
       this.error = e4?.message || this.t("ui.errGeneric");
     }
+  }
+  /**
+   * **Writes the limits of ONE granted action** (hub#1623, flows#66).
+   *
+   * `PUT …/grants` is a complete replace, so this sends every grant this flow holds and not just
+   * the one that changed — {@link setGrantPin} is what keeps the other pins on their way through.
+   * What comes back is what the hub really stored, and that is what the screen shows from then on:
+   * changing a limit is a revocation plus a fresh grant on the other side, so the row the owner
+   * was looking at does not survive it and nothing here may pretend it did.
+   */
+  async saveLimits(grant) {
+    if (!this.client || !this.flow?.id) return;
+    const k2 = grantKey(grant);
+    this.error = "";
+    this.notice = "";
+    this.savingLimits = k2;
+    try {
+      const next = await this.client.flows.replaceGrants(
+        this.flow.id,
+        setGrantPin(this.grants, grant, readPinRows(this.limitRows(grant)))
+      );
+      this.grants = Array.isArray(next) ? next : [];
+      const rest = { ...this.pinDrafts };
+      delete rest[k2];
+      this.pinDrafts = rest;
+      this.notice = this.t("ui.grantsSaved");
+    } catch (e4) {
+      this.error = e4?.message || this.t("ui.errGeneric");
+    } finally {
+      this.savingLimits = "";
+    }
+  }
+  /** The rows the owner is editing, or the stored limit, or one empty pair to start from. */
+  limitRows(grant) {
+    const draft = this.pinDrafts[grantKey(grant)];
+    if (draft) return draft;
+    const stored = pinRows(grant);
+    return stored.length ? stored : [["", ""]];
+  }
+  setLimitRows(grant, rows) {
+    this.pinDrafts = { ...this.pinDrafts, [grantKey(grant)]: rows };
+  }
+  toggleLimits(grant) {
+    const k2 = grantKey(grant);
+    this.limitsOpen = this.limitsOpen.includes(k2) ? this.limitsOpen.filter((x2) => x2 !== k2) : [...this.limitsOpen, k2];
   }
   // ── Editing ─────────────────────────────────────────────────────────────────────────────────
   setDoc(doc) {
@@ -5404,19 +5525,116 @@ var ErpFlowsEditor = class extends i3 {
           <span class="grow">${g3.value}</span>
         </div>`
     )}
-      ${this.grants.map(
-      (g3) => b2`<div class="grant">
-          <ok-status-pill tone="success" label=${this.t("ui.grantsGranted")}></ok-status-pill>
-          <span class="grow">${g3.kind === "command" ? g3.value : this.t("ui.grantOther", g3)}</span>
-          <button type="button" class="icon-btn" @click=${() => void this.revoke(g3)}>
-            ${this.t("ui.revoke")}
-          </button>
-        </div>`
-    )}
+      ${this.grants.map((g3) => this.renderGrant(g3))}
       ${!missing.length && !this.grants.length ? b2`<span class="muted">${this.t("ui.grantsNone")}</span>` : A}
       ${missing.length ? b2`<div class="adders" style="margin-left:0">
             <button type="button" @click=${() => void this.grantAll()}>${this.t("ui.grantAll")}</button>
           </div>` : A}
+    </div>`;
+  }
+  /**
+   * One permission this flow HOLDS, and what it is limited to.
+   *
+   * The limit reads on the row itself, not only inside the fold: an owner who granted «may cancel
+   * appointments AS THE CUSTOMER» has to be able to read that back without opening anything, or
+   * the screen describes a wider permission than the one that was given (hub#1623, flows#66).
+   */
+  renderGrant(g3) {
+    const k2 = grantKey(g3);
+    const limits = pinRows(g3).map(([field, value]) => `${field} = ${value}`).join(", ");
+    const open = this.limitsOpen.includes(k2);
+    return b2`<div class="grant-block" data-grant=${k2}>
+      <div class="grant">
+        <ok-status-pill tone="success" label=${this.t("ui.grantsGranted")}></ok-status-pill>
+        <span class="grow"
+          >${g3.kind === "command" ? g3.value : this.t("ui.grantOther", g3)}${limits ? b2` <em class="pinned">${this.t("ui.grantPinned", { limits })}</em>` : A}</span
+        >
+        <!-- Only a command grant carries a payload. Offered on any other kind the hub answers
+             flow.invalid_grant_payload — and this endpoint replaces the WHOLE list, so it would
+             not lose that row, it would lose every permission on the screen. -->
+        ${canPinPayload(g3.kind) ? b2`<button
+              type="button"
+              class="icon-btn"
+              data-act="limits"
+              aria-expanded=${open ? "true" : "false"}
+              @click=${() => this.toggleLimits(g3)}
+            >
+              ${this.t("ui.grantLimits")}
+            </button>` : A}
+        <button type="button" class="icon-btn" data-act="revoke" @click=${() => void this.revoke(g3)}>
+          ${this.t("ui.revoke")}
+        </button>
+      </div>
+      ${open ? this.renderLimits(g3) : A}
+    </div>`;
+  }
+  /** The `field = value` pairs a granted action is pinned to — folded away until it is asked for. */
+  renderLimits(g3) {
+    const k2 = grantKey(g3);
+    const id = k2.replace(/[^A-Za-z0-9]+/g, "-");
+    const rows = this.limitRows(g3);
+    const saving = this.savingLimits === k2;
+    return b2`<div class="limits">
+      <span class="hint">${this.t("ui.grantLimitsIntro")}</span>
+      ${rows.length ? A : b2`<span class="muted">${this.t("ui.grantLimitsNone")}</span>`}
+      ${rows.map(
+      ([field, value], i4) => b2`<div class="param-row">
+          <div class="field">
+            <label for="pf-${id}-${i4}">${this.t("ui.grantLimitField")}</label>
+            <input
+              id="pf-${id}-${i4}"
+              data-field="pin-name"
+              type="text"
+              .value=${field}
+              @change=${(e4) => this.setLimitRows(
+        g3,
+        rows.map(
+          (r6, j) => j === i4 ? [e4.target.value.trim(), r6[1]] : r6
+        )
+      )}
+            />
+          </div>
+          <div class="field">
+            <label for="pv-${id}-${i4}">${this.t("ui.grantLimitValue")}</label>
+            <input
+              id="pv-${id}-${i4}"
+              data-field="pin-value"
+              type="text"
+              .value=${value}
+              @change=${(e4) => this.setLimitRows(
+        g3,
+        rows.map((r6, j) => j === i4 ? [r6[0], e4.target.value] : r6)
+      )}
+            />
+          </div>
+          <button
+            type="button"
+            class="icon-btn"
+            data-act="remove-limit"
+            aria-label=${this.t("ui.grantLimitRemove", { field: field || this.t("ui.grantLimitField") })}
+            @click=${() => this.setLimitRows(g3, rows.filter((_2, j) => j !== i4))}
+          >
+            ×
+          </button>
+        </div>`
+    )}
+      <div class="adders" style="margin-left:0">
+        <button
+          type="button"
+          data-act="add-limit"
+          @click=${() => this.setLimitRows(g3, [...rows, ["", ""]])}
+        >
+          ${this.t("ui.grantLimitAdd")}
+        </button>
+        <button
+          type="button"
+          data-act="save-limits"
+          ?disabled=${saving}
+          @click=${() => void this.saveLimits(g3)}
+        >
+          ${saving ? this.t("ui.saving") : this.t("ui.grantLimitsSave")}
+        </button>
+      </div>
     </div>`;
   }
   /**
@@ -5756,6 +5974,15 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "grants", 2);
+__decorateClass([
+  r5()
+], ErpFlowsEditor.prototype, "limitsOpen", 2);
+__decorateClass([
+  r5()
+], ErpFlowsEditor.prototype, "pinDrafts", 2);
+__decorateClass([
+  r5()
+], ErpFlowsEditor.prototype, "savingLimits", 2);
 __decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "runs", 2);
@@ -9128,6 +9355,15 @@ var es_default = {
     grantsSaved: "Permisos actualizados.",
     grantCommandNotFound: "Este hub no tiene ning\xFAn comando llamado {command}. Revisa el nombre en el paso.",
     grantOther: "{kind}: {value}",
+    grantLimits: "L\xEDmites",
+    grantPinned: "\u2014 solo con {limits}",
+    grantLimitsIntro: "Fija un valor y esta automatizaci\xF3n solo podr\xE1 actuar con ese valor. Cualquier otra cosa que intente se rechaza \u2014y omitir el campo tambi\xE9n, as\xED no puede saltarse el l\xEDmite call\xE1ndose.",
+    grantLimitsNone: "Sin l\xEDmites: puede hacerlo con lo que ella decida.",
+    grantLimitField: "Campo",
+    grantLimitValue: "Tiene que ser",
+    grantLimitAdd: "A\xF1adir un l\xEDmite",
+    grantLimitRemove: "Quitar el l\xEDmite de {field}",
+    grantLimitsSave: "Guardar l\xEDmites",
     historyTitle: "Qu\xE9 ha hecho",
     historyEmpty: "Todav\xEDa no se ha ejecutado.",
     runDone: "Termin\xF3 bien",
@@ -9969,6 +10205,15 @@ var en_default = {
     grantsSaved: "Permissions updated.",
     grantCommandNotFound: "This hub has no command called {command}. Check the name in the step.",
     grantOther: "{kind}: {value}",
+    grantLimits: "Limits",
+    grantPinned: "\u2014 only with {limits}",
+    grantLimitsIntro: "Fix a value and this automation may only act with that value. Anything else it tries is refused \u2014 and so is leaving the field out, so it cannot get round the limit by staying quiet.",
+    grantLimitsNone: "No limits: it may do this with whatever it decides.",
+    grantLimitField: "Field",
+    grantLimitValue: "Must be",
+    grantLimitAdd: "Add a limit",
+    grantLimitRemove: "Remove the limit on {field}",
+    grantLimitsSave: "Save limits",
     historyTitle: "What it has done",
     historyEmpty: "It has not run yet.",
     runDone: "Completed",

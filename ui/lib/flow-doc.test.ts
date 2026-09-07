@@ -13,6 +13,10 @@ import {
   requiredGrants,
   missingGrants,
   mergeGrants,
+  canPinPayload,
+  setGrantPin,
+  pinRows,
+  readPinRows,
   isSpineKind,
   partsToTemplate,
   httpPatternFor,
@@ -24,6 +28,7 @@ import {
   REJECT_POLICIES,
   approvalOutputs,
 } from './flow-doc';
+import type { Grant } from './flow-doc';
 
 describe('the document a flow is', () => {
   it('is born with the version this core enforces and one trigger', () => {
@@ -497,5 +502,156 @@ describe('the http grant pattern suggested from a URL', () => {
   it('says nothing about a URL that is not one yet', () => {
     expect(httpPatternFor('')).toBe('');
     expect(httpPatternFor('not a url')).toBe('');
+  });
+});
+
+describe('a `command` grant can FIX part of the payload (hub#1623, flows#66)', () => {
+  const pinned = (): Grant[] => [
+    { id: 'g1', kind: 'http', value: 'https://api.example.com/*' },
+    {
+      id: 'g2',
+      kind: 'command',
+      value: 'appointments.appointments.cancel',
+      payload: { channel: 'customer' },
+    },
+  ];
+
+  it('only a `command` grant can fix values — the hub refuses the WHOLE list otherwise', () => {
+    // `flow.invalid_grant_payload`: a pin on a kind that carries no payload is refused at save,
+    // and `PUT …/grants` is all-or-nothing, so one offered on the wrong row would lose the lot.
+    expect(canPinPayload('command')).toBe(true);
+    for (const kind of ['query', 'http', 'notify', 'recipient_query']) {
+      expect(canPinPayload(kind)).toBe(false);
+    }
+  });
+
+  it('carries the pin through a replace — dropping it would WIDEN the permission in silence', () => {
+    // `PUT …/grants` is a complete replace, so every save of this screen re-sends every grant.
+    // A merge that forgot the pin would turn «may cancel appointments AS THE CUSTOMER» back into
+    // «may cancel appointments» the first time the owner touched an unrelated row.
+    const merged = mergeGrants(pinned(), [{ kind: 'command', value: 'tasks.task.create' }], []);
+    expect(merged).toEqual([
+      { kind: 'http', value: 'https://api.example.com/*' },
+      {
+        kind: 'command',
+        value: 'appointments.appointments.cancel',
+        payload: { channel: 'customer' },
+      },
+      { kind: 'command', value: 'tasks.task.create' },
+    ]);
+  });
+
+  it('keeps the pin when an unrelated grant is withdrawn', () => {
+    expect(mergeGrants(pinned(), [], [{ kind: 'http', value: 'https://api.example.com/*' }])).toEqual(
+      [
+        {
+          kind: 'command',
+          value: 'appointments.appointments.cancel',
+          payload: { channel: 'customer' },
+        },
+      ],
+    );
+  });
+
+  it('a pinned grant is still HELD: the pin narrows a grant, it does not replace it', () => {
+    // Mirror of `ux_flow_grant_live`: the identity of a grant stays `(kind, value)`, so a pinned
+    // command must not show up as «waiting for your permission» next to its own granted row.
+    const doc = readDoc({
+      schema_version: 1,
+      triggers: [{ kind: 'manual' }],
+      steps: [{ id: 's1', kind: 'command', command: 'appointments.appointments.cancel' }],
+    });
+    expect(missingGrants(doc, pinned())).toEqual([]);
+  });
+
+  it('sets the pin on the named grant and leaves every other one, pin included, alone', () => {
+    const live: Grant[] = [
+      { id: 'g1', kind: 'command', value: 'tasks.task.create', payload: { source: 'whatsapp' } },
+      { id: 'g2', kind: 'command', value: 'appointments.appointments.cancel' },
+    ];
+    expect(
+      setGrantPin(live, { kind: 'command', value: 'appointments.appointments.cancel' }, {
+        channel: 'customer',
+      }),
+    ).toEqual([
+      { kind: 'command', value: 'tasks.task.create', payload: { source: 'whatsapp' } },
+      {
+        kind: 'command',
+        value: 'appointments.appointments.cancel',
+        payload: { channel: 'customer' },
+      },
+    ]);
+  });
+
+  it('an empty pin REMOVES the limit, and sends the old shape rather than an empty object', () => {
+    expect(
+      setGrantPin(pinned(), { kind: 'command', value: 'appointments.appointments.cancel' }, {}),
+    ).toEqual([
+      { kind: 'http', value: 'https://api.example.com/*' },
+      { kind: 'command', value: 'appointments.appointments.cancel' },
+    ]);
+  });
+
+  it('never builds a pin on a kind the hub would refuse it on', () => {
+    expect(
+      setGrantPin(pinned(), { kind: 'http', value: 'https://api.example.com/*' }, { a: 1 }),
+    ).toEqual([
+      { kind: 'http', value: 'https://api.example.com/*' },
+      {
+        kind: 'command',
+        value: 'appointments.appointments.cancel',
+        payload: { channel: 'customer' },
+      },
+    ]);
+  });
+
+  it('reads the typed rows with the SAME literal rule as a step parameter', () => {
+    // `007` is a postcode and `+34…` is a phone: both stay strings. `7` and `true` become the
+    // number and the boolean a command's schema asks for — the pin is compared for EQUALITY, so
+    // a string `"7"` against a numeric field would deny every call instead of narrowing it.
+    expect(
+      readPinRows([
+        [' channel ', 'customer'],
+        ['code', '007'],
+        ['seats', '7'],
+        ['confirmed', 'true'],
+      ]),
+    ).toEqual({ channel: 'customer', code: '007', seats: 7, confirmed: true });
+  });
+
+  it('a half-typed row asks for NOTHING: a nameless field would pin nothing and read as a limit', () => {
+    expect(readPinRows([['', 'customer'], ['   ', 'x']])).toEqual({});
+  });
+
+  it('shows the stored pin back as the rows that produced it, and round-trips', () => {
+    const grant: Grant = {
+      kind: 'command',
+      value: 'appointments.appointments.cancel',
+      payload: { channel: 'customer', seats: 7, confirmed: true, code: '007' },
+    };
+    expect(pinRows(grant)).toEqual([
+      ['channel', 'customer'],
+      ['seats', '7'],
+      ['confirmed', 'true'],
+      ['code', '007'],
+    ]);
+    expect(readPinRows(pinRows(grant))).toEqual(grant.payload);
+  });
+
+  it('a grant with no pin has no rows to show', () => {
+    expect(pinRows({ kind: 'command', value: 'tasks.task.create' })).toEqual([]);
+    expect(pinRows({ kind: 'command', value: 'tasks.task.create', payload: {} })).toEqual([]);
+  });
+
+  it('round-trips a pin the API holds that this screen cannot compose by typing', () => {
+    // A pin set through the API can be any JSON. Rendering it as text and reading it back as a
+    // STRING would rewrite it into something that matches nothing — the owner would open the
+    // screen, save an unrelated row, and their containment would quietly stop containing.
+    const grant: Grant = {
+      kind: 'command',
+      value: 'sales.sale.void',
+      payload: { origin: { channel: 'customer' }, tags: ['a', 'b'] },
+    };
+    expect(readPinRows(pinRows(grant))).toEqual(grant.payload);
   });
 });
