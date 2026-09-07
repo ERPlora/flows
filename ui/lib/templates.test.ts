@@ -434,11 +434,12 @@ const SOURCES: readonly MirrorSource[] = [
     // (first half of #58) added `confirm_to_customer`, and PR #63 (#55) made the two model steps
     // one.
     //
-    // 🔴 PINNED TO THE BRANCH HEAD, not to a squash: the source PR cannot merge until hub#1622 is
-    // DEPLOYED (an `ai` step carrying `on_reject` is refused whole — `flow.invalid_definition` —
-    // by any hub without it). Re-point this to the squash before merging, which the last test of
-    // this file makes mechanical: it goes red naming the sha to write here.
-    commit: '67c163c96cb4ab8024bd9f1934b427e80e7cd07f',
+    // Re-pinned from the branch head (`67c163c`) to the squash the day wi#85 landed on `main`,
+    // which is the drill the last test of this file enforces: it went red naming this very sha,
+    // and the two digests below did not move — the documents are the same, only the commit that
+    // carries them is new. The source could only merge once hub#1622 was in `develop`: an `ai`
+    // step carrying `on_reject` is refused whole (`flow.invalid_definition`) by any hub without it.
+    commit: '5936a9b0d7d790358b1bc905f8cb1514ac0809c6',
     files: {
       en: 'flows/appointment-from-whatsapp.en.flow.json',
       es: 'flows/appointment-from-whatsapp.es.flow.json',
