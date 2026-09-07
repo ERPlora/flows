@@ -105,6 +105,90 @@ export function readDailyCron(cron: string): string | null {
 }
 
 /**
+ * A schedule the editor can both DRAW and WRITE BACK whole (flows#77).
+ *
+ * `weekday` is crontab's own numbering — 0 is Sunday — because that is what travels to the kernel
+ * and what a template already carries (`friday-week-review` is born `0 18 * * 5`). Translating it
+ * to a local convention here would mean two numbering schemes in one file, and the wrong one
+ * would only show up as an automation running on the wrong day.
+ */
+export type Schedule =
+  | { every: 'day'; time: string }
+  | { every: 'week'; time: string; weekday: number }
+  | { every: 'month'; time: string; monthday: number };
+
+/** `"09:30"` and the fields the kernel wants, in the order it wants them. */
+function hhmm(time: string): { m: number; h: number } | null {
+  const parts = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
+  if (!parts) return null;
+  const h = Number(parts[1]);
+  const m = Number(parts[2]);
+  if (h > 23 || m > 59) return null;
+  return { m, h };
+}
+
+/**
+ * `"0 18 * * 5"` → «every week, Friday, 18:00», and **`null` for anything richer**.
+ *
+ * The refusal is the same one [`readDailyCron`] makes and for the same reason, one shape wider:
+ * whatever this cannot read, the editor must not offer to rewrite. `0 9 * * MON-FRI` and
+ * `*` with a step are perfectly good schedules the kernel runs — they are simply not something
+ * three dropdowns can say without dropping half of the expression on the floor.
+ *
+ * A day of the month AND a day of the week together (`0 9 1 * 5`) is refused on purpose: crontab
+ * ORs those two fields, so it means «the 1st, and also every Friday», which no single control on
+ * this screen says.
+ */
+export function readSchedule(cron: string): Schedule | null {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const [m, h, dom, mon, dow] = parts;
+  if (mon !== '*') return null;
+  if (!/^\d{1,2}$/.test(m) || !/^\d{1,2}$/.test(h)) return null;
+  const at = hhmm(`${h}:${m.padStart(2, '0')}`);
+  if (!at) return null;
+  const time = `${String(at.h).padStart(2, '0')}:${String(at.m).padStart(2, '0')}`;
+  if (dom === '*' && dow === '*') return { every: 'day', time };
+  if (dom === '*') {
+    if (!/^[0-7]$/.test(dow)) return null;
+    // crontab accepts BOTH 0 and 7 for Sunday and the kernel normalises 7 to 0 (scheduler.rs), so
+    // reading it as 7 would write back a different-looking expression for the same day.
+    return { every: 'week', time, weekday: Number(dow) % 7 };
+  }
+  if (dow === '*') {
+    if (!/^\d{1,2}$/.test(dom)) return null;
+    const day = Number(dom);
+    if (day < 1 || day > 31) return null;
+    return { every: 'month', time, monthday: day };
+  }
+  return null;
+}
+
+/**
+ * The hour of a cron whose DAYS this screen cannot draw, or `null` when even that is ambiguous.
+ *
+ * `0 9 * * MON-FRI` runs at 9:00 on five days; the days are the part no control here can say, but
+ * the hour is not in doubt. It is the one thing worth carrying over when an owner deliberately
+ * replaces such a schedule with a simple one — everything else about it is what they chose to
+ * drop. `0 8,20 * * *` has two hours and `*` has none, so both answer `null` rather than pick one.
+ */
+export function readCronTime(cron: string): string | null {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return null;
+  const at = hhmm(`${parts[1]}:${parts[0].padStart(2, '0')}`);
+  if (!at) return null;
+  return `${String(at.h).padStart(2, '0')}:${String(at.m).padStart(2, '0')}`;
+}
+
+/** The expression the kernel parses for a schedule [`readSchedule`] understood. */
+export function scheduleCron(schedule: Schedule): string {
+  const at = hhmm(schedule.time) ?? { m: 0, h: 9 };
+  const dom = schedule.every === 'month' ? String(schedule.monthday) : '*';
+  const dow = schedule.every === 'week' ? String(schedule.weekday) : '*';
+  return `${at.m} ${at.h} ${dom} * ${dow}`;
+}
+
+/**
  * «Cuando pase…» — what starts this flow.
  *
  * `label` is what the owner picked the event by («Se cobra una venta»); the raw name is the
@@ -116,8 +200,18 @@ export function describeTrigger(trigger: Trigger, t: Translator, label?: string)
     case 'event':
       return t('ui.triggerEvent', { event: label || trigger.event || '' });
     case 'cron': {
-      const time = readDailyCron(trigger.cron ?? '');
-      return time ? t('ui.triggerDaily', { time }) : t('ui.triggerCron', { cron: trigger.cron ?? '' });
+      // Raw cron on a card is the fallback, not the plan: a schedule this screen can edit is a
+      // schedule it can also say out loud (flows#77).
+      const schedule = readSchedule(trigger.cron ?? '');
+      if (schedule?.every === 'day') return t('ui.triggerDaily', { time: schedule.time });
+      if (schedule?.every === 'week')
+        return t('ui.triggerWeekly', {
+          day: t(`ui.weekday${schedule.weekday}`),
+          time: schedule.time,
+        });
+      if (schedule?.every === 'month')
+        return t('ui.triggerMonthly', { day: schedule.monthday, time: schedule.time });
+      return t('ui.triggerCron', { cron: trigger.cron ?? '' });
     }
     case 'at':
       return t('ui.triggerAt', { when: trigger.at ?? '' });

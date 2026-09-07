@@ -56,15 +56,17 @@ import type {
   ValuePart,
 } from '../../lib/flow-doc';
 import {
-  dailyCron,
   describeDelay,
   describeStep,
   describeRunStep,
+  describeTrigger,
   humaniseField,
-  readDailyCron,
+  readCronTime,
+  readSchedule,
   runOutcome,
+  scheduleCron,
 } from '../../lib/plain-language';
-import type { RunRow, RunStepRow, Translator } from '../../lib/plain-language';
+import type { RunRow, RunStepRow, Schedule, Translator } from '../../lib/plain-language';
 import { catalogEntry } from '../../lib/trigger-catalog';
 import { groupByFamily, loadEventCatalog } from '../../lib/event-catalog';
 import type { EventCatalog } from '../../lib/event-catalog';
@@ -163,6 +165,36 @@ function clamp(value: number, min: number, max: number, fallback: number): numbe
  */
 function option(value: string, label: string, current: string) {
   return html`<option value=${value} ?selected=${value === current}>${label}</option>`;
+}
+
+/** What a brand-new `cron` trigger is, so the panel never shows a schedule the document lacks. */
+const DEFAULT_SCHEDULE: Schedule = { every: 'day', time: '09:00' };
+
+/**
+ * Monday first, Sunday last — the week of a shop. The VALUES stay crontab's own numbering (Sunday
+ * is 0), because that is what the kernel reads; only the order on screen is the human one.
+ */
+const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+const MONTH_DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
+
+/**
+ * The same schedule said a different way, keeping everything the new shape still has room for.
+ *
+ * Switching «every week» to «every day» drops the day and nothing else; switching back offers
+ * Monday rather than an empty control — a dropdown whose value is «nothing» is a schedule that
+ * cannot be saved, and the hour the owner already chose is never the part that gets lost.
+ */
+function retime(schedule: Schedule, every: Schedule['every']): Schedule {
+  if (every === schedule.every) return schedule;
+  if (every === 'day') return { every: 'day', time: schedule.time };
+  if (every === 'week')
+    return { every: 'week', time: schedule.time, weekday: schedule.every === 'week' ? schedule.weekday : 1 };
+  return {
+    every: 'month',
+    time: schedule.time,
+    monthday: schedule.every === 'month' ? schedule.monthday : 1,
+  };
 }
 
 /**
@@ -1165,7 +1197,12 @@ export class ErpFlowsEditor extends LitElement {
   }
 
   private setTrigger(patch: Partial<Trigger>): void {
-    this.setDoc(patchTrigger(this.document, { ...this.trigger, ...patch } as Trigger));
+    const next = { ...this.trigger, ...patch } as Trigger;
+    // Picking «on a schedule» has to LEAVE a schedule. Without this the panel showed 09:00 while
+    // the document held no `cron` at all, and saving got `flow.invalid_cron` back from a screen
+    // that looked filled in (flows#77).
+    if (next.kind === 'cron' && !(next.cron ?? '').trim()) next.cron = scheduleCron(DEFAULT_SCHEDULE);
+    this.setDoc(patchTrigger(this.document, next));
     void this.loadShape();
   }
 
@@ -1271,16 +1308,11 @@ export class ErpFlowsEditor extends LitElement {
           >
             <span class="grow">
               <span class="eyebrow">${this.t('ui.whenThisHappens')}</span>
+              <!-- One sentence, one author: describeTrigger is what the card in the list and
+                   the gallery already read, so «every Friday at 18:00» cannot say one thing here
+                   and another there (flows#77). -->
               <span class="title"
-                >${trigger.kind === 'event'
-                  ? this.t('ui.triggerEvent', { event: this.eventLabel(trigger.event) })
-                  : trigger.kind === 'cron'
-                    ? readDailyCron(trigger.cron ?? '')
-                      ? this.t('ui.triggerDaily', { time: readDailyCron(trigger.cron ?? '') })
-                      : this.t('ui.triggerCron', { cron: trigger.cron ?? '' })
-                    : trigger.kind === 'at'
-                      ? this.t('ui.triggerAt', { when: trigger.at ?? '' })
-                      : this.t('ui.triggerManual')}</span
+                >${describeTrigger(trigger, this.t, this.eventLabel(trigger.event))}</span
               >
             </span>
           </button>
@@ -1308,19 +1340,7 @@ export class ErpFlowsEditor extends LitElement {
         </select>
       </div>
       ${trigger.kind === 'event' ? this.renderEventChoice(trigger) : nothing}
-      ${trigger.kind === 'cron'
-        ? html`<div class="field">
-            <label for="trigger-time">${this.t('ui.timeLabel')}</label>
-            <input
-              id="trigger-time"
-              type="time"
-              .value=${readDailyCron(trigger.cron ?? '') ?? ''}
-              @change=${(e: Event) =>
-                this.setTrigger({ cron: dailyCron((e.target as HTMLInputElement).value || '09:00') })}
-            />
-            <span class="hint">${this.t('ui.cronLabel')}: ${trigger.cron ?? ''}</span>
-          </div>`
-        : nothing}
+      ${trigger.kind === 'cron' ? this.renderCronPanel(trigger) : nothing}
       ${trigger.kind === 'at'
         ? html`<div class="field">
             <label for="trigger-at">${this.t('ui.atLabel')}</label>
@@ -1336,6 +1356,122 @@ export class ErpFlowsEditor extends LitElement {
             />
           </div>`
         : nothing}
+    `;
+  }
+
+  /**
+   * **The schedule of a `cron` trigger** (flows#77).
+   *
+   * There used to be one control here for every schedule there is — a time box — and it did two
+   * wrong things to «every Friday at 18:00»: it drew itself EMPTY, because it could only read
+   * `M H * * *`, and on the first keystroke it wrote `M H * * *` back. The owner meant to move
+   * the hour and silently moved how often the automation runs, with nothing to undo it.
+   *
+   * So the panel now says the whole schedule — how often, which day, what time — which is the
+   * shape every scheduler an owner has already used offers (Zapier, Make, Power Automate, Odoo's
+   * scheduled actions). Three shapes, and no more: daily, weekly, monthly.
+   *
+   * 🔴 And the important half is what it does with the FOURTH shape. `0 9 * * MON-FRI` and a step
+   * expression are schedules the kernel runs perfectly well and these controls cannot say. Those
+   * get **no editing control at all** — the expression is shown as it is and kept as it is. There
+   * is nothing on screen to touch that could flatten it, which is the actual fix: refusing to
+   * READ one (which the old code already did) is worthless while the WRITE side still overwrites
+   * it. Replacing one is a button that says it replaces it.
+   */
+  private renderCronPanel(trigger: Trigger) {
+    const raw = (trigger.cron ?? '').trim();
+    // A trigger just switched to `cron` has no expression yet, and an empty box is not a schedule:
+    // `setTrigger` seeds it, so what the controls show is what the document holds.
+    const schedule = raw ? readSchedule(raw) : DEFAULT_SCHEDULE;
+    if (!schedule) return this.renderKeptCron(raw);
+    const write = (next: Schedule): void => this.setTrigger({ cron: scheduleCron(next) });
+    return html`
+      <div class="field">
+        <label for="trigger-every">${this.t('ui.cronEvery')}</label>
+        <select
+          id="trigger-every"
+          data-field="cron-every"
+          .value=${schedule.every}
+          @change=${(e: Event) =>
+            write(retime(schedule, (e.target as HTMLSelectElement).value as Schedule['every']))}
+        >
+          ${option('day', this.t('ui.cronEveryDay'), schedule.every)}
+          ${option('week', this.t('ui.cronEveryWeek'), schedule.every)}
+          ${option('month', this.t('ui.cronEveryMonth'), schedule.every)}
+        </select>
+      </div>
+      ${schedule.every === 'week'
+        ? html`<div class="field">
+            <label for="trigger-weekday">${this.t('ui.cronWeekday')}</label>
+            <select
+              id="trigger-weekday"
+              data-field="cron-weekday"
+              .value=${String(schedule.weekday)}
+              @change=${(e: Event) =>
+                write({ ...schedule, weekday: Number((e.target as HTMLSelectElement).value) })}
+            >
+              <!-- Monday first: the week of a shop starts on Monday in every locale this ships
+                   in, even though crontab numbers Sunday 0. The VALUE stays crontab's. -->
+              ${WEEKDAY_ORDER.map((d) =>
+                option(String(d), this.t(`ui.weekday${d}`), String(schedule.weekday)),
+              )}
+            </select>
+          </div>`
+        : nothing}
+      ${schedule.every === 'month'
+        ? html`<div class="field">
+            <label for="trigger-monthday">${this.t('ui.cronMonthday')}</label>
+            <select
+              id="trigger-monthday"
+              data-field="cron-monthday"
+              .value=${String(schedule.monthday)}
+              @change=${(e: Event) =>
+                write({ ...schedule, monthday: Number((e.target as HTMLSelectElement).value) })}
+            >
+              ${MONTH_DAYS.map((d) =>
+                option(String(d), String(d), String(schedule.monthday)),
+              )}
+            </select>
+            <span class="hint">${this.t('ui.cronMonthdayHint')}</span>
+          </div>`
+        : nothing}
+      <div class="field">
+        <label for="trigger-time">${this.t('ui.timeLabel')}</label>
+        <input
+          id="trigger-time"
+          data-field="trigger-time"
+          type="time"
+          .value=${schedule.time}
+          @change=${(e: Event) =>
+            write({ ...schedule, time: (e.target as HTMLInputElement).value || schedule.time })}
+        />
+        <span class="hint">${this.t('ui.cronLabel')}: ${scheduleCron(schedule)}</span>
+      </div>
+    `;
+  }
+
+  /** A schedule this screen cannot draw: shown, kept, and replaced only on purpose (flows#77). */
+  private renderKeptCron(cron: string) {
+    return html`
+      <div class="field">
+        <label>${this.t('ui.cronLabel')}</label>
+        <code class="kept-cron" data-field="cron-raw">${cron}</code>
+        <ok-inline-feedback tone="warning" icon="information-circle-outline"
+          >${this.t('ui.cronKept')}</ok-inline-feedback
+        >
+        <div class="adders" style="margin-left:0">
+          <button
+            type="button"
+            data-act="cron-simplify"
+            @click=${() =>
+              this.setTrigger({
+                cron: scheduleCron({ every: 'day', time: readCronTime(cron) ?? '09:00' }),
+              })}
+          >
+            ${this.t('ui.cronSimplify')}
+          </button>
+        </div>
+      </div>
     `;
   }
 
