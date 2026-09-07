@@ -1971,9 +1971,9 @@ var ErpFlowsValue = class extends i3 {
       })
     );
   }
-  onText(index, text) {
+  onText(index, text2) {
     const parts = [...this.slots];
-    parts[index] = { kind: "text", text };
+    parts[index] = { kind: "text", text: text2 };
     this.emit(parts);
   }
   removeAt(index) {
@@ -2196,15 +2196,15 @@ function hostOf(url) {
     return "";
   }
 }
-function inWords(text) {
-  return text.replace(
+function inWords(text2) {
+  return text2.replace(
     /\{\{\s*([^}]+?)\s*\}\}/g,
     (_all, path) => humaniseField(String(path).replace(/^(input|event|steps|secret)\./, ""))
   );
 }
-function shorten(text, max = 70) {
-  if (text.length <= max) return text;
-  const cut = text.slice(0, max);
+function shorten(text2, max = 70) {
+  if (text2.length <= max) return text2;
+  const cut = text2.slice(0, max);
   const space = cut.lastIndexOf(" ");
   return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}\u2026`;
 }
@@ -2272,8 +2272,8 @@ function describeSample(field, t3) {
   if (field.redacted) return t3("ui.pickFieldRedacted");
   if (field.type === "object" || field.type === "array") return "";
   if (field.sample === void 0 || field.sample === null) return "";
-  const text = typeof field.sample === "string" ? field.sample : JSON.stringify(field.sample);
-  return field.truncated ? `${text}\u2026` : text;
+  const text2 = typeof field.sample === "string" ? field.sample : JSON.stringify(field.sample);
+  return field.truncated ? `${text2}\u2026` : text2;
 }
 
 // ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
@@ -2645,11 +2645,11 @@ function isPath(s4) {
   const root = s4.split(".")[0];
   return PATH_ROOTS.includes(root) && s4.length > root.length + 1 && s4[root.length] === ".";
 }
-function scalar(text) {
-  if (text === "true") return true;
-  if (text === "false") return false;
-  if (text !== "" && String(Number(text)) === text) return Number(text);
-  return text;
+function scalar(text2) {
+  if (text2 === "true") return true;
+  if (text2 === "false") return false;
+  if (text2 !== "" && String(Number(text2)) === text2) return Number(text2);
+  return text2;
 }
 function partsToValue(parts) {
   if (parts.length === 0) return "";
@@ -2689,12 +2689,12 @@ function requiredGrants(doc) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
   const need = (kind, value) => {
-    const text = typeof value === "string" ? value.trim() : "";
-    if (!text) return;
-    const k2 = `${kind} ${text}`;
+    const text2 = typeof value === "string" ? value.trim() : "";
+    if (!text2) return;
+    const k2 = `${kind} ${text2}`;
     if (seen.has(k2)) return;
     seen.add(k2);
-    out.push({ kind, value: text });
+    out.push({ kind, value: text2 });
   };
   for (const step of doc.steps) {
     switch (step.kind) {
@@ -2800,8 +2800,8 @@ function readPinRows(rows) {
 function pinRows(grant) {
   return Object.entries(grantPin(grant)).map(([field, value]) => [field, pinText(value)]);
 }
-function pinValue(text) {
-  const trimmed = text.trim();
+function pinValue(text2) {
+  const trimmed = text2.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
       const parsed = JSON.parse(trimmed);
@@ -2809,7 +2809,7 @@ function pinValue(text) {
     } catch {
     }
   }
-  return scalar(text);
+  return scalar(text2);
 }
 function pinText(value) {
   if (typeof value === "string") return value;
@@ -3467,9 +3467,9 @@ function stringify(value) {
     return String(value);
   }
 }
-function renderTemplate(text, scope) {
+function renderTemplate(text2, scope) {
   let out = "";
-  let rest = text;
+  let rest = text2;
   for (; ; ) {
     const start = rest.indexOf("{{");
     if (start < 0) break;
@@ -3508,9 +3508,9 @@ function resolveExpr(expr, scope) {
 function asNumber(v2) {
   if (typeof v2 === "number") return Number.isFinite(v2) ? v2 : null;
   if (typeof v2 === "string") {
-    const text = v2.trim();
-    if (text === "") return null;
-    const n5 = Number(text);
+    const text2 = v2.trim();
+    if (text2 === "") return null;
+    const n5 = Number(text2);
     return Number.isFinite(n5) ? n5 : null;
   }
   return null;
@@ -3613,7 +3613,7 @@ function pathsIn(expr, out = []) {
 function stepValues(step, scope) {
   const out = [];
   const add = (label, expr) => {
-    const text = stringify(resolveExpr(expr, scope));
+    const text2 = stringify(resolveExpr(expr, scope));
     let blank = false;
     let redacted = false;
     let unknown = false;
@@ -3623,7 +3623,7 @@ function stepValues(step, scope) {
       else if (value === UNKNOWN) unknown = true;
       else if (value === null || value === void 0) blank = true;
     }
-    out.push({ label, text, blank, redacted, ...unknown ? { unknown } : {} });
+    out.push({ label, text: text2, blank, redacted, ...unknown ? { unknown } : {} });
   };
   if (step.kind === "command" || step.kind === "query") {
     for (const [key2, value] of Object.entries(step.params ?? {})) add(key2, value);
@@ -5533,7 +5533,7 @@ var ErpFlowsEditor = class extends i3 {
       field: "var-text",
       label: this.t("ui.notifyText"),
       value: vars.text ?? "",
-      onChange: (text) => setVar("text", text)
+      onChange: (text2) => setVar("text", text2)
     })}
           `}
     `;
@@ -6587,9 +6587,9 @@ function readNotes(raw) {
   if (!Array.isArray(value)) return [];
   return value.filter((n5) => typeof n5 === "string" && n5.trim() !== "");
 }
-function safeParse(text) {
+function safeParse(text2) {
   try {
-    return JSON.parse(text);
+    return JSON.parse(text2);
   } catch {
     return void 0;
   }
@@ -7150,6 +7150,7 @@ var TEMPLATES = [
    */
   {
     id: "whatsapp-appointment",
+    mirrors: { module: "whatsapp_inbox", family: "appointment-from-whatsapp" },
     sector: "beauty",
     icon: "calendar-number-outline",
     nameKey: "tpl.waAppointment.name",
@@ -7387,6 +7388,7 @@ var TEMPLATES = [
    */
   {
     id: "whatsapp-appointment-unattended",
+    mirrors: { module: "whatsapp_inbox", family: "appointment-from-whatsapp-unattended" },
     sector: "beauty",
     // The list she TAPS (`interactive`, hub#1633) and the slots the model hands over (`output`,
     // hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it is refused
@@ -7677,6 +7679,7 @@ var TEMPLATES = [
    */
   {
     id: "whatsapp-reservation",
+    mirrors: { module: "whatsapp_inbox", family: "reservation-from-whatsapp" },
     sector: "food",
     icon: "restaurant-outline",
     nameKey: "tpl.waReservation.name",
@@ -7833,6 +7836,7 @@ var TEMPLATES = [
    */
   {
     id: "whatsapp-reservation-unattended",
+    mirrors: { module: "whatsapp_inbox", family: "reservation-from-whatsapp-unattended" },
     sector: "food",
     // A bookmark against the twin's table setting: this one is already held.
     icon: "bookmark-outline",
@@ -8069,19 +8073,31 @@ function templateInstallation(template, t3, flows) {
   const halfBuilt = listening.find((flow) => flow.commands?.length === 0);
   return halfBuilt ? { state: "unfinished", flow: halfBuilt } : { state: "absent" };
 }
-function flowsWorthAsking(flows, t3) {
-  return flows.filter((flow) => TEMPLATES.some((template) => isCandidateFor(template, t3, flow)));
+function flowsWorthAsking(flows, t3, catalogue = TEMPLATES) {
+  return flows.filter((flow) => catalogue.some((template) => isCandidateFor(template, t3, flow)));
 }
-function templateById(id) {
-  return TEMPLATES.find((tpl) => tpl.id === id);
+function templateById(id, catalogue = TEMPLATES) {
+  return catalogue.find((tpl) => tpl.id === id);
 }
-function templatesOf(sector) {
-  return TEMPLATES.filter((tpl) => tpl.sector === sector);
+function templatesOf(sector, catalogue = TEMPLATES) {
+  return catalogue.filter((tpl) => tpl.sector === sector);
+}
+function templateName(template, t3) {
+  return template.name ?? (template.nameKey ? t3(template.nameKey) : template.id);
+}
+function templateSummary(template, t3) {
+  if (template.source) return t3("ui.tplFromApp", { app: moduleName(template.source.module, t3) });
+  return template.summaryKey ? t3(template.summaryKey) : "";
+}
+function templatePlain(template, t3) {
+  if (template.source) return t3("ui.tplFromAppPlain", { app: moduleName(template.source.module, t3) });
+  return template.plainKey ? t3(template.plainKey) : "";
 }
 function buildTemplate(template, t3) {
   return template.build(t3);
 }
 function templateGrants(template, t3) {
+  if (template.grants) return template.grants.map((grant) => ({ ...grant }));
   const derived = requiredGrants(buildTemplate(template, t3));
   return Object.entries(template.grantPins ?? {}).reduce(
     (grants, [command, pin]) => setGrantPin(grants, { kind: "command", value: command }, pin),
@@ -8095,10 +8111,11 @@ function missingModules(template, known) {
   }
   return out;
 }
-function availableTemplates(sector, known, facts = schemaFacts(void 0)) {
-  return templatesOf(sector).filter(
-    (tpl) => missingModules(tpl, known).length === 0 && coreTakes(tpl, facts)
-  );
+function availableTemplates(sector, known, facts = schemaFacts(void 0), catalogue = TEMPLATES) {
+  return templatesOf(sector, catalogue).filter((tpl) => runnableHere(tpl, known, facts));
+}
+function runnableHere(template, known, facts = schemaFacts(void 0)) {
+  return missingModules(template, known).length === 0 && coreTakes(template, facts);
 }
 function coreTakes(template, facts) {
   return (template.needs ?? []).every((need) => facts[NEED_FACT[need]] === true);
@@ -8128,6 +8145,93 @@ function moduleName(id, t3) {
   const key2 = MODULE_LABELS[id];
   return key2 ? t3(key2) : id;
 }
+function mergeTemplates(local, fromModules) {
+  const aliases = {};
+  const retired = /* @__PURE__ */ new Set();
+  for (const served of fromModules) {
+    if (!served.source) continue;
+    for (const tpl of local) {
+      if (tpl.mirrors?.module !== served.source.module) continue;
+      if (tpl.mirrors.family !== served.source.family) continue;
+      retired.add(tpl.id);
+      aliases[tpl.id] = served.id;
+    }
+  }
+  return { cards: [...local.filter((tpl) => !retired.has(tpl.id)), ...fromModules], aliases };
+}
+
+// ui/lib/module-templates.ts
+var MODULE_TEMPLATE_PREFIX = "module:";
+function moduleTemplateId(module, family) {
+  return `${MODULE_TEMPLATE_PREFIX}${module}/${family}`;
+}
+var MODULE_TEMPLATE_ICON = "git-branch-outline";
+var NEEDS = ["interactive", "output"];
+var text = (value) => typeof value === "string" ? value.trim() : "";
+function documentFor(documents, locale) {
+  const wanted = locale.trim().toLowerCase();
+  const base = wanted.split("-")[0];
+  return documents[wanted] ?? documents[base] ?? documents.en;
+}
+function declaredGrants(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const kind = text(row.kind);
+    const value = text(row.value);
+    if (kind && value) out.push({ kind, value });
+  }
+  return out;
+}
+function neededBy(doc) {
+  return NEEDS.filter(
+    (need) => doc.steps.some(
+      (step) => !!step && typeof step === "object" && step[need] !== void 0
+    )
+  );
+}
+function usable(doc) {
+  return doc.steps.length > 0;
+}
+function moduleTemplates(rows, locale) {
+  if (!Array.isArray(rows)) return [];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of rows) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw;
+    const module = text(row.module);
+    const family = text(row.family);
+    if (!module || !family) continue;
+    if (!row.documents || typeof row.documents !== "object") continue;
+    const served = documentFor(row.documents, locale ?? "en");
+    if (!served || typeof served !== "object") continue;
+    const doc = readDoc(JSON.parse(JSON.stringify(served)));
+    if (!usable(doc)) continue;
+    const id = moduleTemplateId(module, family);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const needs = neededBy(doc);
+    out.push({
+      id,
+      source: { module, family },
+      name: text(doc.name) || family,
+      icon: MODULE_TEMPLATE_ICON,
+      blanks: [],
+      // The hub already refused every family whose modules are missing, so there is nothing left
+      // for the gallery's own module probe to hide — and a witness it cannot answer would hide a
+      // card the hub has just said this business can run.
+      witnesses: [],
+      grantReasons: {},
+      grants: declaredGrants(row.grants),
+      ...needs.length ? { needs } : {},
+      enabledOnCreate: false,
+      build: () => readDoc(JSON.parse(JSON.stringify(doc)))
+    });
+  }
+  return out;
+}
 
 // ui/components/erp-flows-gallery/erp-flows-gallery.ts
 function templateFromSearch(search) {
@@ -8156,6 +8260,8 @@ var ErpFlowsGallery = class extends i3 {
     this.picked = null;
     this.known = {};
     this.existing = [];
+    this.served = [];
+    this.modules = "ok";
     this.busy = false;
     this.error = "";
     /**
@@ -8390,6 +8496,57 @@ var ErpFlowsGallery = class extends i3 {
     this.asked = client;
     void this.probe();
     void this.loadExisting();
+    void this.loadModuleTemplates();
+  }
+  /**
+   * Asks the hub what its installed modules bring (`GET /api/hub/flows/templates`, hub#1645).
+   *
+   * The hub has already applied each family's module floor, so everything it answers is something
+   * this business can run — the gallery does not judge that again. What it DOES keep judging is its
+   * own kernel floor, in {@link runnableHere}: a document naming a step key this core cannot parse
+   * is refused whole at save, so offering it would hand the owner an automation that dies on the
+   * button.
+   */
+  async loadModuleTemplates() {
+    const client = this.client;
+    const ask = client?.flows?.templates;
+    if (typeof ask !== "function") {
+      this.served = [];
+      this.modules = "old-core";
+      return;
+    }
+    try {
+      const rows = await ask.call(client.flows);
+      this.served = moduleTemplates(rows, client.locale);
+      this.modules = "ok";
+    } catch {
+      this.served = [];
+      this.modules = "unavailable";
+    }
+  }
+  /**
+   * The catalogue actually on screen: what is written here, plus what the hub brought.
+   *
+   * Merged rather than concatenated because four cards in this catalogue are hand copies of
+   * WhatsApp recipes made before any hub could serve them — see {@link mergeTemplates}. Only the
+   * served cards this hub can RUN take part: retiring a copy in favour of something that is not
+   * going to be painted would leave the owner with neither.
+   */
+  get catalogue() {
+    return mergeTemplates(
+      TEMPLATES,
+      this.served.filter((tpl) => runnableHere(tpl, this.known, this.facts))
+    );
+  }
+  /**
+   * The card an id ends up at, after a retired copy's shortcut has been forwarded.
+   *
+   * `?template=whatsapp-appointment` is published by `whatsapp_inbox`, not by us, so it goes on
+   * arriving long after the card it names has stepped aside for the module's own recipe.
+   */
+  landsOn(id) {
+    if (!id) return id;
+    return this.catalogue.aliases[id] ?? id;
   }
   disconnectedCallback() {
     window.removeEventListener("popstate", this.onPopState);
@@ -8435,7 +8592,7 @@ var ErpFlowsGallery = class extends i3 {
    */
   reveal() {
     if (!this.linked || this.revealed === this.linked) return;
-    const card = this.renderRoot.querySelector(`[data-template="${this.linked}"]`);
+    const card = this.renderRoot.querySelector(`[data-template="${this.landsOn(this.linked)}"]`);
     if (!card) return;
     if (offScreen(card) && this.waitForTheScreen(card)) return;
     this.stopWaiting();
@@ -8622,13 +8779,14 @@ var ErpFlowsGallery = class extends i3 {
    * silently: the screen to land on is Permissions, not the step list.
    */
   async use() {
-    const template = this.picked ? templateById(this.picked) : void 0;
+    const picked = this.landsOn(this.picked);
+    const template = picked ? templateById(picked, this.catalogue.cards) : void 0;
     if (!template || !this.client || this.busy) return;
     this.busy = true;
     this.error = "";
     try {
       const flow = await this.client.flows.create({
-        name: this.t(template.nameKey),
+        name: templateName(template, this.t),
         enabled: false,
         definition: buildTemplate(template, this.t)
       });
@@ -8650,7 +8808,8 @@ var ErpFlowsGallery = class extends i3 {
   renderPanel(template) {
     const grants = templateGrants(template, this.t);
     return b2`<div class="panel" id=${`panel-${template.id}`}>
-      <p class="plain">${this.t(template.plainKey)}</p>
+      <p class="plain">${templatePlain(template, this.t)}</p>
+      ${template.source ? this.renderSteps(template) : A}
 
       <div class="block">
         <span class="head">${this.t("ui.tplBlanksTitle")}</span>
@@ -8704,6 +8863,24 @@ var ErpFlowsGallery = class extends i3 {
    * Warn and step aside, the same stance this panel already takes on a shared trigger
    * (whatsapp_inbox#58); refusing would be us deciding for them.
    */
+  /**
+   * What a SERVED recipe does, read out of the document the module published (flows#98).
+   *
+   * A card written here has a sentence in the catalogue describing it; one that arrived from a
+   * module has no sentence of ours and must not get an invented one. `describeStep` is the same
+   * reading the editor gives any other flow, so what the owner is shown before creating it is what
+   * they will be shown afterwards — the alternative was a card that says only where it came from.
+   */
+  renderSteps(template) {
+    const steps = buildTemplate(template, this.t).steps;
+    if (!steps.length) return A;
+    return b2`<div class="block" data-steps>
+      <span class="head">${this.t("ui.tplStepsTitle")}</span>
+      ${steps.map(
+      (step) => b2`<div class="item"><span class="grow">${describeStep(step, this.t)}</span></div>`
+    )}
+    </div>`;
+  }
   renderActions(template) {
     const installed = this.installationOf(template);
     const use = b2`<ion-button
@@ -8762,7 +8939,7 @@ var ErpFlowsGallery = class extends i3 {
     >`;
   }
   renderCard(template) {
-    const open = this.picked === template.id;
+    const open = this.landsOn(this.picked) === template.id;
     const { state } = this.installationOf(template);
     return b2`<div
       class="card"
@@ -8778,21 +8955,52 @@ var ErpFlowsGallery = class extends i3 {
       >
         <ion-icon name=${template.icon} aria-hidden="true"></ion-icon>
         <span class="grow">
-          <span class="name">${this.t(template.nameKey)}</span>
-          <span class="summary">${this.t(template.summaryKey)}</span>
+          <span class="name">${templateName(template, this.t)}</span>
+          <span class="summary">${templateSummary(template, this.t)}</span>
         </span>
         ${this.renderInstalledPill(state)}
       </button>
       ${open ? this.renderPanel(template) : A}
     </div>`;
   }
-  renderSector(sector) {
-    const templates = availableTemplates(sector, this.known, this.facts);
+  renderSector(sector, catalogue) {
+    const templates = availableTemplates(sector, this.known, this.facts, catalogue);
     if (!templates.length) return A;
     return b2`<section data-sector=${sector}>
       <h3>${this.t(`ui.sector_${sector}`)}</h3>
       <div class="cards">${templates.map((template) => this.renderCard(template))}</div>
     </section>`;
+  }
+  /**
+   * One heading per app that brought recipes, under the trades and above the shopping list.
+   *
+   * Grouped by APP and not folded into a sector on purpose: the owner installed WhatsApp, and what
+   * they are looking for is «what came with WhatsApp». A restaurant and a salon both install it,
+   * so filing its recipes under one trade would hide them from the other.
+   */
+  renderModuleSections(catalogue) {
+    const served = catalogue.filter((tpl) => tpl.source);
+    const modules = [...new Set(served.map((tpl) => tpl.source.module))];
+    return modules.map((id) => {
+      const cards = served.filter((tpl) => tpl.source.module === id);
+      return b2`<section data-module=${id}>
+        <h3>${this.t("ui.tplFromAppSection", { app: moduleName(id, this.t) })}</h3>
+        <div class="cards">${cards.map((template) => this.renderCard(template))}</div>
+      </section>`;
+    });
+  }
+  /**
+   * Why the apps' own recipes are not on this screen, when they are not.
+   *
+   * Two different sentences because they are two different situations for the owner: an older core
+   * is «not yet, and nothing to do», a refusal is «something went wrong, try again». One sentence
+   * covering both would be wrong for whoever is reading it.
+   */
+  renderModulesState() {
+    if (this.modules === "ok") return A;
+    return b2`<p class="missing" data-modules-state=${this.modules}>${this.t(
+      this.modules === "old-core" ? "ui.tplModulesOldCore" : "ui.tplModulesUnavailable"
+    )}</p>`;
   }
   /**
    * The one line that replaced the grey cards (flows#52, keeping what flows#38 protected).
@@ -8810,6 +9018,7 @@ var ErpFlowsGallery = class extends i3 {
     )}</p>`;
   }
   render() {
+    const { cards } = this.catalogue;
     return b2`<div class="wrap">
       <div class="lede">
         <p>${this.t("ui.tplLede")}</p>
@@ -8824,7 +9033,8 @@ var ErpFlowsGallery = class extends i3 {
           ${this.t("ui.guideOpen")}
         </button>
       </div>
-      ${SECTORS.map((sector) => this.renderSector(sector))} ${this.renderMissing()}
+      ${SECTORS.map((sector) => this.renderSector(sector, cards))}
+      ${this.renderModuleSections(cards)} ${this.renderMissing()} ${this.renderModulesState()}
     </div>`;
   }
 };
@@ -8846,6 +9056,12 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsGallery.prototype, "existing", 2);
+__decorateClass([
+  r5()
+], ErpFlowsGallery.prototype, "served", 2);
+__decorateClass([
+  r5()
+], ErpFlowsGallery.prototype, "modules", 2);
 __decorateClass([
   r5()
 ], ErpFlowsGallery.prototype, "busy", 2);
@@ -10654,6 +10870,9 @@ var es_default = {
     timeLabel: "Hora",
     tplBlanksTitle: "Lo que decides t\xFA",
     tplCreatedPaused: "Se crea en pausa. No pasa nada hasta que la enciendas.",
+    tplFromApp: "Viene con {app}",
+    tplFromAppPlain: "Esta automatizaci\xF3n viene con {app}, la aplicaci\xF3n que tienes instalada. La escribieron quienes hicieron la aplicaci\xF3n, y se crea apagada como cualquier otra.",
+    tplFromAppSection: "Viene con {app}",
     tplGrantLimited: "Solo con {fields} \u2014 no puede pedir nada m\xE1s.",
     tplGrantsIntro: "Una automatizaci\xF3n funciona con sus propios permisos, nunca con los tuyos. Hasta que se los des, no hace nada.",
     tplGrantsTitle: "Lo que te va a pedir permiso para hacer",
@@ -10661,9 +10880,12 @@ var es_default = {
     tplHiddenModule: "Hay automatizaciones ocultas: necesitan el m\xF3dulo {modules}, y este hub no lo tiene. Inst\xE1lalo desde el marketplace y recarga esta pantalla.",
     tplHiddenModules: "Hay automatizaciones ocultas: necesitan los m\xF3dulos {modules}, y este hub no los tiene. Inst\xE1lalos desde el marketplace y recarga esta pantalla.",
     tplLede: "Elige una y pasa a ser tuya, apagada, para que la mires antes de que haga nada.",
+    tplModulesOldCore: "Este hub todav\xEDa no ofrece las automatizaciones que vienen con tus aplicaciones. Lo har\xE1 tras su pr\xF3xima actualizaci\xF3n.",
+    tplModulesUnavailable: "No se han podido cargar las automatizaciones que vienen con tus aplicaciones. Las de abajo siguen aqu\xED; recarga la pantalla para volver a intentarlo.",
     tplNoBlanks: "No hay nada que rellenar. Est\xE1 lista tal cual.",
     tplSameTrigger: "Ojo: \xAB{flows}\xBB ya se dispara con lo mismo. Si a\xF1ades esta tambi\xE9n, se ejecutar\xE1n LAS DOS cada vez \u2014 dos citas y dos mensajes a la misma clienta. Apaga antes la otra, salvo que quieras las dos de verdad.",
     tplSameTriggerMany: "Ojo: \xAB{flows}\xBB ya se disparan con lo mismo. Si a\xF1ades esta tambi\xE9n, se ejecutar\xE1n TODAS cada vez \u2014 varias citas y varios mensajes a la misma clienta. Apaga antes las otras, salvo que las quieras todas de verdad.",
+    tplStepsTitle: "Qu\xE9 hace, paso a paso",
     tplUnfinished: "Sin terminar",
     tplUnfinishedHint: "Empezaste esta y no le permitiste nada, as\xED que todav\xEDa no hace nada. \xC1brela para terminarla.",
     tplUse: "Usar esta",
@@ -11554,6 +11776,9 @@ var en_default = {
     timeLabel: "Time",
     tplBlanksTitle: "What you decide",
     tplCreatedPaused: "It is created paused. Nothing happens until you turn it on.",
+    tplFromApp: "Comes with {app}",
+    tplFromAppPlain: "This automation comes with {app}, the app you have installed. It was written by the people who made the app, and it is created switched off like any other.",
+    tplFromAppSection: "Comes with {app}",
     tplGrantLimited: "Only with {fields} \u2014 it cannot ask for anything else.",
     tplGrantsIntro: "An automation runs with its own permissions, never with yours. Until you allow these, it does nothing.",
     tplGrantsTitle: "What it will ask you to allow",
@@ -11561,9 +11786,12 @@ var en_default = {
     tplHiddenModule: "Some automations are hidden: they need the {modules} module, and this hub does not have it. Install it from the marketplace and reload this screen.",
     tplHiddenModules: "Some automations are hidden: they need the {modules} modules, and this hub does not have them. Install them from the marketplace and reload this screen.",
     tplLede: "Pick one of these and it becomes yours, switched off, ready for you to look at before it does anything.",
+    tplModulesOldCore: "This hub does not yet offer the automations that come with your apps. It will after its next update.",
+    tplModulesUnavailable: "The automations that come with your apps could not be loaded. The ones below are still here; reload the screen to try again.",
     tplNoBlanks: "Nothing to fill in. It is ready as it is.",
     tplSameTrigger: "Careful: \xAB{flows}\xBB already runs on the same thing happening. If you add this one too, BOTH will run every time \u2014 two appointments, two messages to the same customer. Turn the other one off first unless you really want both.",
     tplSameTriggerMany: "Careful: \xAB{flows}\xBB already run on the same thing happening. If you add this one too, they will ALL run every time \u2014 several appointments, several messages to the same customer. Turn the others off first unless you really want them all.",
+    tplStepsTitle: "What it does, step by step",
     tplUnfinished: "Unfinished",
     tplUnfinishedHint: "You started this one and never allowed it anything, so it does nothing yet. Open it to finish it.",
     tplUse: "Use this one",
