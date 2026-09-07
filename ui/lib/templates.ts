@@ -835,6 +835,103 @@ export function flowsOnSameTrigger(
     .map((flow) => flow.name);
 }
 
+/** The commands a template's document will ask to run — what identifies it, with its event. */
+export function templateCommands(template: FlowTemplate, t: Translator): string[] {
+  return templateGrants(template, t)
+    .filter((grant) => grant.kind === 'command')
+    .map((grant) => grant.value);
+}
+
+/** How far this hub has got with one card. Same four words the WhatsApp settings card uses. */
+export type InstalledState = 'absent' | 'unfinished' | 'paused' | 'active';
+
+/**
+ * One of this hub's flows, as much of it as recognising a template needs.
+ *
+ * `commands` is the command grants the flow HOLDS, and `undefined` means **not asked yet** — a
+ * distinct thing from `[]`, which is a flow the owner authorised for nothing.
+ */
+export interface InstalledFlowFacts {
+  enabled?: boolean;
+  definition: Record<string, unknown>;
+  commands?: readonly string[];
+}
+
+/**
+ * **«Does this hub already run this card, and which flow is it?»** (flows#60).
+ *
+ * The gallery offered «Use this one» on every card for ever, so an owner who set the automation up
+ * three weeks ago tapped it again and got a SECOND flow listening to exactly the same thing — on
+ * the WhatsApp cards, two answers to one customer for one message.
+ *
+ * **What identifies «this automation».** Not the template it came from: a created flow keeps no
+ * record of one and the document cannot carry it either, because the root of
+ * `hub/schemas/flow.schema.json` is `additionalProperties: false`. What it does keep is what it
+ * LISTENS to and what it is allowed to DO, and between them they say it precisely. Both are facts
+ * the kernel maintains, so neither can go stale behind our back — and an owner who renamed the
+ * flow and reworded its steps still has the automation this card would create again.
+ *
+ * This is the same predicate `queries/automations_status.sql` answers for whatsapp_inbox, and
+ * deliberately the same four words, so the card the owner arrives from and the card they land on
+ * cannot disagree. It is computed here instead of asked, for two reasons: that query returns three
+ * counters and no id, and half of this issue is sending the owner to the flow they already have;
+ * and it exists so a module WITHOUT `manage_flows` can ask — this gallery holds it and already has
+ * the list in hand, so asking would buy nothing and cost a round trip per card.
+ *
+ * `unfinished` is its own state because it is a third state: the gallery creates every template
+ * paused and with NO grants (rule 3 above) and hands the owner to Permissions, so somebody who
+ * stops halfway has a flow that listens and can do nothing. Counting it as absent would put the
+ * invitation back on the card and buy the duplicate; counting it as present would say something is
+ * running when nothing is. And it is «holds no command grant at all», not «does not hold ours»: a
+ * flow on this event with a command of its own is a different automation the business finished.
+ *
+ * A card that does not start on an event answers `absent` and gets no badge: two flows on «every
+ * Friday at 18:00» are not the same automation, and a wrong badge is worse than none (flows#67).
+ */
+export function templateInstallation<T extends InstalledFlowFacts>(
+  template: FlowTemplate,
+  t: Translator,
+  flows: readonly T[],
+): { state: InstalledState; flow?: T } {
+  const event = templateTriggerEvent(template, t);
+  if (!event) return { state: 'absent' };
+
+  const listening = flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).includes(event));
+  const commands = templateCommands(template, t);
+  const mine = listening.filter((flow) => flow.commands?.some((held) => commands.includes(held)));
+  if (mine.length) {
+    // The one that answers is the one that is on: handing over the paused copy of a hub that acts
+    // on every no-show reads as «it is off» about an automation that is running.
+    const running = mine.find((flow) => flow.enabled !== false);
+    return running ? { state: 'active', flow: running } : { state: 'paused', flow: mine[0] };
+  }
+
+  // `undefined` is «not asked yet», and treating it as «holds nothing» would badge every card of a
+  // hub whose grants are still in flight and then unbadge them a round trip later.
+  const halfBuilt = listening.find((flow) => flow.commands?.length === 0);
+  return halfBuilt ? { state: 'unfinished', flow: halfBuilt } : { state: 'absent' };
+}
+
+/**
+ * The flows worth asking the hub anything else about: the ones already waiting on a card's event.
+ *
+ * Recognising a card costs one question per candidate, so this is what keeps the badge from being
+ * a round trip per card on every visit: a hub with nothing automated yet — the one that opens this
+ * gallery most — asks nothing at all, and a busy one asks only about the handful of flows that
+ * could possibly be one of these.
+ */
+export function flowsOnTemplateEvents<T extends { definition: Record<string, unknown> }>(
+  flows: readonly T[],
+  t: Translator,
+): T[] {
+  const events = new Set(
+    TEMPLATES.map((template) => templateTriggerEvent(template, t)).filter(
+      (event): event is string => event !== null,
+    ),
+  );
+  return flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).some((e) => events.has(e)));
+}
+
 export function templateById(id: string): FlowTemplate | undefined {
   return TEMPLATES.find((tpl) => tpl.id === id);
 }

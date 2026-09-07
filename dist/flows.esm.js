@@ -6502,6 +6502,30 @@ function flowsOnSameTrigger(template, t3, flows) {
   if (!event) return [];
   return flows.filter((flow) => flow.enabled !== false && triggerEventsOf(flow.definition ?? {}).includes(event)).map((flow) => flow.name);
 }
+function templateCommands(template, t3) {
+  return templateGrants(template, t3).filter((grant) => grant.kind === "command").map((grant) => grant.value);
+}
+function templateInstallation(template, t3, flows) {
+  const event = templateTriggerEvent(template, t3);
+  if (!event) return { state: "absent" };
+  const listening = flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).includes(event));
+  const commands = templateCommands(template, t3);
+  const mine = listening.filter((flow) => flow.commands?.some((held) => commands.includes(held)));
+  if (mine.length) {
+    const running = mine.find((flow) => flow.enabled !== false);
+    return running ? { state: "active", flow: running } : { state: "paused", flow: mine[0] };
+  }
+  const halfBuilt = listening.find((flow) => flow.commands?.length === 0);
+  return halfBuilt ? { state: "unfinished", flow: halfBuilt } : { state: "absent" };
+}
+function flowsOnTemplateEvents(flows, t3) {
+  const events = new Set(
+    TEMPLATES.map((template) => templateTriggerEvent(template, t3)).filter(
+      (event) => event !== null
+    )
+  );
+  return flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).some((e4) => events.has(e4)));
+}
 function templateById(id) {
   return TEMPLATES.find((tpl) => tpl.id === id);
 }
@@ -6680,6 +6704,12 @@ var ErpFlowsGallery = class extends i3 {
       flex: 1 1 auto;
       min-width: 0;
     }
+    /* «Active» / «Paused» / «Unfinished» on a card this hub already runs (flows#60): beside the
+       name, never squeezing it — the summary is what the owner reads to recognise the card. */
+    .card ok-status-pill {
+      flex: 0 0 auto;
+      margin-top: 0.1rem;
+    }
     .name {
       display: block;
       font-weight: 600;
@@ -6826,16 +6856,71 @@ var ErpFlowsGallery = class extends i3 {
   async loadExisting() {
     const client = this.client;
     if (!client?.flows?.list) return;
+    let flows;
     try {
-      const flows = await client.flows.list();
-      this.existing = flows.map((flow) => ({
-        name: flow.name,
-        // Carried through on purpose: a paused flow does not fire, so it is not a collision.
-        enabled: flow.enabled,
-        definition: flow.definition ?? {}
-      }));
+      flows = await client.flows.list();
     } catch {
+      return;
     }
+    this.existing = flows.map((flow) => ({
+      ...flow,
+      // Carried through on purpose: a paused flow does not fire, so it is not a collision.
+      definition: flow.definition ?? {}
+    }));
+    await this.loadGrants(flows);
+  }
+  /**
+   * What each candidate flow is ALLOWED to do — the other half of «is this card already installed»
+   * (flows#60).
+   *
+   * Asked only about the flows already waiting on one of the catalogue's events, so a hub with
+   * nothing automated pays nothing and a busy one pays for a handful, instead of a question per
+   * card on every visit. Swallowed on failure, one flow at a time: an unanswered flow stays
+   * `undefined` — «not asked» — and its card keeps the invitation it had before this existed,
+   * which is the behaviour to fall back to and never an error on the catalogue.
+   */
+  async loadGrants(flows) {
+    const read = this.client?.flows?.grants;
+    if (typeof read !== "function") return;
+    const candidates = flowsOnTemplateEvents(flows, this.t);
+    if (!candidates.length) return;
+    const held = await Promise.all(
+      candidates.map(async (flow) => {
+        try {
+          const grants = await read.call(this.client?.flows, flow.id);
+          return [flow.id, grants.filter((g3) => g3.kind === "command").map((g3) => g3.value)];
+        } catch {
+          return null;
+        }
+      })
+    );
+    const byId = new Map(held.filter((row) => row !== null));
+    if (!byId.size) return;
+    this.existing = this.existing.map(
+      (flow) => byId.has(flow.id) ? { ...flow, commands: byId.get(flow.id) } : flow
+    );
+  }
+  /** How far this hub has got with one card, and the flow to hand over when it has one. */
+  installationOf(template) {
+    return templateInstallation(template, this.t, this.existing);
+  }
+  /**
+   * Hands the owner the automation they already have, instead of making them a second one.
+   *
+   * The screen that owns the editor does the opening: this element is the catalogue, and the flow
+   * it points at is a flow like any other — the one difference is where it lands, and a half-built
+   * one lands on Permissions, which is the only thing it is missing.
+   */
+  view(template) {
+    const installed = this.installationOf(template);
+    if (!installed.flow) return;
+    this.dispatchEvent(
+      new CustomEvent("flows-open-flow", {
+        detail: { flow: installed.flow, needsGrants: installed.state === "unfinished" },
+        bubbles: true,
+        composed: true
+      })
+    );
   }
   /**
    * Asks the hub, once per distinct event, whether it has ever heard of it.
@@ -6930,18 +7015,56 @@ var ErpFlowsGallery = class extends i3 {
             >${this.error}</ok-inline-feedback
           >` : A}
 
-      <div class="actions">
-        <ion-button
-          size="small"
-          data-act="use"
-          ?disabled=${this.busy}
-          @click=${() => void this.use()}
-        >
-          ${this.busy ? this.t("ui.saving") : this.t("ui.tplUse")}
-        </ion-button>
-        <span class="muted">${this.t("ui.tplCreatedPaused")}</span>
-      </div>
+      ${this.renderActions(template)}
     </div>`;
+  }
+  /**
+   * **What the button offers, once the hub already runs this card** (flows#60).
+   *
+   * On a card this hub does not have, the offer is the one it always was. On one it does, the lead
+   * action becomes «View it» — because tapping «Use this one» is exactly how the owner ended up
+   * with two automations answering the same message.
+   *
+   * «Use this one» stays, second and quieter, and that is deliberate. Two flows on one event is a
+   * legitimate thing to build, it is the owner's hub, and the switch-over the WhatsApp twins need
+   * — pause the attended one, install the unattended one — goes through a card that is badged.
+   * Warn and step aside, the same stance this panel already takes on a shared trigger
+   * (whatsapp_inbox#58); refusing would be us deciding for them.
+   */
+  renderActions(template) {
+    const installed = this.installationOf(template);
+    const use = b2`<ion-button
+      size="small"
+      fill=${installed.state === "absent" ? A : "outline"}
+      data-act="use"
+      ?disabled=${this.busy}
+      @click=${() => void this.use()}
+    >
+      ${this.busy ? this.t("ui.saving") : this.t("ui.tplUse")}
+    </ion-button>`;
+    if (installed.state === "absent") {
+      return b2`<div class="actions">
+        ${use}<span class="muted">${this.t("ui.tplCreatedPaused")}</span>
+      </div>`;
+    }
+    return b2`<div class="actions">
+      <ion-button size="small" data-act="view" @click=${() => this.view(template)}>
+        ${this.t("ui.tplView")}
+      </ion-button>
+      ${use}
+      <span class="muted"
+        >${this.t(
+      installed.state === "unfinished" ? "ui.tplUnfinishedHint" : "ui.tplHaveItAlready"
+    )}</span
+      >
+    </div>`;
+  }
+  /** The four words of {@link InstalledState}, in the vocabulary the WhatsApp card already uses. */
+  renderInstalledPill(state) {
+    if (state === "absent") return A;
+    const tone = state === "active" ? "success" : state === "unfinished" ? "warning" : "neutral";
+    const label = state === "active" ? "ui.active" : state === "paused" ? "ui.paused" : "ui.tplUnfinished";
+    return b2`<ok-status-pill tone=${tone} label=${this.t(label)}></ok-status-pill>`;
   }
   /**
    * **«You already have one of these»** (whatsapp_inbox#58).
@@ -6967,7 +7090,12 @@ var ErpFlowsGallery = class extends i3 {
   }
   renderCard(template) {
     const open = this.picked === template.id;
-    return b2`<div class="card" data-template=${template.id}>
+    const { state } = this.installationOf(template);
+    return b2`<div
+      class="card"
+      data-template=${template.id}
+      data-installed=${state === "absent" ? A : state}
+    >
       <button
         type="button"
         class="pick"
@@ -6980,6 +7108,7 @@ var ErpFlowsGallery = class extends i3 {
           <span class="name">${this.t(template.nameKey)}</span>
           <span class="summary">${this.t(template.summaryKey)}</span>
         </span>
+        ${this.renderInstalledPill(state)}
       </button>
       ${open ? this.renderPanel(template) : A}
     </div>`;
@@ -8645,6 +8774,10 @@ var es_default = {
     mod_verifactu: "VeriFactu",
     mod_whatsapp_inbox: "Bandeja de WhatsApp",
     tplUse: "Usar esta",
+    tplUnfinished: "Sin terminar",
+    tplView: "Verla",
+    tplHaveItAlready: "Ya tienes esta. \xC1brela para ver c\xF3mo est\xE1 montada; si la vuelves a usar te quedan dos automatizaciones haciendo lo mismo a la vez.",
+    tplUnfinishedHint: "Empezaste esta y no le permitiste nada, as\xED que todav\xEDa no hace nada. \xC1brela para terminarla.",
     tplCreatedPaused: "Se crea en pausa. No pasa nada hasta que la enciendas.",
     tplSameTrigger: "Ojo: \xAB{flows}\xBB ya se dispara con lo mismo. Si a\xF1ades esta tambi\xE9n, se ejecutar\xE1n LAS DOS cada vez \u2014 dos citas y dos mensajes a la misma clienta. Apaga antes la otra, salvo que quieras las dos de verdad.",
     tplSameTriggerMany: "Ojo: \xAB{flows}\xBB ya se disparan con lo mismo. Si a\xF1ades esta tambi\xE9n, se ejecutar\xE1n TODAS cada vez \u2014 varias citas y varios mensajes a la misma clienta. Apaga antes las otras, salvo que las quieras todas de verdad.",
@@ -9451,6 +9584,10 @@ var en_default = {
     mod_verifactu: "VeriFactu",
     mod_whatsapp_inbox: "WhatsApp Inbox",
     tplUse: "Use this one",
+    tplUnfinished: "Unfinished",
+    tplView: "View it",
+    tplHaveItAlready: "You already have this one. Open it to see how it is set up \u2014 using it again leaves you with two automations doing the same thing at the same time.",
+    tplUnfinishedHint: "You started this one and never allowed it anything, so it does nothing yet. Open it to finish it.",
     tplCreatedPaused: "It is created paused. Nothing happens until you turn it on.",
     tplSameTrigger: "Careful: \xAB{flows}\xBB already runs on the same thing happening. If you add this one too, BOTH will run every time \u2014 two appointments, two messages to the same customer. Turn the other one off first unless you really want both.",
     tplSameTriggerMany: "Careful: \xAB{flows}\xBB already run on the same thing happening. If you add this one too, they will ALL run every time \u2014 several appointments, several messages to the same customer. Turn the others off first unless you really want them all.",
@@ -10803,6 +10940,18 @@ var ErpFlowsApp = class extends i3 {
     this.editorTab = e4.detail.needsGrants ? "permissions" : "editor";
     void this.reload();
   }
+  /**
+   * The gallery says the owner already has this card: open THAT flow (flows#60).
+   *
+   * Nothing is created, so nothing needs reloading — the flow being opened came out of the list
+   * this screen loaded. A half-built one lands on Permissions for the same reason a brand new one
+   * does: it is the only thing standing between it and working.
+   */
+  onOpenExisting(e4) {
+    this.editing = e4.detail.flow;
+    this.isNew = false;
+    this.editorTab = e4.detail.needsGrants ? "permissions" : "editor";
+  }
   render() {
     if (this.gate === "loading") {
       return b2`<div class="body"><span>${this.t("ui.loading")}</span></div>`;
@@ -10873,6 +11022,7 @@ var ErpFlowsApp = class extends i3 {
           .client=${this.client}
           .t=${this.t}
           @flows-template-used=${(e4) => this.onTemplateUsed(e4)}
+          @flows-open-flow=${(e4) => this.onOpenExisting(e4)}
           @flows-open-guide=${() => {
       this.guideOpen = true;
     }}

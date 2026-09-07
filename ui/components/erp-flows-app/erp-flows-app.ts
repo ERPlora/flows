@@ -983,6 +983,19 @@ export class ErpFlowsApp extends LitElement {
     void this.reload();
   }
 
+  /**
+   * The gallery says the owner already has this card: open THAT flow (flows#60).
+   *
+   * Nothing is created, so nothing needs reloading — the flow being opened came out of the list
+   * this screen loaded. A half-built one lands on Permissions for the same reason a brand new one
+   * does: it is the only thing standing between it and working.
+   */
+  private onOpenExisting(e: CustomEvent<{ flow: Flow; needsGrants: boolean }>): void {
+    this.editing = e.detail.flow;
+    this.isNew = false;
+    this.editorTab = e.detail.needsGrants ? 'permissions' : 'editor';
+  }
+
   render() {
     if (this.gate === 'loading') {
       return html`<div class="body"><span>${this.t('ui.loading')}</span></div>`;
@@ -1065,6 +1078,8 @@ export class ErpFlowsApp extends LitElement {
           .t=${this.t}
           @flows-template-used=${(e: Event) =>
             this.onTemplateUsed(e as CustomEvent<{ flow: Flow; needsGrants: boolean }>)}
+          @flows-open-flow=${(e: Event) =>
+            this.onOpenExisting(e as CustomEvent<{ flow: Flow; needsGrants: boolean }>)}
           @flows-open-guide=${() => {
             this.guideOpen = true;
           }}

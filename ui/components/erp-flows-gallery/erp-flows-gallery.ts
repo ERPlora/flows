@@ -2,18 +2,21 @@ import { LitElement, html, css, nothing } from 'lit';
 import { property, state } from 'lit/decorators.js';
 import { define } from '@erplora/outfitkit/define';
 import '@erplora/outfitkit/ok-inline-feedback';
+import '@erplora/outfitkit/ok-status-pill';
 import {
   SECTORS,
   availableTemplates,
   flowsOnSameTrigger,
+  flowsOnTemplateEvents,
   buildTemplate,
   moduleName,
   templateById,
   templateGrants,
+  templateInstallation,
   templatesOf,
   unavailableModules,
 } from '../../lib/templates';
-import type { FlowTemplate, Sector } from '../../lib/templates';
+import type { FlowTemplate, InstalledState, Sector } from '../../lib/templates';
 import { errorCode } from '../../lib/hub-flows';
 import type { Flow, ModuleClient } from '../../lib/hub-flows';
 import type { Translator } from '../../lib/plain-language';
@@ -164,6 +167,12 @@ export class ErpFlowsGallery extends LitElement {
       flex: 1 1 auto;
       min-width: 0;
     }
+    /* «Active» / «Paused» / «Unfinished» on a card this hub already runs (flows#60): beside the
+       name, never squeezing it — the summary is what the owner reads to recognise the card. */
+    .card ok-status-pill {
+      flex: 0 0 auto;
+      margin-top: 0.1rem;
+    }
     .name {
       display: block;
       font-weight: 600;
@@ -256,10 +265,15 @@ export class ErpFlowsGallery extends LitElement {
 
   /**
    * The flows this hub already has, for the «you already have one on this event» warning
-   * (whatsapp_inbox#58). Empty until the hub answers, and empty FOREVER if it refuses: a gallery
-   * that cannot list flows still has to show its catalogue.
+   * (whatsapp_inbox#58) and for the badge that says a card is already installed (flows#60). Empty
+   * until the hub answers, and empty FOREVER if it refuses: a gallery that cannot list flows still
+   * has to show its catalogue.
+   *
+   * `commands` is filled a round trip later, only for the flows that could be one of these cards.
+   * Until then it is `undefined`, which is «not asked yet» and badges nothing — never `[]`, which
+   * would mean the owner authorised the flow for nothing.
    */
-  @state() private existing: { name: string; enabled?: boolean; definition: Record<string, unknown> }[] = [];
+  @state() private existing: (Flow & { commands?: string[] })[] = [];
 
   @state() private busy = false;
 
@@ -364,17 +378,79 @@ export class ErpFlowsGallery extends LitElement {
   private async loadExisting(): Promise<void> {
     const client = this.client;
     if (!client?.flows?.list) return;
+    let flows: Flow[];
     try {
-      const flows = await client.flows.list();
-      this.existing = flows.map((flow) => ({
-        name: flow.name,
-        // Carried through on purpose: a paused flow does not fire, so it is not a collision.
-        enabled: flow.enabled,
-        definition: (flow.definition ?? {}) as Record<string, unknown>,
-      }));
+      flows = await client.flows.list();
     } catch {
-      // No answer, no warning. Never an error on the catalogue.
+      return; // No answer, no warning. Never an error on the catalogue.
     }
+    // Published before the grants are in: the collision warning is useful straight away, and a
+    // catalogue that waits for a second round trip to draw itself is a screen that flickers.
+    this.existing = flows.map((flow) => ({
+      ...flow,
+      // Carried through on purpose: a paused flow does not fire, so it is not a collision.
+      definition: (flow.definition ?? {}) as Record<string, unknown>,
+    }));
+    await this.loadGrants(flows);
+  }
+
+  /**
+   * What each candidate flow is ALLOWED to do — the other half of «is this card already installed»
+   * (flows#60).
+   *
+   * Asked only about the flows already waiting on one of the catalogue's events, so a hub with
+   * nothing automated pays nothing and a busy one pays for a handful, instead of a question per
+   * card on every visit. Swallowed on failure, one flow at a time: an unanswered flow stays
+   * `undefined` — «not asked» — and its card keeps the invitation it had before this existed,
+   * which is the behaviour to fall back to and never an error on the catalogue.
+   */
+  private async loadGrants(flows: readonly Flow[]): Promise<void> {
+    const read = this.client?.flows?.grants;
+    if (typeof read !== 'function') return; // A core whose flows surface predates grants.
+    const candidates = flowsOnTemplateEvents(flows, this.t);
+    if (!candidates.length) return;
+    const held = await Promise.all(
+      candidates.map(async (flow) => {
+        try {
+          const grants = await read.call(this.client?.flows, flow.id);
+          return [flow.id, grants.filter((g) => g.kind === 'command').map((g) => g.value)] as const;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    const byId = new Map(held.filter((row): row is readonly [string, string[]] => row !== null));
+    if (!byId.size) return;
+    this.existing = this.existing.map((flow) =>
+      byId.has(flow.id) ? { ...flow, commands: byId.get(flow.id) } : flow,
+    );
+  }
+
+  /** How far this hub has got with one card, and the flow to hand over when it has one. */
+  private installationOf(template: FlowTemplate): {
+    state: InstalledState;
+    flow?: Flow & { commands?: string[] };
+  } {
+    return templateInstallation(template, this.t, this.existing);
+  }
+
+  /**
+   * Hands the owner the automation they already have, instead of making them a second one.
+   *
+   * The screen that owns the editor does the opening: this element is the catalogue, and the flow
+   * it points at is a flow like any other — the one difference is where it lands, and a half-built
+   * one lands on Permissions, which is the only thing it is missing.
+   */
+  private view(template: FlowTemplate): void {
+    const installed = this.installationOf(template);
+    if (!installed.flow) return;
+    this.dispatchEvent(
+      new CustomEvent<{ flow: Flow; needsGrants: boolean }>('flows-open-flow', {
+        detail: { flow: installed.flow, needsGrants: installed.state === 'unfinished' },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   /**
@@ -481,18 +557,63 @@ export class ErpFlowsGallery extends LitElement {
           >`
         : nothing}
 
-      <div class="actions">
-        <ion-button
-          size="small"
-          data-act="use"
-          ?disabled=${this.busy}
-          @click=${() => void this.use()}
-        >
-          ${this.busy ? this.t('ui.saving') : this.t('ui.tplUse')}
-        </ion-button>
-        <span class="muted">${this.t('ui.tplCreatedPaused')}</span>
-      </div>
+      ${this.renderActions(template)}
     </div>`;
+  }
+
+  /**
+   * **What the button offers, once the hub already runs this card** (flows#60).
+   *
+   * On a card this hub does not have, the offer is the one it always was. On one it does, the lead
+   * action becomes «View it» — because tapping «Use this one» is exactly how the owner ended up
+   * with two automations answering the same message.
+   *
+   * «Use this one» stays, second and quieter, and that is deliberate. Two flows on one event is a
+   * legitimate thing to build, it is the owner's hub, and the switch-over the WhatsApp twins need
+   * — pause the attended one, install the unattended one — goes through a card that is badged.
+   * Warn and step aside, the same stance this panel already takes on a shared trigger
+   * (whatsapp_inbox#58); refusing would be us deciding for them.
+   */
+  private renderActions(template: FlowTemplate) {
+    const installed = this.installationOf(template);
+    const use = html`<ion-button
+      size="small"
+      fill=${installed.state === 'absent' ? nothing : 'outline'}
+      data-act="use"
+      ?disabled=${this.busy}
+      @click=${() => void this.use()}
+    >
+      ${this.busy ? this.t('ui.saving') : this.t('ui.tplUse')}
+    </ion-button>`;
+    if (installed.state === 'absent') {
+      return html`<div class="actions">
+        ${use}<span class="muted">${this.t('ui.tplCreatedPaused')}</span>
+      </div>`;
+    }
+    return html`<div class="actions">
+      <ion-button size="small" data-act="view" @click=${() => this.view(template)}>
+        ${this.t('ui.tplView')}
+      </ion-button>
+      ${use}
+      <span class="muted"
+        >${this.t(
+          installed.state === 'unfinished' ? 'ui.tplUnfinishedHint' : 'ui.tplHaveItAlready',
+        )}</span
+      >
+    </div>`;
+  }
+
+  /** The four words of {@link InstalledState}, in the vocabulary the WhatsApp card already uses. */
+  private renderInstalledPill(state: InstalledState) {
+    if (state === 'absent') return nothing;
+    const tone = state === 'active' ? 'success' : state === 'unfinished' ? 'warning' : 'neutral';
+    const label =
+      state === 'active'
+        ? 'ui.active'
+        : state === 'paused'
+          ? 'ui.paused'
+          : 'ui.tplUnfinished';
+    return html`<ok-status-pill tone=${tone} label=${this.t(label)}></ok-status-pill>`;
   }
 
   /**
@@ -520,7 +641,12 @@ export class ErpFlowsGallery extends LitElement {
 
   private renderCard(template: FlowTemplate) {
     const open = this.picked === template.id;
-    return html`<div class="card" data-template=${template.id}>
+    const { state } = this.installationOf(template);
+    return html`<div
+      class="card"
+      data-template=${template.id}
+      data-installed=${state === 'absent' ? nothing : state}
+    >
       <button
         type="button"
         class="pick"
@@ -533,6 +659,7 @@ export class ErpFlowsGallery extends LitElement {
           <span class="name">${this.t(template.nameKey)}</span>
           <span class="summary">${this.t(template.summaryKey)}</span>
         </span>
+        ${this.renderInstalledPill(state)}
       </button>
       ${open ? this.renderPanel(template) : nothing}
     </div>`;
