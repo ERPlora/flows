@@ -199,4 +199,61 @@ describe('telling the owner her automation is the one that answers itself', () =
     expect(warningOn(el, 'old')).toBeTruthy();
     expect(el.renderRoot.textContent).toContain('boom');
   });
+  /**
+   * **Two old automations, and the second button answers nothing** (review of flows#71).
+   *
+   * A salon that mounted the card twice — one for the salon, one for the second chair — has the
+   * flaw twice. `repair()` refuses to start a second save while one is running, which is right:
+   * two `PUT`s racing on the same list would write the row twice. What was wrong is that only the
+   * button being saved went disabled, so the OTHER one still looked pressable, and pressing it did
+   * nothing at all: no save, no warning, no error. A control that looks alive and answers nothing
+   * is the mute failure this repo does not ship — she presses it twice, decides the screen is
+   * broken, and the automation she came to fix stays broken.
+   *
+   * So while a repair is in flight EVERY repair button is disabled, and the one she pressed says
+   * so.
+   */
+  it('disables the other old automation’s button while a repair is in flight', async () => {
+    let landTheSave!: () => void;
+    const inFlight = new Promise<void>((resolve) => {
+      landTheSave = resolve;
+    });
+    const twoOld = [
+      { id: 'old-a', name: 'WhatsApp → cita (salón)', enabled: true, updated_at: '2026-09-05T10:00:00Z', definition: beforeTheFix() },
+      { id: 'old-b', name: 'WhatsApp → cita (segunda silla)', enabled: true, updated_at: '2026-09-04T10:00:00Z', definition: beforeTheFix() },
+    ];
+    const client = fakeClient(twoOld as never);
+    client.flows.update = vi.fn(async (id: string, f: Record<string, unknown>) => {
+      await inFlight;
+      return { id, ...f };
+    }) as never;
+    const el = await mount(client);
+
+    const fixButton = (id: string): HTMLButtonElement | null =>
+      (warningOn(el, id)?.querySelector('[data-act="checkup-fix"]') as HTMLButtonElement) ?? null;
+
+    expect(fixButton('old-a'), 'the first automation is not even warned about').toBeTruthy();
+    expect(fixButton('old-b'), 'the second automation is not even warned about').toBeTruthy();
+    expect(fixButton('old-b')!.hasAttribute('disabled'), 'nothing is saving yet').toBe(false);
+
+    // Press the first one and DO NOT let the save land: this is the window she can press in.
+    await click(el, fixButton('old-a'));
+
+    expect(
+      fixButton('old-b')!.hasAttribute('disabled'),
+      'the other old automation still offers a button that would do nothing at all',
+    ).toBe(true);
+    expect(fixButton('old-a')!.hasAttribute('disabled'), 'the one being saved is disabled too').toBe(true);
+    expect(fixButton('old-a')!.textContent?.trim(), 'the button she pressed does not say it is busy').not.toBe(
+      fixButton('old-b')!.textContent?.trim(),
+    );
+
+    // And once it lands, the other one is pressable again — a screen that stays locked after a
+    // save is the same mute failure with better manners.
+    landTheSave();
+    await settle(el);
+    await settle(el);
+    expect(warningOn(el, 'old-a'), 'the repaired automation keeps its warning').toBeNull();
+    expect(fixButton('old-b')!.hasAttribute('disabled'), 'the second button never came back').toBe(false);
+  });
 });

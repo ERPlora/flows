@@ -10858,10 +10858,14 @@ var ErpFlowsApp = class extends i3 {
             <strong>${this.t(problem.titleKey)}</strong>
             ${this.t(problem.bodyKey)}
           </span>
+          <!-- Disabled while ANY repair is in flight, not just this row's: the handler
+               refuses to start a second save while one is running, so a button left
+               pressable on another old automation answers nothing at all — no save, no
+               warning, no error. The row being saved says so in its label. -->
           <button
             type="button"
             data-act="checkup-fix"
-            ?disabled=${this.repairing === flow.id}
+            ?disabled=${!!this.repairing}
             @click=${() => void this.repair(flow, problem)}
           >
             ${this.repairing === flow.id ? this.t("ui.saving") : this.t(problem.fixKey)}
