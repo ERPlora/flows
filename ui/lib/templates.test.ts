@@ -426,19 +426,27 @@ const SOURCES: readonly MirrorSource[] = [
   {
     template: 'whatsapp-appointment',
     module: 'whatsapp_inbox',
-    // whatsapp_inbox PR #75 (#61), squash-merged as `ba2f293`: the proposing step decides FIRST
-    // what the message is asking for and can now CANCEL as well as book — two tools and two grants
-    // more. Before it, PR #69 (first half of #58) added `confirm_to_customer`, and PR #63 (#55)
-    // made the two model steps one.
-    commit: 'ba2f293e9b16aeff3c329f54e01764398e17a602',
+    // whatsapp_inbox #67: a «no» from the salon used to end the run where it stood, so the
+    // customer who had been promised an answer never got one. The proposing step now says
+    // `on_reject: "continue"`, and a step after it writes what she actually receives — the booking
+    // words when nothing was refused, and a real «that time cannot be, tell me another» when it
+    // was. Before it, PR #75 (#61) taught the proposing step to CANCEL as well as book, PR #69
+    // (first half of #58) added `confirm_to_customer`, and PR #63 (#55) made the two model steps
+    // one.
+    //
+    // 🔴 PINNED TO THE BRANCH HEAD, not to a squash: the source PR cannot merge until hub#1622 is
+    // DEPLOYED (an `ai` step carrying `on_reject` is refused whole — `flow.invalid_definition` —
+    // by any hub without it). Re-point this to the squash before merging, which the last test of
+    // this file makes mechanical: it goes red naming the sha to write here.
+    commit: '67c163c96cb4ab8024bd9f1934b427e80e7cd07f',
     files: {
       en: 'flows/appointment-from-whatsapp.en.flow.json',
       es: 'flows/appointment-from-whatsapp.es.flow.json',
       grants: 'flows/appointment-from-whatsapp.grants.json',
     },
     digest: {
-      en: 'aaf15be0a201432c680ca7a21de4971219dc5ea5909b49558ca182388943748e',
-      es: '96289feba45cd0c323db1722d13b27d7454efa478006ae724a63453631e08aa6',
+      en: 'ce57190392703d67a5b077b488a0c18715fe5597288adfd29a445af54afdc508',
+      es: '54b3ffd771bfd0da8a0d8ee86f046ecc51b8e5364aa901f8b11e0b24df1bde24',
     },
   },
   {
@@ -560,26 +568,60 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
     // «Find what is free» and «propose» are ONE model step: they used to be two (a step that only
     // asked, `auto`, and one that wrote from its report), the workaround for a hub that refused a
     // read inside a `manual` step — hub#1595 made the read legal and whatsapp_inbox#55 collapsed
-    // them. The fourth step is whatsapp_inbox#58's first half: once the booking goes through, the
-    // customer hears about it, on WhatsApp, in the words the model wrote for them.
+    // them. The fourth step is whatsapp_inbox#67's: the one that knows how the salon DECIDED and
+    // writes what the customer actually reads — it is what makes the fifth (whatsapp_inbox#58's
+    // first half, the only thing that ever speaks to her) say something on a «no» too.
     expect(steps.map((s) => [s.id, s.kind])).toEqual([
       ['acknowledge', 'notify'],
       ['know_the_customer', 'ai'],
       ['propose_appointment', 'ai'],
+      ['reply_to_customer', 'ai'],
       ['confirm_to_customer', 'notify'],
     ]);
-    // Both model steps WRITE (a customer card, a booking), so both wait for a person.
-    expect(steps.map((s) => s.policy)).toEqual([undefined, 'manual', 'manual', undefined]);
+    // Every model step waits for a person: the first two WRITE (a customer card, a booking), and
+    // the third carries no tools at all, so `manual` costs it nothing — there is never a proposal
+    // to approve.
+    expect(steps.map((s) => s.policy)).toEqual([
+      undefined,
+      'manual',
+      'manual',
+      'manual',
+      undefined,
+    ]);
   });
 
-  it('confirms to the customer with the proposing step’s own words, through the same conversation', () => {
+  it('carries on when the salon says NO, instead of ending the run at the rejection', () => {
+    // whatsapp_inbox#67. The kernel's default for a model's proposal is `cancel`: the run stops
+    // AT the refusal and every step after it — including the only one that ever speaks to the
+    // customer — never runs. She had been promised «we will confirm as soon as the salon opens»,
+    // and then nothing came. Without this key the card below is decoration.
+    const propose = buildTemplate(template!, t).steps.find((s) => s.id === 'propose_appointment');
+    expect(propose?.on_reject).toBe('continue');
+  });
+
+  it('lets one step, and only one, write what the customer reads — with no tools of its own', () => {
+    const steps = buildTemplate(template!, t).steps;
+    const reply = steps.find((s) => s.id === 'reply_to_customer');
+    // It has to know how it ended AND what was written for her: the outcome alone cannot name the
+    // day, the hour and the professional, and the words alone describe an appointment she may not
+    // have. Both, or the message is wrong on one branch or the other.
+    expect(reply?.prompt).toContain('{{steps.propose_appointment.status}}');
+    expect(reply?.prompt).toContain('{{steps.propose_appointment.text}}');
+    // NO tools, on purpose: it cannot book, cancel or look anything up, so there is nothing here
+    // for the salon to approve and nothing a customer's message could talk it into doing. One
+    // turn is all it gets — it is composing a message, not working anything out.
+    expect(reply?.tools).toBeUndefined();
+    expect(reply?.max_iters).toBe(1);
+  });
+
+  it('confirms to the customer with the deciding step’s own words, through the same conversation', () => {
     const steps = buildTemplate(template!, t).steps;
     const confirm = steps.find((s) => s.id === 'confirm_to_customer');
-    // The text is the model's reply from the step that booked — which is why that step's prompt
-    // ends with «everything you write back is sent to them, word for word». Not a template of ours,
-    // not a second model call: the salon pays for one WhatsApp, and the customer reads what the
-    // assistant decided, after a person approved it.
-    expect(confirm?.vars?.text).toBe('{{steps.propose_appointment.text}}');
+    // The text comes from the step that knows how the salon decided — NOT straight from the one
+    // that booked, which cannot know it was turned down and would cheerfully send «you are booked
+    // for Thursday at five» after the salon refused Thursday at five. Not a template of ours: the
+    // salon pays for one WhatsApp, and the customer reads what the assistant wrote for her.
+    expect(confirm?.vars?.text).toBe('{{steps.reply_to_customer.text}}');
     // Same recipient resolution as the acknowledgement: the conversation, never a typed number —
     // so the two notifies cost ONE recipient grant and ONE channel grant, not two of each.
     expect(confirm?.channel).toBe('whatsapp');
@@ -665,13 +707,20 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
 
   it('tells the model which tools it may use, and offers no tool it has no permission for', () => {
     const granted = new Set(templateGrants(template!, t).map((g) => `${g.kind} ${g.value}`));
-    for (const step of buildTemplate(template!, t).steps) {
-      if (step.kind !== 'ai') continue;
+    const ai = buildTemplate(template!, t).steps.filter((s) => s.kind === 'ai');
+    for (const step of ai) {
       expect(step.prompt, step.id).toBeTruthy();
-      expect((step.tools?.queries?.length ?? 0) + (step.tools?.commands?.length ?? 0)).toBeGreaterThan(0);
       for (const query of step.tools?.queries ?? []) expect(granted.has(`query ${query}`), query).toBe(true);
       for (const command of step.tools?.commands ?? []) expect(granted.has(`command ${command}`), command).toBe(true);
     }
+    // WHICH steps carry tools is the shape itself, not an accident, so it is named here rather
+    // than left to «at least one»: the two that act have them, and `reply_to_customer` has none
+    // BECAUSE it only writes prose (whatsapp_inbox#67). Stripping the tools off a step that acts
+    // would leave a model asked to book with nothing to book with — and, under the old «every ai
+    // step has at least one tool» wording, that failure only surfaced if it stripped the LAST one.
+    expect(
+      ai.filter((s) => (s.tools?.queries?.length ?? 0) + (s.tools?.commands?.length ?? 0) > 0).map((s) => s.id),
+    ).toEqual(['know_the_customer', 'propose_appointment']);
   });
 });
 
