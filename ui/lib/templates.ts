@@ -209,7 +209,37 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
     build: (t) => ({
       schema_version: SCHEMA_VERSION,
-      triggers: [{ kind: 'event', event: 'whatsapp_inbox.message.received' }],
+      triggers: [
+        {
+          kind: 'event',
+          // The MODULE's event, not the core's — and it inherits the same two problems one hop
+          // later (flows#67). `whatsapp_inbox._ingest_inbound_message` is a manifest listener on
+          // `hub.whatsapp.message_received`, and a manifest listener has no mapping layer: the
+          // relay hands the core payload straight to the command and the command's `emit` writes
+          // that same bound payload to the outbox. So from hub#1621 this event carries the OWNER's
+          // own replies, echoed back from the WhatsApp Business app on her phone, and the 180 days
+          // of backlog Meta delivers the moment the number is connected. Unguarded that is a task
+          // per message she types herself and a task per conversation anybody had in March — the
+          // list this card exists to keep short, buried on the day the fleet updates.
+          //
+          // 🔴 `neq` and never `eq`, the SAME reason as the appointment pair below: those two
+          // fields reach the event only from hub#1621, which no published tag carries (`v1.1.15`
+          // is the newest). In the kernel an absent path is `Null` and `json_eq(Null, x)` is false
+          // (`crates/runtime/src/flows/def.rs`), so an affirmative clause matches NOTHING on the
+          // fleet as it stands — no run, no error, no log. We EXCLUDE what is bad; we never
+          // REQUIRE what is good.
+          //
+          // No `event.text` clause on purpose. Its neighbour filters an empty body because every
+          // reply IT sends is billed by Meta; this card only writes a task, and a customer who
+          // sends a photo, a voice note or a location has written to the shop just as much as one
+          // who types.
+          event: 'whatsapp_inbox.message.received',
+          filter: {
+            'event.direction': { neq: 'outbound' },
+            'event.source': { neq: 'history' },
+          },
+        },
+      ],
       steps: [
         run('s1', 'tasks.tasks.create', {
           title: t('tpl.whatsapp.taskTitle'),

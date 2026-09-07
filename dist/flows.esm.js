@@ -6151,7 +6151,37 @@ var TEMPLATES = [
     grantReasons: { "tasks.tasks.create": "tpl.grant.tasksCreate" },
     build: (t3) => ({
       schema_version: SCHEMA_VERSION2,
-      triggers: [{ kind: "event", event: "whatsapp_inbox.message.received" }],
+      triggers: [
+        {
+          kind: "event",
+          // The MODULE's event, not the core's — and it inherits the same two problems one hop
+          // later (flows#67). `whatsapp_inbox._ingest_inbound_message` is a manifest listener on
+          // `hub.whatsapp.message_received`, and a manifest listener has no mapping layer: the
+          // relay hands the core payload straight to the command and the command's `emit` writes
+          // that same bound payload to the outbox. So from hub#1621 this event carries the OWNER's
+          // own replies, echoed back from the WhatsApp Business app on her phone, and the 180 days
+          // of backlog Meta delivers the moment the number is connected. Unguarded that is a task
+          // per message she types herself and a task per conversation anybody had in March — the
+          // list this card exists to keep short, buried on the day the fleet updates.
+          //
+          // 🔴 `neq` and never `eq`, the SAME reason as the appointment pair below: those two
+          // fields reach the event only from hub#1621, which no published tag carries (`v1.1.15`
+          // is the newest). In the kernel an absent path is `Null` and `json_eq(Null, x)` is false
+          // (`crates/runtime/src/flows/def.rs`), so an affirmative clause matches NOTHING on the
+          // fleet as it stands — no run, no error, no log. We EXCLUDE what is bad; we never
+          // REQUIRE what is good.
+          //
+          // No `event.text` clause on purpose. Its neighbour filters an empty body because every
+          // reply IT sends is billed by Meta; this card only writes a task, and a customer who
+          // sends a photo, a voice note or a location has written to the shop just as much as one
+          // who types.
+          event: "whatsapp_inbox.message.received",
+          filter: {
+            "event.direction": { neq: "outbound" },
+            "event.source": { neq: "history" }
+          }
+        }
+      ],
       steps: [
         run("s1", "tasks.tasks.create", {
           title: t3("tpl.whatsapp.taskTitle"),
@@ -8984,6 +9014,11 @@ function copyName(name, taken, t3) {
 
 // ui/lib/flow-checkup.ts
 var WHATSAPP_MESSAGE_EVENT = "hub.whatsapp.message_received";
+var WHATSAPP_MODULE_MESSAGE_EVENT = "whatsapp_inbox.message.received";
+var WHATSAPP_MESSAGE_EVENTS = [
+  WHATSAPP_MESSAGE_EVENT,
+  WHATSAPP_MODULE_MESSAGE_EVENT
+];
 var ECHO_AND_BACKLOG = "whatsapp_echo_and_backlog";
 var ECHO_GUARDS = [
   ["event.direction", "outbound"],
@@ -8994,7 +9029,7 @@ function isGuarded(filter, path) {
   const clause = filter?.[path];
   return isRecord(clause) && Object.keys(clause).length > 0;
 }
-var isWhatsappTrigger = (trigger) => trigger?.kind === "event" && trigger?.event === WHATSAPP_MESSAGE_EVENT;
+var isWhatsappTrigger = (trigger) => trigger?.kind === "event" && WHATSAPP_MESSAGE_EVENTS.includes(trigger?.event);
 var answersEchoAndBacklog = (trigger) => isWhatsappTrigger(trigger) && ECHO_GUARDS.some(([path]) => !isGuarded(trigger.filter, path));
 function flowProblems(definition) {
   const doc = readDoc(definition);
@@ -9278,8 +9313,8 @@ var es_default = {
     copyOf: "Copia de {name}",
     copyMade: "Copiada, y la copia est\xE1 en pausa. No lleva ninguno de los permisos de la original: conc\xE9dele lo que necesite antes de encenderla.",
     copySecrets: "Sale fuera usando: {names}. Comprueba que son los correctos para la copia.",
-    checkupEchoTitle: "Esta automatizaci\xF3n contesta a tus propios mensajes",
-    checkupEchoBody: "Se mont\xF3 antes de que lo corrigi\xE9ramos, as\xED que tambi\xE9n responde a lo que escribes t\xFA desde tu m\xF3vil y a conversaciones de hace meses. Actual\xEDzala y solo contestar\xE1 a lo que escriba un cliente ahora. No cambia nada m\xE1s de ella.",
+    checkupEchoTitle: "Esta automatizaci\xF3n tambi\xE9n salta con tus propios mensajes",
+    checkupEchoBody: "Se mont\xF3 antes de que lo corrigi\xE9ramos, as\xED que tambi\xE9n salta con lo que escribes t\xFA desde tu m\xF3vil y con conversaciones de hace meses. Actual\xEDzala y solo saltar\xE1 con lo que escriba un cliente ahora. No cambia nada m\xE1s de ella.",
     checkupEchoFix: "Actualizarla",
     checkupFixed: "\xAB{name}\xBB ya solo contesta a lo que escribe un cliente.",
     checkupNotFixed: "No hemos podido actualizar esta automatizaci\xF3n: el hub la ha guardado sin el cambio. Vuelve a intentarlo en un momento y avisa a soporte si sigue pasando.",
@@ -10128,8 +10163,8 @@ var en_default = {
     copyOf: "Copy of {name}",
     copyMade: "Copied, and the copy is paused. It carries none of the original's permissions \u2014 allow what it needs before turning it on.",
     copySecrets: "It reaches out using: {names}. Check those are the right ones for the copy.",
-    checkupEchoTitle: "This automation replies to your own messages",
-    checkupEchoBody: "It was set up before we corrected it, so it also answers the replies you send from your own phone and conversations from months ago. Update it and it will only answer what a customer writes now. Nothing else about it changes.",
+    checkupEchoTitle: "This automation also runs on your own messages",
+    checkupEchoBody: "It was set up before we corrected it, so it also reacts to the replies you send from your own phone and to conversations from months ago. Update it and it will only react to what a customer writes now. Nothing else about it changes.",
     checkupEchoFix: "Update it",
     checkupFixed: "\u201C{name}\u201D now only replies to what a customer writes.",
     checkupNotFixed: "We could not update this automation: the hub saved it without the change. Try again in a moment, and tell support if it keeps happening.",

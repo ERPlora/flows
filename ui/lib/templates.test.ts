@@ -14,6 +14,7 @@ import {
   unavailableModules,
   flowsOnSameTrigger,
 } from './templates';
+import { conditionResult } from './simulate';
 import type { FlowDoc } from './flow-doc';
 import { MAX_ITERS_CAP, isSpineKind, readDoc } from './flow-doc';
 import en from '../../locales/en.json';
@@ -300,20 +301,32 @@ describe('a template becomes a flow', () => {
 describe('the everyday automations of flows#18', () => {
   const byId = (id: string) => TEMPLATES.find((tpl) => tpl.id === id);
 
+  // The third column is the trigger's `filter`, spelled out rather than allowed for: the
+  // comparison below stays a whole-object `toEqual`, so a clause that appears on any of these
+  // cards without being written here is still a failure. `undefined` means «this card filters
+  // nothing», which is an assertion too — three of the four run on every event of their kind.
   it.each([
-    ['new-staff-checklist', 'staff.member.created', 'R0 #7 — somebody joins → the checklist'],
-    ['whatsapp-answer', 'whatsapp_inbox.message.received', 'R0 #8 — a message arrives → answer it'],
-    ['cash-close-review', 'cash_register.session_closed', 'R0 #12 — the till closes → check the day'],
+    ['new-staff-checklist', 'staff.member.created', undefined, 'R0 #7 — somebody joins → the checklist'],
+    [
+      'whatsapp-answer',
+      'whatsapp_inbox.message.received',
+      // flows#67 — the owner's own echo and Meta's 180 days of backlog. Asserted in full, with
+      // the filter RUN against the kernel's evaluator, in the card's own block further down.
+      { 'event.direction': { neq: 'outbound' }, 'event.source': { neq: 'history' } },
+      'R0 #8 — a message arrives → answer it',
+    ],
+    ['cash-close-review', 'cash_register.session_closed', undefined, 'R0 #12 — the till closes → check the day'],
     [
       'fiscal-rejection-alert',
       'verifactu.record.rejected',
+      undefined,
       'R0 #6 — the AEAT said no → somebody finds out without opening a screen',
     ],
-  ])('%s starts on %s', (id, event) => {
+  ])('%s starts on %s', (id, event, filter) => {
     const template = byId(id);
     expect(template, id).toBeTruthy();
     const doc = buildTemplate(template!, t);
-    expect(doc.triggers[0]).toEqual({ kind: 'event', event });
+    expect(doc.triggers[0]).toEqual(filter ? { kind: 'event', event, filter } : { kind: 'event', event });
   });
 
   it('friday-week-review starts on the clock, on a Friday', () => {
@@ -687,6 +700,79 @@ function sourceMain(
   const sha = git('rev-parse', 'refs/remotes/origin/main');
   return sha === null ? null : { sha, git };
 }
+/**
+ * **The card that turns a WhatsApp into a job on somebody's list** (flows#67).
+ *
+ * It waits on the MODULE's event and not the core's, which is the whole reason it needed fixing
+ * separately from its neighbour below. `whatsapp_inbox._ingest_inbound_message` is a manifest
+ * listener on `hub.whatsapp.message_received`, and a manifest listener has no mapping layer: the
+ * relay hands the core event's payload straight to the command, and the command's `emit` writes
+ * that same bound payload into the outbox. So `whatsapp_inbox.message.received` carries
+ * `direction` and `source` exactly when the core carries them — and it inherits the owner's echo
+ * and Meta's 180 days of backlog on the same day, through one more hop.
+ *
+ * Unguarded, that is a task per reply the owner types on her own phone and a task per conversation
+ * anybody had in March: the list this card exists to keep short is the first thing it buries.
+ */
+describe('WhatsApp → task, the card that puts a message on somebody’s list (flows#67)', () => {
+  const template = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-answer');
+
+  /** The event as the module re-emits it, plus whatever fields this hub's core knows about. */
+  const message = (extra: Record<string, unknown> = {}) => ({
+    event: { from: '34600111222', text: '¿tenéis hueco mañana?', ...extra },
+  });
+
+  const filterOf = () => buildTemplate(template!, t).triggers[0].filter;
+
+  it('is in the gallery at all', () => {
+    expect(template, 'no `whatsapp-answer` template in the catalogue').toBeTruthy();
+  });
+
+  it('waits on the module’s own event, guarded against the echo and the backlog', () => {
+    // No `event.text` clause, and that is a decision rather than an omission: its neighbour below
+    // filters an empty body because every reply IT sends is billed by Meta, while this card only
+    // writes a task. A customer who sends a photo, a voice note or a location has written to the
+    // shop just as much as one who types, and dropping her on the floor is the failure this card
+    // is for. No `input` either — every word of the task is a fixed string.
+    expect(buildTemplate(template!, t).triggers[0]).toEqual({
+      kind: 'event',
+      event: 'whatsapp_inbox.message.received',
+      filter: {
+        'event.direction': { neq: 'outbound' },
+        'event.source': { neq: 'history' },
+      },
+    });
+  });
+
+  // ── Both senses of the same clause, against the kernel's own evaluator ──────────────────────
+  //
+  // `conditionResult` mirrors `crates/runtime/src/flows/def.rs`, so these two tests are the filter
+  // being RUN and not the filter being read back. One sense without the other is how this gets
+  // written wrong: excluding the bad is easy to check and easy to over-tighten into requiring the
+  // good, which is silent and much worse.
+
+  it('does not fire on the owner’s own reply, nor on a message out of the backlog', () => {
+    expect(conditionResult(filterOf(), message({ direction: 'inbound', source: 'live' })).matched).toBe(true);
+    expect(conditionResult(filterOf(), message({ direction: 'outbound', source: 'live' })).matched).toBe(false);
+    expect(conditionResult(filterOf(), message({ direction: 'inbound', source: 'history' })).matched).toBe(false);
+  });
+
+  it('STILL fires on a hub that sends neither field — which is why it is `neq` and never `eq`', () => {
+    // Every hub tag published today. `direction` and `source` reach the event only from hub#1621,
+    // so on the fleet as it stands both paths resolve to `null`.
+    expect(conditionResult(filterOf(), message()).matched).toBe(true);
+
+    // And the shape that would have looked right and broken every card already installed: in the
+    // kernel `json_eq(null, x)` is false, so an affirmative filter matches NOTHING on that hub —
+    // no run, no error, no log, and an owner whose task list went quiet finds out from a customer.
+    const affirmative = {
+      'event.direction': { eq: 'inbound' },
+      'event.source': { eq: 'live' },
+    };
+    expect(conditionResult(affirmative, message()).matched).toBe(false);
+  });
+});
+
 describe('WhatsApp → appointment, the card the WhatsApp module has always shipped (flows#52)', () => {
   const template = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment');
 
