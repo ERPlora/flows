@@ -452,15 +452,41 @@ const SOURCES: readonly MirrorSource[] = [
     // it is refused whole with `invalid_payload`. Until this landed the gallery kept handing out
     // the version that cannot cancel (flows#64) — and NOTHING here went red, which is why the
     // third pin test below now exists.
-    commit: '0f8eb60f9cdc2f9bafa818dd19fc45d3f2e91e45',
+    // And moved by whatsapp_inbox#74 (squashed as `33e7c0f`): the proposing step gained MOVING —
+    // in THIS family only. It had book and cancel and
+    // no way to change an appointment's hour, so «can you change it to Thursday?» fell into the
+    // «anything else» branch — or was read as a new booking and the customer ended up with two.
+    // Moving is `appointments.appointments.reschedule`, ONE call and never cancel-then-book, and
+    // the id always comes out of `list_for_customer` because that command carries no `channel` and
+    // no `customer_id` (appointments 1.1.72), so nothing below it can tell whose appointment it is.
+    // The grants list grows by one (13 → 14) and `reply_to_customer` learns to say that a refused
+    // MOVE leaves the appointment she already had exactly where it was.
+    //
+    // Its twin below did NOT gain it, and that asymmetry is the whole point: `reschedule` cannot
+    // be bound to the customer asking (no `channel`, no `customer_id`, and the handler never looks
+    // at whose appointment it is), so the move only ships where a PERSON approves the write.
+    //
+    // Re-pinned from the branch head (`5cdfb79`) to that squash the day whatsapp_inbox#102 landed,
+    // which is the drill this file enforces: the mirror was opened while its source was still a
+    // branch, `merge-pr.sh` squashed it, and the first pin test went red naming the sha to set.
+    // The four digests did NOT move — the documents are the same, only the commit that carries
+    // them is new.
+    //
+    // 🪤 And the sha to set is the one that CARRIES the documents, not the tip: that red names
+    // `main` as fetched, which the day of this re-pin was `0fd8a74` — a `chore(release)` bump that
+    // touches no template. Pinned there, the two tests below would still pass (a descendant that
+    // did not touch the files hashes the same), and the pin would stop saying WHICH change it
+    // mirrors, which is the one job it has. `git log -1 <file>` on the source's `main` is the
+    // answer, and it is what the third test names in its own remedy.
+    commit: '33e7c0fab69d875e8bd530a1939d59efe1dfd27c',
     files: {
       en: 'flows/appointment-from-whatsapp.en.flow.json',
       es: 'flows/appointment-from-whatsapp.es.flow.json',
       grants: 'flows/appointment-from-whatsapp.grants.json',
     },
     digest: {
-      en: '96f1ab71dc27a4519efecc039e5140a92d9fac05917c541caa41fd5118b30af6',
-      es: '32a2112096288db6d93c2051d620ffc93788a8e77982a601a7bab3cda01cc43b',
+      en: '2119e9a89c7df1d5cef5ff6b4ef4b8bc5a4f07c2d5079a27076c631964de3c2e',
+      es: '219531d57fb72433f051d48176164b7e04fa5aa23729ce226b39b408f6d0bff1',
     },
   },
   {
@@ -483,6 +509,17 @@ const SOURCES: readonly MirrorSource[] = [
     // And by whatsapp_inbox#82 (`0f8eb60`), the same identified cancellation as the twin — with
     // nobody watching, here it mattered more: the customer was told nothing and no salon saw the
     // refusal.
+    //
+    // 🔴 whatsapp_inbox#74 did NOT touch this family, and the pin stays where it was to say so:
+    // the twin above learned to MOVE an appointment and this one deliberately did not, so it keeps
+    // thirteen permissions against the twin's fourteen. `appointments.appointments.reschedule`
+    // carries no `channel` and no `customer_id` (`additionalProperties: false` over
+    // `appointment_id`, `start_datetime`, `duration_minutes`) and its handler never checks whose
+    // appointment it is, so nothing downstream can refuse a stranger's. Cancelling CAN be bound
+    // that way — which is why whatsapp_inbox#100 can pin `payload` in its grant once hub#1632
+    // ships, and why the same trick has nothing to bite on here. With `policy: "auto"` there is no
+    // person in the loop either, so the family answers «somebody from the salon will get back to
+    // you». It reopens with appointments#142 first, then whatsapp_inbox#103.
     commit: '0f8eb60f9cdc2f9bafa818dd19fc45d3f2e91e45',
     files: {
       en: 'flows/appointment-from-whatsapp-unattended.en.flow.json',
@@ -727,13 +764,16 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
    * where it is caught — and a grant is the difference between an automation that books and one
    * that writes to a customer without being allowed to.
    *
-   * Thirteen: eleven, plus the two whatsapp_inbox#61 needs to CANCEL — reading what a customer
-   * already has, and cancelling it. (It was twelve before whatsapp_inbox#55 dropped
+   * Fourteen: eleven, plus the two whatsapp_inbox#61 needs to CANCEL — reading what a customer
+   * already has, and cancelling it — plus the one whatsapp_inbox#74 needs to MOVE one. Moving
+   * needs no fifteenth: it reuses the same `list_for_customer` read to know WHICH appointment it
+   * is moving, and the availability trio to know where to move it to. (It was twelve before
+   * whatsapp_inbox#55 dropped
    * `appointments.appointments.conflicting`: `availability.check` already refuses an overlap with
    * the booking gate's own authority, and the reads it does on the way run as the SYSTEM
    * (`preload_reads`), which no grant governs.)
    */
-  it('asks for the thirteen permissions the module’s own grants file lists, and no fourteenth', () => {
+  it('asks for the fourteen permissions the module’s own grants file lists, and no fifteenth', () => {
     expect(
       templateGrants(template!, t)
         .map((g) => `${g.kind} ${g.value}`)
@@ -742,6 +782,7 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
       [
         'command appointments.appointments.cancel',
         'command appointments.appointments.create',
+        'command appointments.appointments.reschedule',
         'command appointments.availability.check',
         'command appointments.availability.day_opening',
         'command appointments.availability.slots',
@@ -851,12 +892,30 @@ describe('WhatsApp → appointment BOOKED, the family that runs with nobody watc
     expect(confirm?.to).toEqual(steps[0].to);
   });
 
-  it('asks for the same thirteen permissions as its attended twin, and not one more', () => {
-    // Running unattended is a reason to skip the tray, never a reason to want more authority.
+  /**
+   * **Thirteen against the twin's fourteen, and the missing one is MOVING** (whatsapp_inbox#74).
+   *
+   * Running unattended is a reason to skip the tray, never a reason to want more authority — and
+   * here it is a reason to want LESS. `appointments.appointments.reschedule` cannot be scoped to
+   * the customer who is writing: it takes no `channel` and no `customer_id`, and its handler
+   * checks state, notice, hours, blocks and overlap — never whose appointment it is. The grants
+   * this card already holds reach any of them (`customers.list` searches by name,
+   * `list_for_customer` takes any `customer_id`), so with `policy: "auto"` the only thing between
+   * a customer and a stranger's hour would be a paragraph of prompt (hub#1623: not a control).
+   *
+   * Asserted as «the twin's set MINUS the move» and not as a literal list, so the day the twin
+   * gains a permission this card gains it too — the one asymmetry that is deliberate is named
+   * here, and any other one is a red. It goes back to being identical when appointments#142 gives
+   * `reschedule` its `channel` + `customer_id` and whatsapp_inbox#103 re-adds the branch.
+   */
+  it('asks for its attended twin’s permissions MINUS the move it must not have', () => {
     const mine = templateGrants(template!, t).map((g) => `${g.kind} ${g.value}`).sort();
     const theirs = templateGrants(attended!, t).map((g) => `${g.kind} ${g.value}`).sort();
-    expect(mine).toEqual(theirs);
+    expect(mine).not.toContain('command appointments.appointments.reschedule');
+    expect(theirs).toContain('command appointments.appointments.reschedule');
+    expect(mine).toEqual(theirs.filter((g) => g !== 'command appointments.appointments.reschedule'));
     expect(mine).toHaveLength(13);
+    expect(theirs).toHaveLength(14);
   });
 
   it('needs the same five modules, so a hub short of one never sees it', () => {
@@ -1072,6 +1131,39 @@ describe.each(SOURCES)(
         .map((g) => `${g.kind} ${g.value}`)
         .sort(),
     );
+  });
+
+  /**
+   * **…and the pin has to be the commit that CARRIES the documents, not just any commit that has
+   * them** (whatsapp_inbox#102's re-pin).
+   *
+   * The three tests above are all satisfied by a DESCENDANT of the right commit: `main`'s tip
+   * hashes the same documents as the squash that wrote them, so a pin moved to the tip passes
+   * every one of them. Measured on the re-pin of whatsapp_inbox#102 — pinned at
+   * `0fd8a74` (`chore(release): v2.1.40`, which touches no template) the suite was 77 green.
+   *
+   * That is not cosmetic. The `commit` has ONE job: say which change of the source this card
+   * mirrors, so a reader who finds the two drifting knows what to diff against (whatsapp_inbox#73)
+   * — and the release bump the fleet pushes minutes after every merge is the sha most likely to be
+   * grabbed by mistake, because it is what the FIRST test names in its remedy (it can only offer
+   * the tip it fetched). `git log -1 <file>` is the answer, and this is the test that insists on it.
+   *
+   * Judged per FILE and satisfied by any of them: the two documents and the grants file move in
+   * different commits (the unattended grants last moved in `a44a3f1`, its documents in `0f8eb60`),
+   * so demanding one single carrier for all three would be a red the day only one of them changes.
+   */
+  it.skipIf(main === null || !pinned)(`is the commit that carries them, not a later one (${state})`, () => {
+    const carrier = (file: string): string | null =>
+      git('log', '-1', '--format=%H', 'refs/remotes/origin/main', '--', file);
+    const carriers = [mirror.files.en, mirror.files.es, mirror.files.grants].map(carrier);
+    expect(
+      carriers,
+      `${mirror.template} pins ${mirror.commit.slice(0, 7)}, which is not the commit any of its ` +
+        `three files last moved in (${carriers
+          .map((c) => (c === null ? '—' : c.slice(0, 7)))
+          .join(', ')}). A pin on a later commit — a \`chore(release)\` bump, or the tip the first ` +
+        `test names — passes every other check here and stops saying WHICH change it mirrors.`,
+    ).toContain(mirror.commit);
   });
 
   },
