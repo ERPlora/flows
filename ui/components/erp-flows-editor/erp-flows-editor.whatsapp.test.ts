@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-editor';
-import type { ErpFlowsEditor } from './erp-flows-editor';
+import { ErpFlowsEditor } from './erp-flows-editor';
 
 /**
  * **Offering options the customer TAPS, from the screen the owner already uses** (flows#75).
@@ -421,5 +421,56 @@ describe('what the tap comes home as, in the list of things to check', () => {
   it('does not offer them on a hub that could never have sent the options', async () => {
     const el = await mountOn(false);
     expect(pickerPaths(el)).toEqual(['text']);
+  });
+});
+
+/**
+ * **An option is a box you can read, not a slot beside a bin** (flows#75).
+ *
+ * The row holding an option's identifier and its «remove» button was reusing `.param-row`, the
+ * class the http step uses for `name → value → bin`. That class is a THREE column grid above
+ * 560px (`0.7fr 1.6fr auto`), and this row only ever has TWO children: the identifier landed in
+ * the 0.7fr column and the bin swallowed the 1.6fr one. On a phone (single column) it read fine,
+ * so the defect only shows on tablet and desktop — the two viewports the owner actually composes
+ * on.
+ *
+ * happy-dom does no layout: what these tests pin is the CONTRACT that makes the geometry true in
+ * a real browser, exactly like the gallery's width tests. They do NOT prove anything about touch.
+ */
+describe('an option the customer taps is laid out as its own card (flows#75)', () => {
+  /** One rule block of the component's static stylesheet, by its selector. */
+  const rule = (selector: string): string => {
+    const cssText = (ErpFlowsEditor.styles as unknown as { cssText: string }).cssText;
+    const at = cssText.indexOf(`${selector} {`);
+    expect(at, `${selector} is not in the stylesheet at all`).toBeGreaterThanOrEqual(0);
+    return cssText.slice(at, cssText.indexOf('}', at));
+  };
+
+  it('gives the identifier and the bin a two column row, not the http step three column one', () => {
+    // `1fr auto` is the whole fix: the box takes the line and the bin takes what it needs. It
+    // needs no media query, which is why it is right on all three viewports at once.
+    const head = rule('.tap-head');
+    expect(head).toContain('display: grid');
+    expect(head).toContain('grid-template-columns: 1fr auto');
+  });
+
+  it('keeps the option card fluid: nothing here caps a width', () => {
+    // hub#1605's standing rule for this UI — no container carries a max-width.
+    expect(rule('.tap-option')).not.toContain('max-width');
+  });
+
+  it('does not lay an option out with the class meant for three columns', async () => {
+    const el = await mount(withOptions());
+    const panel = await panelOf(el);
+    const card = panel.querySelector('[data-tap-option="0"]')!;
+    expect(card, 'the option is not on the screen at all').toBeTruthy();
+    expect(
+      card.querySelector('.tap-head'),
+      'the identifier and the bin do not share a row of their own',
+    ).toBeTruthy();
+    expect(
+      card.querySelector('.param-row'),
+      'the option still borrows the three column row: the bin eats the wide column',
+    ).toBeNull();
   });
 });
