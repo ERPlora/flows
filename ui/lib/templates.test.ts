@@ -452,7 +452,8 @@ const SOURCES: readonly MirrorSource[] = [
     // it is refused whole with `invalid_payload`. Until this landed the gallery kept handing out
     // the version that cannot cancel (flows#64) — and NOTHING here went red, which is why the
     // third pin test below now exists.
-    // And moved by whatsapp_inbox#74: the proposing step gained MOVING — in THIS family only. It had book and cancel and
+    // And moved by whatsapp_inbox#74 (squashed as `33e7c0f`): the proposing step gained MOVING —
+    // in THIS family only. It had book and cancel and
     // no way to change an appointment's hour, so «can you change it to Thursday?» fell into the
     // «anything else» branch — or was read as a new booking and the customer ended up with two.
     // Moving is `appointments.appointments.reschedule`, ONE call and never cancel-then-book, and
@@ -465,10 +466,19 @@ const SOURCES: readonly MirrorSource[] = [
     // be bound to the customer asking (no `channel`, no `customer_id`, and the handler never looks
     // at whose appointment it is), so the move only ships where a PERSON approves the write.
     //
-    // 🔴 Pinned at the branch head while whatsapp_inbox#102 is open: `merge-pr.sh` squashes it, so
-    // the last test of this file goes red naming the squash sha, and this pin is set to that. The
-    // digests do not change with the re-pin.
-    commit: '5cdfb79d8c031896abe28971c3c1d9a3f5c9491d',
+    // Re-pinned from the branch head (`5cdfb79`) to that squash the day whatsapp_inbox#102 landed,
+    // which is the drill this file enforces: the mirror was opened while its source was still a
+    // branch, `merge-pr.sh` squashed it, and the first pin test went red naming the sha to set.
+    // The four digests did NOT move — the documents are the same, only the commit that carries
+    // them is new.
+    //
+    // 🪤 And the sha to set is the one that CARRIES the documents, not the tip: that red names
+    // `main` as fetched, which the day of this re-pin was `0fd8a74` — a `chore(release)` bump that
+    // touches no template. Pinned there, the two tests below would still pass (a descendant that
+    // did not touch the files hashes the same), and the pin would stop saying WHICH change it
+    // mirrors, which is the one job it has. `git log -1 <file>` on the source's `main` is the
+    // answer, and it is what the third test names in its own remedy.
+    commit: '33e7c0fab69d875e8bd530a1939d59efe1dfd27c',
     files: {
       en: 'flows/appointment-from-whatsapp.en.flow.json',
       es: 'flows/appointment-from-whatsapp.es.flow.json',
