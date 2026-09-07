@@ -7,7 +7,7 @@ import {
   SECTORS,
   availableTemplates,
   flowsOnSameTrigger,
-  flowsOnTemplateEvents,
+  flowsWorthAsking,
   buildTemplate,
   moduleName,
   templateById,
@@ -418,7 +418,8 @@ export class ErpFlowsGallery extends LitElement {
    * What each candidate flow is ALLOWED to do — the other half of «is this card already installed»
    * (flows#60).
    *
-   * Asked only about the flows already waiting on one of the catalogue's events, so a hub with
+   * Asked only about the flows that could be one of these cards — waiting on a catalogue event,
+   * or coming round on a catalogue cadence (flows#68) — so a hub with
    * nothing automated pays nothing and a busy one pays for a handful, instead of a question per
    * card on every visit. Swallowed on failure, one flow at a time: an unanswered flow stays
    * `undefined` — «not asked» — and its card keeps the invitation it had before this existed,
@@ -427,7 +428,7 @@ export class ErpFlowsGallery extends LitElement {
   private async loadGrants(flows: readonly Flow[]): Promise<void> {
     const read = this.client?.flows?.grants;
     if (typeof read !== 'function') return; // A core whose flows surface predates grants.
-    const candidates = flowsOnTemplateEvents(flows, this.t);
+    const candidates = flowsWorthAsking(flows, this.t);
     if (!candidates.length) return;
     const held = await Promise.all(
       candidates.map(async (flow) => {

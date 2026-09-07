@@ -43,6 +43,41 @@ const flowOf = (
 };
 
 /**
+ * A flow of this hub that comes round on a schedule, with the cron and the permissions given.
+ *
+ * Built by hand rather than from a card, because the whole point of the calendar half of this is
+ * the flow whose cron the owner has since changed: a helper that could only produce the card's own
+ * `0 18 * * 5` would make the case this issue exists for unreachable.
+ */
+const scheduledFlow = (
+  cron: string,
+  commands: readonly string[],
+  id = 'f1',
+  enabled = true,
+): {
+  id: string;
+  name: string;
+  enabled: boolean;
+  definition: Record<string, unknown>;
+  commands: readonly string[];
+} => ({
+  id,
+  name: 'A weekly look at the numbers',
+  enabled,
+  definition: {
+    ...(buildTemplate(tpl('friday-week-review'), t) as unknown as Record<string, unknown>),
+    triggers: [{ kind: 'cron', cron }],
+  },
+  commands,
+});
+
+/** A document the kernel runs on demand — no event, no schedule. */
+const manualDoc = {
+  ...(buildTemplate(tpl('friday-week-review'), t) as unknown as Record<string, unknown>),
+  triggers: [{ kind: 'manual' }],
+};
+
+/**
  * **«Do I already have this one?», asked of the hub's own flows** (flows#60).
  *
  * The same predicate `queries/automations_status.sql` answers for a module that cannot hold
@@ -119,18 +154,74 @@ describe('a template this hub already runs', () => {
     expect(templateInstallation(template, t, [flow])).toEqual({ state: 'absent' });
   });
 
-  it('says nothing about a template that does not start on an event', () => {
-    // A cron card cannot be identified this way: what a flow listens to is an event name, and two
-    // flows on «every Friday at 18:00» are not the same automation. Out of scope on purpose
-    // (flows#68), and silence is the honest answer — never a wrong badge.
+  it('recognises a card that runs on a schedule, not on an event', () => {
+    // The two calendar cards used to answer `absent` for ever, so the owner who set the Friday
+    // review up three weeks ago came back, saw the same invitation, and ended up with two reviews
+    // landing every Friday (flows#68).
     const template = tpl('friday-week-review');
-    const flow = {
-      id: 'f9',
-      name: 'Friday review',
-      enabled: true,
-      definition: buildTemplate(template, t) as unknown as Record<string, unknown>,
-      commands: ['tasks.tasks.create'],
-    };
+    const flow = flowOf('friday-week-review', { commands: ['tasks.tasks.create'] });
+    expect(templateInstallation(template, t, [flow])).toEqual({ state: 'active', flow });
+  });
+
+  it('still recognises it after the owner moves it to another day and another hour', () => {
+    // «The day and the time» is what this card's blank INVITES her to change
+    // (`tpl.weekReview.blankWhen`), so an identity that pinned either one would drop the badge for
+    // precisely the owner who made the card her own — and hand her the duplicate back.
+    const template = tpl('friday-week-review');
+    const flow = scheduledFlow('30 20 * * 1', ['tasks.tasks.create']);
+    expect(templateInstallation(template, t, [flow])).toEqual({ state: 'active', flow });
+  });
+
+  it('does not let one calendar card answer for the other', () => {
+    // Both create a task, so what is done cannot tell them apart: the weekly review comes round
+    // every Friday and the diary check every morning. Badging the morning card because the hub
+    // runs the Friday one is the wrong badge this issue is not allowed to buy.
+    const weekly = scheduledFlow('0 18 * * 5', ['tasks.tasks.create']);
+    expect(templateInstallation(tpl('morning-agenda-check'), t, [weekly])).toEqual({
+      state: 'absent',
+    });
+    const daily = scheduledFlow('0 9 * * *', ['tasks.tasks.create'], 'f2');
+    expect(templateInstallation(tpl('friday-week-review'), t, [daily])).toEqual({
+      state: 'absent',
+    });
+  });
+
+  it('is «unfinished» when the scheduled flow was left with no permission at all', () => {
+    // Same third state as an event card: the gallery creates every template paused and with no
+    // grants, so somebody who stops on the way to Permissions has a flow that comes round on time
+    // and can do nothing.
+    const flow = scheduledFlow('0 18 * * 5', []);
+    expect(templateInstallation(tpl('friday-week-review'), t, [flow])).toEqual({
+      state: 'unfinished',
+      flow,
+    });
+  });
+
+  it('is «paused» when the only scheduled one it has is switched off', () => {
+    const flow = scheduledFlow('0 18 * * 5', ['tasks.tasks.create'], 'f1', false);
+    expect(templateInstallation(tpl('friday-week-review'), t, [flow])).toEqual({
+      state: 'paused',
+      flow,
+    });
+  });
+
+  it('says nothing when the hub hands back a schedule it cannot read', () => {
+    // A cron this gallery does not understand is not a match and must never be guessed into one:
+    // silence leaves the card exactly as it was, a wrong badge sends the owner to somebody else's
+    // automation.
+    for (const cron of ['', '0 18 * * 5 7', 'every friday', '@weekly']) {
+      const flow = scheduledFlow(cron, ['tasks.tasks.create']);
+      expect(templateInstallation(tpl('friday-week-review'), t, [flow]), cron).toEqual({
+        state: 'absent',
+      });
+    }
+  });
+
+  it('does not answer for a card whose trigger is neither an event nor a schedule', () => {
+    // `manual` and `at` are trigger kinds the kernel runs and this catalogue does not use. Nothing
+    // recognises them, and `absent` stays the honest answer until something does.
+    const template = { ...tpl('friday-week-review'), build: () => manualDoc };
+    const flow = { id: 'f1', name: 'By hand', enabled: true, definition: manualDoc, commands: ['tasks.tasks.create'] };
     expect(templateInstallation(template, t, [flow])).toEqual({ state: 'absent' });
   });
 

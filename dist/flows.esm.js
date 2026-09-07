@@ -6497,6 +6497,37 @@ function triggerEventsOf(definition) {
   if (!Array.isArray(triggers)) return [];
   return triggers.map((trigger) => trigger?.event).filter((event) => typeof event === "string");
 }
+function cronCadence(cron) {
+  if (typeof cron !== "string") return null;
+  const fields = cron.trim().split(/\s+/).filter(Boolean);
+  if (fields.length !== 5 || !fields.every((field) => CRON_FIELD.test(field))) return null;
+  const [, , dayOfMonth, month, dayOfWeek] = fields;
+  if (month !== "*") return "yearly";
+  if (dayOfMonth !== "*") return "monthly";
+  if (dayOfWeek !== "*") return "weekly";
+  return "daily";
+}
+function triggerCadencesOf(definition) {
+  const triggers = definition?.triggers;
+  if (!Array.isArray(triggers)) return [];
+  return triggers.map((trigger) => {
+    const t3 = trigger;
+    return t3?.kind === "cron" ? cronCadence(t3.cron) : null;
+  }).filter((cadence) => cadence !== null);
+}
+function templateCadence(template, t3) {
+  const trigger = template.build(t3).triggers[0];
+  return trigger?.kind === "cron" ? cronCadence(trigger.cron) : null;
+}
+function candidateFlows(template, t3, flows) {
+  const event = templateTriggerEvent(template, t3);
+  if (event) {
+    return flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).includes(event));
+  }
+  const cadence = templateCadence(template, t3);
+  if (!cadence) return [];
+  return flows.filter((flow) => triggerCadencesOf(flow.definition ?? {}).includes(cadence));
+}
 function flowsOnSameTrigger(template, t3, flows) {
   const event = templateTriggerEvent(template, t3);
   if (!event) return [];
@@ -6505,10 +6536,9 @@ function flowsOnSameTrigger(template, t3, flows) {
 function templateCommands(template, t3) {
   return templateGrants(template, t3).filter((grant) => grant.kind === "command").map((grant) => grant.value);
 }
+var CRON_FIELD = /^[*\d,\-/]+$/;
 function templateInstallation(template, t3, flows) {
-  const event = templateTriggerEvent(template, t3);
-  if (!event) return { state: "absent" };
-  const listening = flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).includes(event));
+  const listening = candidateFlows(template, t3, flows);
   const commands = templateCommands(template, t3);
   const mine = listening.filter((flow) => flow.commands?.some((held) => commands.includes(held)));
   if (mine.length) {
@@ -6518,13 +6548,21 @@ function templateInstallation(template, t3, flows) {
   const halfBuilt = listening.find((flow) => flow.commands?.length === 0);
   return halfBuilt ? { state: "unfinished", flow: halfBuilt } : { state: "absent" };
 }
-function flowsOnTemplateEvents(flows, t3) {
+function flowsWorthAsking(flows, t3) {
   const events = new Set(
     TEMPLATES.map((template) => templateTriggerEvent(template, t3)).filter(
       (event) => event !== null
     )
   );
-  return flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).some((e4) => events.has(e4)));
+  const cadences = new Set(
+    TEMPLATES.map((template) => templateCadence(template, t3)).filter(
+      (cadence) => cadence !== null
+    )
+  );
+  return flows.filter((flow) => {
+    const definition = flow.definition ?? {};
+    return triggerEventsOf(definition).some((event) => events.has(event)) || triggerCadencesOf(definition).some((cadence) => cadences.has(cadence));
+  });
 }
 function templateById(id) {
   return TEMPLATES.find((tpl) => tpl.id === id);
@@ -6874,7 +6912,8 @@ var ErpFlowsGallery = class extends i3 {
    * What each candidate flow is ALLOWED to do — the other half of «is this card already installed»
    * (flows#60).
    *
-   * Asked only about the flows already waiting on one of the catalogue's events, so a hub with
+   * Asked only about the flows that could be one of these cards — waiting on a catalogue event,
+   * or coming round on a catalogue cadence (flows#68) — so a hub with
    * nothing automated pays nothing and a busy one pays for a handful, instead of a question per
    * card on every visit. Swallowed on failure, one flow at a time: an unanswered flow stays
    * `undefined` — «not asked» — and its card keeps the invitation it had before this existed,
@@ -6883,7 +6922,7 @@ var ErpFlowsGallery = class extends i3 {
   async loadGrants(flows) {
     const read = this.client?.flows?.grants;
     if (typeof read !== "function") return;
-    const candidates = flowsOnTemplateEvents(flows, this.t);
+    const candidates = flowsWorthAsking(flows, this.t);
     if (!candidates.length) return;
     const held = await Promise.all(
       candidates.map(async (flow) => {

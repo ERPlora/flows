@@ -802,6 +802,75 @@ function triggerEventsOf(definition: Record<string, unknown>): string[] {
 }
 
 /**
+ * **How often a schedule comes round** — the half of a cron line that is not the clock.
+ *
+ * `null` for anything this gallery cannot read with certainty, and that is the point: an
+ * unparseable schedule leaves the card exactly as it was, where a guess would send the owner to
+ * somebody else's automation. Only the five-field form the kernel runs is accepted — no `@weekly`,
+ * no seconds field — because a shape we do not execute is a shape we must not recognise either.
+ */
+function cronCadence(cron: unknown): Cadence | null {
+  if (typeof cron !== 'string') return null;
+  const fields = cron.trim().split(/\s+/).filter(Boolean);
+  if (fields.length !== 5 || !fields.every((field) => CRON_FIELD.test(field))) return null;
+  const [, , dayOfMonth, month, dayOfWeek] = fields;
+  if (month !== '*') return 'yearly';
+  if (dayOfMonth !== '*') return 'monthly';
+  if (dayOfWeek !== '*') return 'weekly';
+  return 'daily';
+}
+
+/** The cadences a stored flow comes round on — whatever the hub happens to have in `definition`. */
+function triggerCadencesOf(definition: Record<string, unknown>): Cadence[] {
+  const triggers = definition?.triggers;
+  if (!Array.isArray(triggers)) return [];
+  return triggers
+    .map((trigger) => {
+      const t = trigger as { kind?: unknown; cron?: unknown } | null;
+      return t?.kind === 'cron' ? cronCadence(t.cron) : null;
+    })
+    .filter((cadence): cadence is Cadence => cadence !== null);
+}
+
+/**
+ * The cadence a card's own schedule comes round on, or `null` for a card that is not scheduled.
+ *
+ * Read from the built document for the same reason {@link templateTriggerEvent} is: the document
+ * is what the hub stores and what actually fires.
+ */
+export function templateCadence(template: FlowTemplate, t: Translator): Cadence | null {
+  const trigger = template.build(t).triggers[0];
+  return trigger?.kind === 'cron' ? cronCadence(trigger.cron) : null;
+}
+
+/**
+ * **The flows that could be the automation this card would create.**
+ *
+ * A card that starts on an event is matched on the event. A card that comes round on a schedule is
+ * matched on its CADENCE — daily, weekly, monthly — and deliberately not on its cron line: «the day
+ * and the time» is what these cards' blanks INVITE the owner to change (`tpl.weekReview.blankWhen`,
+ * `tpl.morning.blankTimeHint`), so pinning either would drop the badge for exactly the owner who
+ * made the card her own, and hand her back the duplicate this exists to prevent.
+ *
+ * Cadence is what separates the two calendar cards from each other, and it has to, because what
+ * they DO cannot: both create a task. The weekly review comes round every Friday, the diary check
+ * every morning, and no change of hour or weekday turns one into the other.
+ */
+function candidateFlows<T extends { definition: Record<string, unknown> }>(
+  template: FlowTemplate,
+  t: Translator,
+  flows: readonly T[],
+): T[] {
+  const event = templateTriggerEvent(template, t);
+  if (event) {
+    return flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).includes(event));
+  }
+  const cadence = templateCadence(template, t);
+  if (!cadence) return [];
+  return flows.filter((flow) => triggerCadencesOf(flow.definition ?? {}).includes(cadence));
+}
+
+/**
  * **The flows this hub already runs on the same event as `template`, by name** (whatsapp_inbox#58).
  *
  * Two automations on one event both fire. For most pairs that is fine and wanted — log every
@@ -845,6 +914,12 @@ export function templateCommands(template: FlowTemplate, t: Translator): string[
 /** How far this hub has got with one card. Same four words the WhatsApp settings card uses. */
 export type InstalledState = 'absent' | 'unfinished' | 'paused' | 'active';
 
+/** How often a scheduled automation comes round, in the words the owner would use. */
+export type Cadence = 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+/** What a five-field cron may contain. Anything else is a line we do not run and must not read. */
+const CRON_FIELD = /^[*\d,\-/]+$/;
+
 /**
  * One of this hub's flows, as much of it as recognising a template needs.
  *
@@ -885,18 +960,19 @@ export interface InstalledFlowFacts {
  * running when nothing is. And it is «holds no command grant at all», not «does not hold ours»: a
  * flow on this event with a command of its own is a different automation the business finished.
  *
- * A card that does not start on an event answers `absent` and gets no badge: two flows on «every
- * Friday at 18:00» are not the same automation, and a wrong badge is worse than none (flows#68).
+ * **A card that comes round on a schedule is recognised too** (flows#68), by the same two halves
+ * read one notch coarser: how often it comes round, and what it may do. Not its cron line — «the
+ * day and the time» is precisely what those cards ask the owner to change — and not what it does
+ * alone, because both calendar cards create a task and neither could then answer for itself.
+ * See {@link candidateFlows}. A trigger that is neither, or a schedule this gallery cannot read,
+ * still answers `absent`: a wrong badge is worse than none.
  */
 export function templateInstallation<T extends InstalledFlowFacts>(
   template: FlowTemplate,
   t: Translator,
   flows: readonly T[],
 ): { state: InstalledState; flow?: T } {
-  const event = templateTriggerEvent(template, t);
-  if (!event) return { state: 'absent' };
-
-  const listening = flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).includes(event));
+  const listening = candidateFlows(template, t, flows);
   const commands = templateCommands(template, t);
   const mine = listening.filter((flow) => flow.commands?.some((held) => commands.includes(held)));
   if (mine.length) {
@@ -913,14 +989,20 @@ export function templateInstallation<T extends InstalledFlowFacts>(
 }
 
 /**
- * The flows worth asking the hub anything else about: the ones already waiting on a card's event.
+ * The flows worth asking the hub anything else about: the ones that could be one of these cards.
  *
  * Recognising a card costs one question per candidate, so this is what keeps the badge from being
  * a round trip per card on every visit: a hub with nothing automated yet — the one that opens this
  * gallery most — asks nothing at all, and a busy one asks only about the handful of flows that
  * could possibly be one of these.
+ *
+ * Since flows#68 that is «waits on a card's event OR comes round on a card's cadence», so the two
+ * calendar cards can be recognised at all. The catalogue's cadences are daily and weekly, which is
+ * a coarser net than an event name and is meant to be: it is what survives the change of day and
+ * hour those cards invite. It stays bounded by the hub's scheduled flows, and a card is still only
+ * BADGED when the answer says the flow may run one of its commands.
  */
-export function flowsOnTemplateEvents<T extends { definition: Record<string, unknown> }>(
+export function flowsWorthAsking<T extends { definition: Record<string, unknown> }>(
   flows: readonly T[],
   t: Translator,
 ): T[] {
@@ -929,7 +1011,18 @@ export function flowsOnTemplateEvents<T extends { definition: Record<string, unk
       (event): event is string => event !== null,
     ),
   );
-  return flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).some((e) => events.has(e)));
+  const cadences = new Set(
+    TEMPLATES.map((template) => templateCadence(template, t)).filter(
+      (cadence): cadence is Cadence => cadence !== null,
+    ),
+  );
+  return flows.filter((flow) => {
+    const definition = flow.definition ?? {};
+    return (
+      triggerEventsOf(definition).some((event) => events.has(event)) ||
+      triggerCadencesOf(definition).some((cadence) => cadences.has(cadence))
+    );
+  });
 }
 
 export function templateById(id: string): FlowTemplate | undefined {
