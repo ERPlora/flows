@@ -8145,9 +8145,21 @@ function moduleName(id, t3) {
   const key2 = MODULE_LABELS[id];
   return key2 ? t3(key2) : id;
 }
+function withCopiedPins(served, copy2) {
+  const pins = Object.entries(copy2.grantPins ?? {});
+  if (!pins.length || !served.grants) return served;
+  let grants = served.grants.map((grant) => ({ ...grant }));
+  for (const [command, pin] of pins) {
+    const current = grants.find((grant) => grant.kind === "command" && grant.value === command);
+    if (!current || Object.keys(grantPin(current)).length) continue;
+    grants = setGrantPin(grants, { kind: "command", value: command }, pin);
+  }
+  return { ...served, grants };
+}
 function mergeTemplates(local, fromModules) {
   const aliases = {};
   const retired = /* @__PURE__ */ new Set();
+  const inherited = /* @__PURE__ */ new Map();
   for (const served of fromModules) {
     if (!served.source) continue;
     for (const tpl of local) {
@@ -8155,9 +8167,16 @@ function mergeTemplates(local, fromModules) {
       if (tpl.mirrors.family !== served.source.family) continue;
       retired.add(tpl.id);
       aliases[tpl.id] = served.id;
+      inherited.set(served.id, withCopiedPins(inherited.get(served.id) ?? served, tpl));
     }
   }
-  return { cards: [...local.filter((tpl) => !retired.has(tpl.id)), ...fromModules], aliases };
+  return {
+    cards: [
+      ...local.filter((tpl) => !retired.has(tpl.id)),
+      ...fromModules.map((served) => inherited.get(served.id) ?? served)
+    ],
+    aliases
+  };
 }
 
 // ui/lib/module-templates.ts
@@ -8180,7 +8199,9 @@ function declaredGrants(raw) {
     if (!row || typeof row !== "object") continue;
     const kind = text(row.kind);
     const value = text(row.value);
-    if (kind && value) out.push({ kind, value });
+    if (!kind || !value) continue;
+    const pin = grantPin({ kind, value, payload: row.payload });
+    out.push(Object.keys(pin).length ? { kind, value, payload: pin } : { kind, value });
   }
   return out;
 }
