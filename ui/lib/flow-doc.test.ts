@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   SCHEMA_VERSION,
+  grantAllowsCall,
   emptyDoc,
   readDoc,
   addStep,
@@ -653,5 +654,57 @@ describe('a `command` grant can FIX part of the payload (hub#1623, flows#66)', (
       payload: { origin: { channel: 'customer' }, tags: ['a', 'b'] },
     };
     expect(readPinRows(pinRows(grant))).toEqual(grant.payload);
+  });
+});
+
+// ── The kernel's payload pin, as this UI mirrors it (flows#80) ─────────────────────────────────
+
+describe('a grant that FIXES part of a payload answers about the call, not about the caller', () => {
+  const pinned = (pin: Record<string, unknown>) => ({
+    kind: 'command',
+    value: 'appointments.appointments.cancel',
+    payload: pin,
+  });
+
+  it('lets through the call that carries the fixed value', () => {
+    expect(
+      grantAllowsCall(pinned({ channel: 'customer' }), { appointment_id: 'a1', channel: 'customer' }),
+    ).toBe(true);
+  });
+
+  // 🔴 THE case this mirror exists for. A cancellation «on behalf of the salon» is what the
+  // recipe promises it cannot do, and the promise is only real if the grant refuses it.
+  it('refuses the call that asks on somebody else’s behalf', () => {
+    expect(
+      grantAllowsCall(pinned({ channel: 'customer' }), { appointment_id: 'a1', channel: 'staff' }),
+    ).toBe(false);
+  });
+
+  // `crates/runtime/src/flows/grants.rs` — «omitting it is refused just the same as contradicting
+  // it». Without this line the pin would be a formality: `channel` has `"default": "staff"` in the
+  // command's schema, so LEAVING IT OUT is precisely how a model gets the wide behaviour.
+  it('refuses the call that leaves the fixed field out, because the default is the wide one', () => {
+    expect(grantAllowsCall(pinned({ channel: 'customer' }), { appointment_id: 'a1' })).toBe(false);
+  });
+
+  it('compares by value, so a nested pin is not fooled by a re-ordered object', () => {
+    expect(grantAllowsCall(pinned({ who: { a: 1, b: 2 } }), { who: { b: 2, a: 1 } })).toBe(true);
+    expect(grantAllowsCall(pinned({ who: { a: 1 } }), { who: { a: 2 } })).toBe(false);
+  });
+
+  // A grant with no pin authorises whatever the command's own schema accepts — the pre-hub#1623
+  // shape, and the shape every grant on the fleet still has today.
+  it('lets everything through when it fixes nothing', () => {
+    expect(grantAllowsCall({ kind: 'command', value: 'x' }, { channel: 'staff' })).toBe(true);
+    expect(grantAllowsCall({ kind: 'command', value: 'x', payload: {} }, {})).toBe(true);
+  });
+
+  // Only a `command` grant reaches `check_command_grant`, so a `payload` sitting on any other kind
+  // fixes NOTHING in the hub. Reading it as a limit here would be this screen inventing a
+  // containment the kernel never applies.
+  it('ignores a pin on a kind the hub never hands a payload to', () => {
+    expect(grantAllowsCall({ kind: 'query', value: 'customers.list', payload: { f_phone: '+1' } }, {})).toBe(
+      true,
+    );
   });
 });

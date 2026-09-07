@@ -17,6 +17,7 @@
     "retry": "Try again",
     "unnamed": "Untitled automation",
     "errGeneric": "Something went wrong. Nothing was saved.",
+    "errLimitNotApplied": "The recipe was installed and left switched off, with no permission granted: this hub could not store the limit it needs. Turning it on with the wide permission would let it do more than the recipe promises. Do not grant it by hand in Permissions: that puts the wide permission back. Leave it as it is — the recipe will start working on its own once this hub is updated.",
     "listTitle": "Automations",
     "newAutomation": "New automation",
     "emptyTitle": "Nothing is automated yet",
@@ -630,6 +631,7 @@
     "mod_services": "Services",
     "tplHiddenModule": "Some automations are hidden: they need the {modules} module, and this hub does not have it. Install it from the marketplace and reload this screen.",
     "tplHiddenModules": "Some automations are hidden: they need the {modules} modules, and this hub does not have them. Install them from the marketplace and reload this screen.",
+    "tplGrantLimited": "Only with {fields} — it cannot ask for anything else.",
     "triggerWeekly": "Every {day} at {time}",
     "triggerMonthly": "Every month on day {day} at {time}",
     "cronEvery": "How often",
@@ -673,7 +675,8 @@
       "reservationsSlotsCount": "To see how many tables are really left in each window of that day, counted the way the booking gate counts them.",
       "reservationsBlockedDates": "To know whether you are closed that day, or part of it, before it offers anything.",
       "reservationsCreate": "To put the table in the book. Only with the day, the time and the number of people the guest gave.",
-      "reservationsWaitlistCreate": "To put them on the waiting list when the day is full and they ask to be called if a table frees up."
+      "reservationsWaitlistCreate": "To put them on the waiting list when the day is full and they ask to be called if a table frees up.",
+      "appointmentsCancelAsCustomer": "Cancel an appointment when the customer asks, and only ever as that customer: the appointment has to be hers, and your own cancellation rules still apply."
     },
     "welcome": {
       "name": "Welcome every new customer",

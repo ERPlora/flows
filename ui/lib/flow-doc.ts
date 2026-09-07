@@ -597,6 +597,56 @@ export function grantPin(grant: Grant): Record<string, unknown> {
   return { ...raw };
 }
 
+/**
+ * Would this grant let THIS call through? The UI's mirror of `check_payload_pin`
+ * (`crates/runtime/src/flows/grants.rs`, hub#1623).
+ *
+ * It answers about the CALL and never about the caller: a pin is not «who may run this», it is
+ * «with what». That distinction is the whole point of a recipe that cancels appointments — the
+ * automation is allowed to cancel, and what it may not do is cancel *on the salon's behalf*.
+ *
+ * Two rules, both the kernel's:
+ *
+ * - **Omitting a fixed field is refused exactly like contradicting it.** Not a detail: a command's
+ *   schema is free to give the field a default — `appointments.appointments.cancel` defaults
+ *   `channel` to `"staff"` — so «leave it out» is precisely how a payload written by a model would
+ *   land back on the wide behaviour. A pin that only checked the values it was SENT would read as
+ *   containment on screen and hold nothing.
+ * - **Only a `command` grant is ever handed a payload**, so a `payload` on any other kind fixes
+ *   nothing in the hub ({@link canPinPayload}) and must not be read as a limit here either.
+ */
+export function grantAllowsCall(grant: Grant, payload: Record<string, unknown>): boolean {
+  return Object.entries(grantPin(grant)).every(
+    ([field, fixed]) =>
+      Object.prototype.hasOwnProperty.call(payload, field) && sameJson(payload[field], fixed),
+  );
+}
+
+/**
+ * Two JSON values compared BY VALUE, the way `serde_json::Value`'s `PartialEq` compares them.
+ *
+ * Key order is not part of a JSON object's identity, so a pin written `{a,b}` has to match a
+ * payload that arrives `{b,a}` — a containment that depended on the order a model happened to
+ * serialise its answer in would fail open on a Tuesday and nobody would know why.
+ */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((v, i) => sameJson(v, b[i]))
+    );
+  }
+  if (typeof a !== 'object') return false;
+  const x = a as Record<string, unknown>;
+  const y = b as Record<string, unknown>;
+  const keys = Object.keys(x);
+  return keys.length === Object.keys(y).length && keys.every((k) => k in y && sameJson(x[k], y[k]));
+}
+
 /** A grant carrying `pin`, with the key OMITTED when it fixes nothing — the pre-hub#1623 shape. */
 function withPin(grant: Grant, pin: Record<string, unknown>): Grant {
   const kept = canPinPayload(grant.kind) ? pin : {};

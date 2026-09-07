@@ -17,6 +17,7 @@
     "retry": "Reintentar",
     "unnamed": "Automatización sin nombre",
     "errGeneric": "Algo ha fallado. No se ha guardado nada.",
+    "errLimitNotApplied": "La receta se instaló y quedó apagada, sin ningún permiso concedido: este hub no pudo guardar el límite que necesita. Encenderla con el permiso abierto la dejaría hacer más de lo que promete. No le concedas el permiso a mano en Permisos: eso vuelve a dejarlo abierto. Déjala como está: la receta funcionará sola cuando este hub se actualice.",
     "listTitle": "Automatizaciones",
     "newAutomation": "Nueva automatización",
     "emptyTitle": "Todavía no hay nada automatizado",
@@ -630,6 +631,7 @@
     "mod_services": "Servicios",
     "tplHiddenModule": "Hay automatizaciones ocultas: necesitan el módulo {modules}, y este hub no lo tiene. Instálalo desde el marketplace y recarga esta pantalla.",
     "tplHiddenModules": "Hay automatizaciones ocultas: necesitan los módulos {modules}, y este hub no los tiene. Instálalos desde el marketplace y recarga esta pantalla.",
+    "tplGrantLimited": "Solo con {fields} — no puede pedir nada más.",
     "triggerWeekly": "Todos los {day} a las {time}",
     "triggerMonthly": "Cada mes, el día {day} a las {time}",
     "cronEvery": "Cada cuánto",
@@ -673,7 +675,8 @@
       "reservationsSlotsCount": "Para ver cuántas mesas quedan de verdad en cada turno de ese día, contadas como las cuenta la puerta de reserva.",
       "reservationsBlockedDates": "Para saber si ese día cierras, entero o a ratos, antes de ofrecer nada.",
       "reservationsCreate": "Para meter la mesa en el libro. Solo con el día, la hora y las personas que haya dicho el cliente.",
-      "reservationsWaitlistCreate": "Para apuntarle en la lista de espera cuando el día está lleno y pide que le avisen si se libera una mesa."
+      "reservationsWaitlistCreate": "Para apuntarle en la lista de espera cuando el día está lleno y pide que le avisen si se libera una mesa.",
+      "appointmentsCancelAsCustomer": "Anular una cita cuando la clienta lo pide, y siempre como esa clienta: la cita tiene que ser suya, y tus propias reglas de anulación siguen mandando."
     },
     "welcome": {
       "name": "Dar la bienvenida a cada cliente nuevo",

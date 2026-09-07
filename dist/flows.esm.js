@@ -6802,8 +6802,25 @@ var TEMPLATES = [
       "appointments.availability.check": "tpl.grant.availabilityCheck",
       "appointments.appointments.create": "tpl.grant.appointmentsCreate",
       "appointments.appointments.list_for_customer": "tpl.grant.appointmentsListForCustomer",
-      "appointments.appointments.cancel": "tpl.grant.appointmentsCancel"
+      // Its OWN sentence, not the twin's: the shared one ends «it waits in the tray until you
+      // approve it», and this family has no tray — it books and cancels unattended. Read on this
+      // card that line promised a human in the loop who is not there.
+      "appointments.appointments.cancel": "tpl.grant.appointmentsCancelAsCustomer"
     },
+    // 🔴 The one permission on this card that is NOT allowed to be as wide as its name (flows#80).
+    //
+    // `book_appointment` runs `policy: "auto"` — no tray, nobody looking — and the payload it hands
+    // this command is written by a model reading a stranger's WhatsApp. `appointment_cancel.json`
+    // takes `channel: "staff" | "customer"` and **defaults it to `staff`**, so the wide grant lets
+    // that model cancel anybody's hour on the salon's behalf: no ownership check, no notice
+    // period, no `allow_customer_cancellation`. Until hub#1623 the only thing standing in the way
+    // was a paragraph of prompt, which is exactly what hub#1623 says is NOT a control.
+    //
+    // Pinned to `customer`, the handler compares the appointment's `customer_id` with the one the
+    // flow resolved from the phone the message came from (`find_customer`), and the salon's
+    // cancellation policy applies. The recipe keeps doing the thing it was installed for and loses
+    // the thing nobody asked for. Its source half is whatsapp_inbox#100.
+    grantPins: { "appointments.appointments.cancel": { channel: "customer" } },
     build: (t3) => ({
       schema_version: SCHEMA_VERSION2,
       triggers: [
@@ -7369,7 +7386,11 @@ function buildTemplate(template, t3) {
   return template.build(t3);
 }
 function templateGrants(template, t3) {
-  return requiredGrants(buildTemplate(template, t3));
+  const derived = requiredGrants(buildTemplate(template, t3));
+  return Object.entries(template.grantPins ?? {}).reduce(
+    (grants, [command, pin]) => setGrantPin(grants, { kind: "command", value: command }, pin),
+    derived
+  );
 }
 function missingModules(template, known) {
   const out = [];
@@ -7804,6 +7825,50 @@ var ErpFlowsGallery = class extends i3 {
     this.error = "";
   }
   /**
+   * Grants the permissions this card LIMITS, as limited as it declared them (flows#80).
+   *
+   * Only the limited ones. A card's other permissions stay a decision the owner makes on the
+   * Permissions screen — installing a recipe is not a reason to hand it the rest unasked. But a
+   * LIMIT cannot wait for that screen: the screen derives what it grants from the DOCUMENT, and
+   * the limit does not live in the document. Left for later it is simply lost, and the salon ends
+   * up holding the wide permission it was shown the narrow version of.
+   *
+   * Writing it here survives that screen: `missingGrants` matches on kind and value, so the row
+   * is already held and never re-offered, and `mergeGrants` carries its pin through untouched.
+   *
+   * 🔴 **Written and then read back**, because a hub older than hub#1623 has no `payload` on a
+   * grant and `serde` drops the unknown key without a word. Unchecked, this method would be the
+   * bug it exists to fix, one step worse: the salon would HOLD «may cancel appointments», wide,
+   * granted by a screen it never pressed a button on — and the Permissions screen would not even
+   * list it as missing. So when the limit did not survive, the grant goes back out and the flow is
+   * left exactly as it was before: nothing granted, and the owner told why.
+   */
+  async applyDeclaredLimits(flow, template) {
+    const limited = templateGrants(template, this.t).filter(
+      (g3) => Object.keys(grantPin(g3)).length > 0
+    );
+    if (!limited.length) return true;
+    const write = this.client?.flows?.replaceGrants;
+    if (typeof write !== "function") {
+      this.error = this.t("ui.errLimitNotApplied");
+      return false;
+    }
+    const pinOf = (g3) => JSON.stringify(Object.entries(grantPin(g3)).sort());
+    try {
+      const stored = await write.call(this.client.flows, flow.id, limited);
+      const kept = Array.isArray(stored) ? stored : [];
+      const survived = limited.every(
+        (want) => kept.some((g3) => g3.kind === want.kind && g3.value === want.value && pinOf(g3) === pinOf(want))
+      );
+      if (survived) return true;
+      await write.call(this.client.flows, flow.id, []);
+    } catch {
+      await write.call(this.client.flows, flow.id, []).catch(() => void 0);
+    }
+    this.error = this.t("ui.errLimitNotApplied");
+    return false;
+  }
+  /**
    * Creates the picked template as a **paused** flow and hands it over.
    *
    * `needsGrants` travels with it because a flow with no grants does nothing at all, and does it
@@ -7820,6 +7885,7 @@ var ErpFlowsGallery = class extends i3 {
         enabled: false,
         definition: buildTemplate(template, this.t)
       });
+      if (!await this.applyDeclaredLimits(flow, template)) return;
       this.dispatchEvent(
         new CustomEvent("flows-template-used", {
           detail: { flow, needsGrants: templateGrants(template, this.t).length > 0 },
@@ -7854,14 +7920,20 @@ var ErpFlowsGallery = class extends i3 {
       <div class="block">
         <span class="head">${this.t("ui.tplGrantsTitle")}</span>
         <span class="muted">${this.t("ui.tplGrantsIntro")}</span>
-        ${grants.map(
-      (grant) => b2`<div class="item" data-grant=${grant.value}>
+        ${grants.map((grant) => {
+      const pin = Object.entries(grantPin(grant));
+      return b2`<div class="item" data-grant=${grant.value}>
             <span class="grow">
               <span class="label">${this.t(template.grantReasons[grant.value] ?? grant.value)}</span>
+              ${pin.length ? b2`<span class="hint" data-limit=${grant.value}
+                    >${this.t("ui.tplGrantLimited", {
+        fields: pin.map(([field, value]) => `${field} = ${String(value)}`).join(", ")
+      })}</span
+                  >` : A}
               <span class="hint">${grant.value}</span>
             </span>
-          </div>`
-    )}
+          </div>`;
+    })}
       </div>
 
       ${this.renderSameTrigger(template)}
@@ -9427,6 +9499,7 @@ var es_default = {
     retry: "Reintentar",
     unnamed: "Automatizaci\xF3n sin nombre",
     errGeneric: "Algo ha fallado. No se ha guardado nada.",
+    errLimitNotApplied: "La receta se instal\xF3 y qued\xF3 apagada, sin ning\xFAn permiso concedido: este hub no pudo guardar el l\xEDmite que necesita. Encenderla con el permiso abierto la dejar\xEDa hacer m\xE1s de lo que promete. No le concedas el permiso a mano en Permisos: eso vuelve a dejarlo abierto. D\xE9jala como est\xE1: la receta funcionar\xE1 sola cuando este hub se actualice.",
     listTitle: "Automatizaciones",
     newAutomation: "Nueva automatizaci\xF3n",
     emptyTitle: "Todav\xEDa no hay nada automatizado",
@@ -10040,6 +10113,7 @@ var es_default = {
     mod_services: "Servicios",
     tplHiddenModule: "Hay automatizaciones ocultas: necesitan el m\xF3dulo {modules}, y este hub no lo tiene. Inst\xE1lalo desde el marketplace y recarga esta pantalla.",
     tplHiddenModules: "Hay automatizaciones ocultas: necesitan los m\xF3dulos {modules}, y este hub no los tiene. Inst\xE1lalos desde el marketplace y recarga esta pantalla.",
+    tplGrantLimited: "Solo con {fields} \u2014 no puede pedir nada m\xE1s.",
     triggerWeekly: "Todos los {day} a las {time}",
     triggerMonthly: "Cada mes, el d\xEDa {day} a las {time}",
     cronEvery: "Cada cu\xE1nto",
@@ -10083,7 +10157,8 @@ var es_default = {
       reservationsSlotsCount: "Para ver cu\xE1ntas mesas quedan de verdad en cada turno de ese d\xEDa, contadas como las cuenta la puerta de reserva.",
       reservationsBlockedDates: "Para saber si ese d\xEDa cierras, entero o a ratos, antes de ofrecer nada.",
       reservationsCreate: "Para meter la mesa en el libro. Solo con el d\xEDa, la hora y las personas que haya dicho el cliente.",
-      reservationsWaitlistCreate: "Para apuntarle en la lista de espera cuando el d\xEDa est\xE1 lleno y pide que le avisen si se libera una mesa."
+      reservationsWaitlistCreate: "Para apuntarle en la lista de espera cuando el d\xEDa est\xE1 lleno y pide que le avisen si se libera una mesa.",
+      appointmentsCancelAsCustomer: "Anular una cita cuando la clienta lo pide, y siempre como esa clienta: la cita tiene que ser suya, y tus propias reglas de anulaci\xF3n siguen mandando."
     },
     welcome: {
       name: "Dar la bienvenida a cada cliente nuevo",
@@ -10295,6 +10370,7 @@ var en_default = {
     retry: "Try again",
     unnamed: "Untitled automation",
     errGeneric: "Something went wrong. Nothing was saved.",
+    errLimitNotApplied: "The recipe was installed and left switched off, with no permission granted: this hub could not store the limit it needs. Turning it on with the wide permission would let it do more than the recipe promises. Do not grant it by hand in Permissions: that puts the wide permission back. Leave it as it is \u2014 the recipe will start working on its own once this hub is updated.",
     listTitle: "Automations",
     newAutomation: "New automation",
     emptyTitle: "Nothing is automated yet",
@@ -10908,6 +10984,7 @@ var en_default = {
     mod_services: "Services",
     tplHiddenModule: "Some automations are hidden: they need the {modules} module, and this hub does not have it. Install it from the marketplace and reload this screen.",
     tplHiddenModules: "Some automations are hidden: they need the {modules} modules, and this hub does not have them. Install them from the marketplace and reload this screen.",
+    tplGrantLimited: "Only with {fields} \u2014 it cannot ask for anything else.",
     triggerWeekly: "Every {day} at {time}",
     triggerMonthly: "Every month on day {day} at {time}",
     cronEvery: "How often",
@@ -10951,7 +11028,8 @@ var en_default = {
       reservationsSlotsCount: "To see how many tables are really left in each window of that day, counted the way the booking gate counts them.",
       reservationsBlockedDates: "To know whether you are closed that day, or part of it, before it offers anything.",
       reservationsCreate: "To put the table in the book. Only with the day, the time and the number of people the guest gave.",
-      reservationsWaitlistCreate: "To put them on the waiting list when the day is full and they ask to be called if a table frees up."
+      reservationsWaitlistCreate: "To put them on the waiting list when the day is full and they ask to be called if a table frees up.",
+      appointmentsCancelAsCustomer: "Cancel an appointment when the customer asks, and only ever as that customer: the appointment has to be hers, and your own cancellation rules still apply."
     },
     welcome: {
       name: "Welcome every new customer",
