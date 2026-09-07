@@ -4036,6 +4036,25 @@ var ErpFlowsEditor = class extends i3 {
         grid-template-columns: 0.7fr 1.6fr auto;
       }
     }
+    /* One option the customer can tap: a card of its own, because it holds three composed
+       boxes and a bin. It does NOT borrow .param-row — that grid is name, value, bin, and above
+       560px it is three columns, so a two child row left the identifier in the narrow 0.7fr and
+       gave the bin the wide one. Fluid on purpose: nothing here caps a width. */
+    .tap-option {
+      display: grid;
+      gap: 0.4rem;
+      padding: 0.6rem;
+      border: 1px solid var(--ok-border, #d7d5cc);
+      border-radius: var(--ok-radius-sm, 10px);
+    }
+    /* The identifier and the button that removes the option, on one line at every width:
+       1fr auto needs no media query to be right on a phone, a tablet and a desktop. */
+    .tap-head {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.4rem;
+      align-items: end;
+    }
     /* A composed value and, inside an http step, the secret picker beside it. The select is a
        sibling and not a child of erp-flows-value on purpose: a control inside another element's
        shadow root cannot be reached from here, and this one has to drive the box next to it. */
@@ -5490,7 +5509,7 @@ var ErpFlowsEditor = class extends i3 {
       ${taps.options.map(
       (opt, i4) => b2`
           <div class="tap-option" data-tap-option=${i4}>
-            <div class="param-row">
+            <div class="tap-head">
               <div class="field">
                 <label for="ti-${step.id}-${i4}">${this.t("ui.tapId")}</label>
                 <input
