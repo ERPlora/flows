@@ -10,8 +10,13 @@
  *
  * - **Meta's shape IS the shape on the wire.** `interactive` travels from the document to the SaaS
  *   proxy UNTRANSLATED, so what is stored is Meta's own object (`{type, header?, body, footer?,
- *   action}`). This module reads it into three flat things the owner can edit and writes it back —
- *   it does not invent a second vocabulary that would have to grow every time Meta adds a field.
+ *   action}`). This module reads it into three flat things the owner can edit and MERGES them back
+ *   over the object that was there — it does not invent a second vocabulary that would have to grow
+ *   every time Meta adds a field. That merge is not a detail (flows#91): a message composed
+ *   somewhere else — a module template, a recipe, the API — carries a `header`, a `footer` and
+ *   groups with a title that this screen has no box for, and rebuilding the object from the form
+ *   deleted them in silence on a save asked for to change ONE label. **Saving can never lose a key
+ *   it does not understand.**
  * - **The limits are the SaaS's to enforce**, before the paid call, answering `too_many_options`,
  *   `duplicate_option_id` and `invalid_option`. {@link tapOptionProblems} does not re-implement
  *   them: it WARNS with the same names, so the owner finds out while typing rather than after a
@@ -43,6 +48,13 @@ export interface TapOption {
   title: unknown;
   /** `list` only. Meta has no description on a button. */
   description?: unknown;
+  /**
+   * `list` only, and only when the message arrived with MORE THAN ONE section: which group this
+   * row came from, so writing it back can put it there again (flows#91). There is no control for
+   * it — the screen edits a flat list of rows on purpose, ten rows being ten rows wherever they
+   * sit. It is carried, not edited.
+   */
+  group?: number;
 }
 
 export interface TapOptions {
@@ -95,7 +107,10 @@ export function readTapOptions(step: Step): TapOptions | null {
     }
   } else {
     const sections = Array.isArray(action.sections) ? action.sections : [];
-    for (const section of sections) {
+    // Only when there is more than one: a single section is what this screen writes, and tagging
+    // its rows would put a key in every ordinary document to say «the one group».
+    const grouped = sections.length > 1;
+    for (const [at, section] of sections.entries()) {
       const rows = Array.isArray(obj(section)?.rows) ? (obj(section)!.rows as unknown[]) : [];
       for (const raw of rows) {
         const row = obj(raw);
@@ -103,6 +118,7 @@ export function readTapOptions(step: Step): TapOptions | null {
         const option: TapOption = {
           id: typeof row.id === 'string' ? row.id : '',
           title: copy(row.title),
+          ...(grouped ? { group: at } : {}),
         };
         // Absent, never empty: a description Meta never received is not the same as one the owner
         // deliberately cleared, and writing `""` back would send a blank second line.
@@ -121,14 +137,68 @@ export function readTapOptions(step: Step): TapOptions | null {
   };
 }
 
-/** Meta's own object, as the hub forwards it verbatim. */
-export function toInteractive(options: TapOptions): Record<string, unknown> {
-  const body = { text: options.body };
+/** A row of a `list`, as Meta reads it. */
+function toRow(option: TapOption): Record<string, unknown> {
+  return {
+    id: option.id,
+    title: option.title,
+    ...(textOf(option.description) ? { description: option.description } : {}),
+  };
+}
+
+/**
+ * Everything the action carried EXCEPT the keys that belong to the other shape.
+ *
+ * Keeping the unknown is not keeping the wrong: `sections` on a `type: button` message is a key
+ * Meta never defined there, and it is the proxy that pays for finding out.
+ */
+function actionWithout(action: Record<string, unknown>, drop: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(action)) if (!drop.includes(key)) out[key] = value;
+  return out;
+}
+
+/**
+ * The rows back in the groups they came from, titles and all — see {@link TapOption.group}.
+ *
+ * A row the owner ADDED has no group and lands in the last one that still has rows, which is where
+ * it is on screen: at the end. A group she emptied is dropped rather than sent empty.
+ */
+function toSections(options: TapOption[], original: unknown): Record<string, unknown>[] {
+  const flat = [{ rows: options.map(toRow) }];
+  const groups = options.map((o) => (typeof o.group === 'number' ? o.group : -1));
+  const last = Math.max(...groups);
+  const sections = Array.isArray(original) ? original : [];
+  if (last < 0 || !sections.length) return flat;
+  const out: Record<string, unknown>[] = [];
+  for (const [at, section] of sections.entries()) {
+    const rows = options.filter((_, i) => (groups[i] < 0 ? last : groups[i]) === at).map(toRow);
+    if (rows.length) out.push({ ...(obj(section) ?? {}), rows });
+  }
+  return out.length ? out : flat;
+}
+
+/**
+ * Meta's own object, as the hub forwards it verbatim — **merged over the one that was already
+ * there**, never rebuilt from the form (flows#91).
+ *
+ * @param original what the step carries today, when it carries anything. Its `header`, its
+ * `footer` and any key Meta ships next survive an edit this screen cannot even show.
+ */
+export function toInteractive(
+  options: TapOptions,
+  original?: Record<string, unknown> | null,
+): Record<string, unknown> {
+  const base = original ?? {};
+  const action = obj(base.action) ?? {};
+  const body = { ...(obj(base.body) ?? {}), text: options.body };
   if (options.kind === 'button') {
     return {
+      ...base,
       type: 'button',
       body,
       action: {
+        ...actionWithout(action, ['button', 'sections']),
         buttons: options.options.map((o) => ({
           type: 'reply',
           reply: { id: o.id, title: o.title },
@@ -137,19 +207,13 @@ export function toInteractive(options: TapOptions): Record<string, unknown> {
     };
   }
   return {
+    ...base,
     type: 'list',
     body,
     action: {
+      ...actionWithout(action, ['buttons']),
       button: options.openLabel,
-      sections: [
-        {
-          rows: options.options.map((o) => ({
-            id: o.id,
-            title: o.title,
-            ...(textOf(o.description) ? { description: o.description } : {}),
-          })),
-        },
-      ],
+      sections: toSections(options.options, action.sections),
     },
   };
 }
@@ -199,8 +263,6 @@ export function tapOptionProblems(options: TapOptions): TapProblem[] {
  */
 export function setTapOptions(doc: FlowDoc, index: number, options: TapOptions | null): FlowDoc {
   if (!options) return removeStepKeys(doc, index, ['interactive']);
-  return removeStepKeys(patchStep(doc, index, { interactive: toInteractive(options) }), index, [
-    'template',
-    'vars',
-  ]);
+  const interactive = toInteractive(options, obj(doc.steps[index]?.interactive));
+  return removeStepKeys(patchStep(doc, index, { interactive }), index, ['template', 'vars']);
 }

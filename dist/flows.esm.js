@@ -2852,14 +2852,16 @@ function readTapOptions(step) {
     }
   } else {
     const sections = Array.isArray(action.sections) ? action.sections : [];
-    for (const section of sections) {
+    const grouped = sections.length > 1;
+    for (const [at2, section] of sections.entries()) {
       const rows = Array.isArray(obj(section)?.rows) ? obj(section).rows : [];
       for (const raw of rows) {
         const row = obj(raw);
         if (!row) continue;
         const option2 = {
           id: typeof row.id === "string" ? row.id : "",
-          title: copy(row.title)
+          title: copy(row.title),
+          ...grouped ? { group: at2 } : {}
         };
         if (typeof row.description === "string" && row.description !== "") {
           option2.description = row.description;
@@ -2875,13 +2877,42 @@ function readTapOptions(step) {
     options
   };
 }
-function toInteractive(options) {
-  const body = { text: options.body };
+function toRow(option2) {
+  return {
+    id: option2.id,
+    title: option2.title,
+    ...textOf(option2.description) ? { description: option2.description } : {}
+  };
+}
+function actionWithout(action, drop) {
+  const out = {};
+  for (const [key2, value] of Object.entries(action)) if (!drop.includes(key2)) out[key2] = value;
+  return out;
+}
+function toSections(options, original) {
+  const flat = [{ rows: options.map(toRow) }];
+  const groups = options.map((o6) => typeof o6.group === "number" ? o6.group : -1);
+  const last = Math.max(...groups);
+  const sections = Array.isArray(original) ? original : [];
+  if (last < 0 || !sections.length) return flat;
+  const out = [];
+  for (const [at2, section] of sections.entries()) {
+    const rows = options.filter((_2, i4) => (groups[i4] < 0 ? last : groups[i4]) === at2).map(toRow);
+    if (rows.length) out.push({ ...obj(section) ?? {}, rows });
+  }
+  return out.length ? out : flat;
+}
+function toInteractive(options, original) {
+  const base = original ?? {};
+  const action = obj(base.action) ?? {};
+  const body = { ...obj(base.body) ?? {}, text: options.body };
   if (options.kind === "button") {
     return {
+      ...base,
       type: "button",
       body,
       action: {
+        ...actionWithout(action, ["button", "sections"]),
         buttons: options.options.map((o6) => ({
           type: "reply",
           reply: { id: o6.id, title: o6.title }
@@ -2890,19 +2921,13 @@ function toInteractive(options) {
     };
   }
   return {
+    ...base,
     type: "list",
     body,
     action: {
+      ...actionWithout(action, ["buttons"]),
       button: options.openLabel,
-      sections: [
-        {
-          rows: options.options.map((o6) => ({
-            id: o6.id,
-            title: o6.title,
-            ...textOf(o6.description) ? { description: o6.description } : {}
-          }))
-        }
-      ]
+      sections: toSections(options.options, action.sections)
     }
   };
 }
@@ -2931,10 +2956,8 @@ function tapOptionProblems(options) {
 }
 function setTapOptions(doc, index, options) {
   if (!options) return removeStepKeys(doc, index, ["interactive"]);
-  return removeStepKeys(patchStep(doc, index, { interactive: toInteractive(options) }), index, [
-    "template",
-    "vars"
-  ]);
+  const interactive = toInteractive(options, obj(doc.steps[index]?.interactive));
+  return removeStepKeys(patchStep(doc, index, { interactive }), index, ["template", "vars"]);
 }
 
 // ui/lib/trigger-catalog.ts
