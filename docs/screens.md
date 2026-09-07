@@ -23,8 +23,15 @@ When there is nothing yet, the screen shows the **gallery**: ready-made automati
 sector (any business, hair and beauty, bars and restaurants). Read the sentence under each card —
 that is exactly what it will do — and press **Use this one**. It becomes yours, **created paused**,
 with the blanks it asked you to decide (an amount, a time, how long to wait) already holding a
-sensible guess. A card that needs a module this hub does not have **names it** — *Missing: Tasks* —
-and cannot be used until it is installed and this screen is reloaded.
+sensible guess. A card that needs a module this hub does not have is **left out**, and one line
+under the cards names what to install — *Some automations are hidden: they need the Tasks module* —
+so the card comes back once it is installed and this screen is reloaded.
+
+Another screen can send you straight to one of these cards: a link that carries `?template=<id>`
+opens that card and brings it into view, so you do not have to find it among a dozen. That is how
+**Settings → WhatsApp → Book appointments → Set it up** gets here. It only opens the card — turning
+the automation on is still yours to do. A link naming a card this hub does not offer, or naming
+nothing at all, simply shows the gallery.
 
 **New automation** starts from an empty one. **How does this work?** opens the built-in guide.
 

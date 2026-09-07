@@ -19,6 +19,25 @@ import type { Flow, ModuleClient } from '../../lib/hub-flows';
 import type { Translator } from '../../lib/plain-language';
 
 /**
+ * `?template=<id>` → the card the shortcut asked for, or `''` for «the whole gallery» (flows#56).
+ *
+ * The other end of this contract lives in another repository:
+ * `whatsapp_inbox/ui/lib/whatsapp-uses.ts::galleryPath()` pushes `/m/flows/automations?template=<id>`
+ * when the owner taps «Configurar» on one of the things their WhatsApp can be put to. The id is a
+ * **gallery** id (`whatsapp-appointment`), never the file name of the document the module mirrors.
+ *
+ * An id this catalogue does not have answers `''`, which is the same answer as no parameter at all
+ * — the same rule `inventory`'s `statusFilterFromSearch` applies to `?status=`. A link kept in a
+ * bookmark, a template retired two releases ago or a typo has to land on the gallery the owner
+ * would have seen anyway; the one thing it can never do is leave the screen empty with nothing on
+ * it to explain why.
+ */
+export function templateFromSearch(search: string): string {
+  const id = new URLSearchParams(search).get('template') ?? '';
+  return templateById(id) ? id : '';
+}
+
+/**
  * **The gallery: what the owner sees first** (flows#1).
  *
  * The screen this replaces was a list with nothing in it and a button saying «New automation».
@@ -246,10 +265,40 @@ export class ErpFlowsGallery extends LitElement {
 
   @state() private error = '';
 
+  /**
+   * The card the last shortcut named, so {@link reveal} knows what to bring on screen once it
+   * exists.
+   *
+   * A shortcut is served on every NAVIGATION that names it — mount and `popstate` — and never on a
+   * render: the URL says where the owner was sent, not what the screen must keep showing, and
+   * re-reading it on every render is how a card becomes impossible to close. It is served again on
+   * the same address on purpose: the shell keeps this element alive when the owner leaves the
+   * module (`ModuleView.vue`, hub#1099) and only re-creates it when `route.fullPath` changes, so
+   * the second tap on the same «Set it up» reaches this same instance through `popstate`, with
+   * the same URL. Ignoring it would be the original complaint again.
+   */
+  private linked = '';
+
+  /** The linked card, once it has been brought on screen. Reset each time a shortcut is served. */
+  private revealed = '';
+
+  private readonly onPopState = (): void => this.followShortcut();
+
   connectedCallback(): void {
     super.connectedCallback();
+    // Same module, same tab: the shell's router watches `moduleId`/`navId` only, so a navigation
+    // that changes nothing but the query string does NOT re-create this element and
+    // `connectedCallback` never fires again. Without this, only the first shortcut of a session
+    // would work.
+    window.addEventListener('popstate', this.onPopState);
+    this.followShortcut();
     void this.probe();
     void this.loadExisting();
+  }
+
+  disconnectedCallback(): void {
+    window.removeEventListener('popstate', this.onPopState);
+    super.disconnectedCallback();
   }
 
   updated(changed: Map<string, unknown>): void {
@@ -257,6 +306,50 @@ export class ErpFlowsGallery extends LitElement {
       void this.probe();
       void this.loadExisting();
     }
+    this.reveal();
+  }
+
+  /**
+   * Opens the card a shortcut named (flows#56).
+   *
+   * Everything that is not a card of this catalogue — no parameter, an id that was retired, a hub
+   * whose shell hands out no URL at all — leaves the gallery exactly as it was. That is the whole
+   * error handling this deserves, and it is deliberate: the fallback IS the screen the owner
+   * expected before shortcuts existed.
+   */
+  private followShortcut(): void {
+    let id = '';
+    try {
+      id = templateFromSearch(window.location.search);
+    } catch {
+      return; // No address bar, no shortcut. Still a gallery.
+    }
+    if (!id) return;
+    this.linked = id;
+    this.revealed = '';
+    this.picked = id;
+    this.error = '';
+    // `picked` may already be this card (opened on the first visit, never shut): still a cycle, so
+    // `reveal()` runs now and marks it, instead of scrolling to it on some unrelated later render.
+    this.requestUpdate();
+  }
+
+  /**
+   * Scrolls the linked card into view once it is actually rendered.
+   *
+   * It is not on screen at mount time: the gallery hides every card whose modules this hub cannot
+   * prove it has, and that answer arrives one round trip later (`probe`). And «opened» is not
+   * «found» — the gallery sits under however many automations the business already has, so a card
+   * opened below the fold looks like a screen that ignored the tap, which is the complaint this
+   * whole change answers. If the probe ends up hiding the card, there is nothing to scroll to and
+   * the plain gallery is the answer.
+   */
+  private reveal(): void {
+    if (!this.linked || this.revealed === this.linked) return;
+    const card = this.renderRoot.querySelector(`[data-template="${this.linked}"]`);
+    if (!card) return;
+    this.revealed = this.linked;
+    (card as HTMLElement).scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }
 
   /**
