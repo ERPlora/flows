@@ -6643,6 +6643,20 @@ var ErpFlowsGallery = class extends i3 {
     this.linked = "";
     /** The linked card, once it has been brought on screen. Reset each time a shortcut is served. */
     this.revealed = "";
+    /**
+     * The client this screen has already asked, so it is not asked the same thing twice (flows#69).
+     *
+     * Opening Automations used to cost two of everything — the flow list, the shape of every witness
+     * event, and one grants call per candidate — because the load runs on connect AND on the first
+     * render, where `client` going from nothing to the shell's client counts as a change. Both are
+     * needed: the shell may hand the client over before this element is on screen or after, and
+     * dropping either half leaves one of those two orders never loading at all.
+     *
+     * So the guard is «have I already asked THIS client», not «did the property change». It also
+     * covers the other way a parent re-render reaches here: lit calls `updated` for a property set
+     * to the very same object again.
+     */
+    this.asked = null;
     this.onPopState = () => this.followShortcut();
   }
   static {
@@ -6830,6 +6844,13 @@ var ErpFlowsGallery = class extends i3 {
     super.connectedCallback();
     window.addEventListener("popstate", this.onPopState);
     this.followShortcut();
+    this.load();
+  }
+  /** Everything this screen asks the hub when it opens, asked once per client. */
+  load() {
+    const client = this.client;
+    if (!client || client === this.asked) return;
+    this.asked = client;
     void this.probe();
     void this.loadExisting();
   }
@@ -6838,10 +6859,7 @@ var ErpFlowsGallery = class extends i3 {
     super.disconnectedCallback();
   }
   updated(changed) {
-    if (changed.has("client")) {
-      void this.probe();
-      void this.loadExisting();
-    }
+    if (changed.has("client")) this.load();
     this.reveal();
   }
   /**
