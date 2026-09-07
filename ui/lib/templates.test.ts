@@ -14,8 +14,11 @@ import {
   templateById,
   unavailableModules,
   flowsOnSameTrigger,
+  templatesOf,
 } from './templates';
 import { conditionResult } from './simulate';
+import { schemaFacts } from './ai-draft';
+import type { SchemaFacts } from './ai-draft';
 import type { FlowDoc } from './flow-doc';
 import { MAX_ITERS_CAP, grantAllowsCall, grantPin, isSpineKind, readDoc } from './flow-doc';
 import en from '../../locales/en.json';
@@ -31,6 +34,11 @@ const lookup = (catalogue: unknown, key: string): string | undefined => {
 };
 
 /** A translator that returns the ENGLISH string, so a document can be inspected as it is stored. */
+/** A hub on a current core, for the tests that are not about the kernel floor (flows#92). */
+const CURRENT_CORE = schemaFacts({
+  $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+});
+
 const t = (key: string): string => lookup(en, key) ?? key;
 
 /** The same, in Spanish: a mirror is verbatim in BOTH languages or it is not a mirror. */
@@ -75,11 +83,20 @@ describe('the template catalogue', () => {
     }
   });
 
-  it('writes the document version this editor writes, and exactly one trigger', () => {
+  it('writes the document version this editor writes, and one trigger unless they are disjoint', () => {
+    // One trigger was «one way in» — two ways in is two automations wearing one name, and on an
+    // event card it is also the same message answered twice. It stays the rule, with ONE exception
+    // and only because it cannot fire twice: the unattended WhatsApp card wakes on words
+    // (`text: neq ''`) and on a TAP (`text: eq ''` + `reply_id: neq ''`), and no message can
+    // satisfy both. Disjoint by construction, not by luck — and the invariant is asserted where
+    // the document is AUTHORED, not here: `whatsapp_inbox/tests/flow_templates.test.py` judges the
+    // UNION of the triggers and refuses the overlap that reads as disjoint. Here it is the digest
+    // guard that holds the line: a mirror whose triggers overlap stops matching the source.
+    const TWO_WAYS_IN = new Set(['whatsapp-appointment-unattended']);
     for (const template of TEMPLATES) {
       const doc = buildTemplate(template, t);
       expect(doc.schema_version).toBe(1);
-      expect(doc.triggers).toHaveLength(1);
+      expect(doc.triggers, template.id).toHaveLength(TWO_WAYS_IN.has(template.id) ? 2 : 1);
     }
   });
 
@@ -534,15 +551,25 @@ const SOURCES: readonly MirrorSource[] = [
     // ships, and why the same trick has nothing to bite on here. With `policy: "auto"` there is no
     // person in the loop either, so the family answers «somebody from the salon will get back to
     // you». It reopens with appointments#142 first, then whatsapp_inbox#103.
-    commit: '6737f5a5e649ed6561e26a453f91858e5db0d93d',
+    //
+    // And moved by whatsapp_inbox#101 (squashed as `8460f33`), with both digests — flows#92. The
+    // customer stopped having to TYPE the slot: the document gained a second trigger for the tap,
+    // the booking step DECLARES the slots it found (`output`) and a guarded `notify` sends them as
+    // a list she taps. The permissions did not move (`grants.json` is still on `a44a3f1`), which
+    // is the shape of this change: a different way of asking, not a wider one.
+    //
+    // 🔴 This is the pin whose drift the gallery was living with for a day: the source landed and
+    // the card kept handing out «reply with the service, the day and the hour». The guard below
+    // named it, in red, with this very sha — which is the one job it has.
+    commit: '8460f33a3db9196ff8e2138c3d51df7dcc190111',
     files: {
       en: 'flows/appointment-from-whatsapp-unattended.en.flow.json',
       es: 'flows/appointment-from-whatsapp-unattended.es.flow.json',
       grants: 'flows/appointment-from-whatsapp-unattended.grants.json',
     },
     digest: {
-      en: '233ab8c1f9a296aa06962675cfcfde5c859e1d9e9bc89f3cb5e334cb36ca1ccf',
-      es: 'cd5195b5905eb8b6abbe63bd397fef0c5ba74ba88f9c5a9f0e9e4d75f1f34a9a',
+      en: '25f539ad1d30a480112a0bba0e867a0794fafcae178f962f3a91796a60ba87d3',
+      es: 'd7a9aed8d4e51f22f7dc96c10981dbc59eb3c31c233a1de5b3dfd8ec4da28c3f',
     },
   },
   {
@@ -1030,6 +1057,8 @@ describe('WhatsApp → appointment BOOKED, the family that runs with nobody watc
     // against: with nobody reading the model's work before the customer does, a `customers.list`
     // in its hands turned «what has María got booked?» into a stranger's diary sent over WhatsApp.
     // The lookup is the document's now, keyed on the number the message came from.
+    // The last two are whatsapp_inbox#101's: the model DECLARES the slots it found and the guard
+    // only sends the list when there is something in it.
     expect(steps.map((s) => [s.id, s.kind])).toEqual([
       ['acknowledge', 'notify'],
       ['find_customer', 'query'],
@@ -1037,6 +1066,8 @@ describe('WhatsApp → appointment BOOKED, the family that runs with nobody watc
       ['resolve_customer', 'query'],
       ['book_appointment', 'ai'],
       ['confirm_to_customer', 'notify'],
+      ['any_slot_to_offer', 'condition'],
+      ['offer_slots', 'notify'],
     ]);
     // The one word this family is: `manual` parks the write in `_flow_approvals` and ends the turn,
     // which is the tray this salon has nobody to empty. The `query` steps have no policy at all —
@@ -1047,6 +1078,8 @@ describe('WhatsApp → appointment BOOKED, the family that runs with nobody watc
       'auto',
       undefined,
       'auto',
+      undefined,
+      undefined,
       undefined,
     ]);
     // And the kernel's explicit pause (hub#950) is not smuggled back in by another name.
@@ -1377,7 +1410,13 @@ describe('the gallery only offers what this hub can run (flows#52)', () => {
   it('offers everything while the hub has not answered yet', () => {
     // «Not asked yet» is not a refusal. Hiding on an unanswered probe would empty the gallery for
     // the first second of every visit and then fill it back in, which reads as a broken screen.
-    const shown = SECTORS.flatMap((sector) => availableTemplates(sector, {})).map((tpl) => tpl.id);
+    //
+    // This is about the MODULE probe, so the kernel one is held open here on purpose: it is the
+    // other way round (fail-closed) and it has its own describe at the end of this file, where it
+    // belongs. Holding it open is what keeps THIS test about the one thing it names.
+    const shown = SECTORS.flatMap((sector) => availableTemplates(sector, {}, CURRENT_CORE)).map(
+      (tpl) => tpl.id,
+    );
     expect(shown.sort()).toEqual(TEMPLATES.map((tpl) => tpl.id).sort());
   });
 
@@ -1611,5 +1650,69 @@ describe('a card installs the permission it PROMISED, not the wide one next to i
         if (Object.keys(grantPin(grant)).length) expect(grant.kind).toBe('command');
       }
     }
+  });
+});
+
+/**
+ * **A recipe an older core cannot even parse is not offered to it** (flows#92).
+ *
+ * The unattended card's document carries `interactive` (hub#1633) and `output` (hub#1639), and a
+ * core below `v1.1.16` does not degrade on them: `parse_step` walks an allowlist per step kind and
+ * answers `flow.invalid_definition` for the WHOLE document, so the recipe dies at save. The
+ * gallery has to know that BEFORE it offers the card.
+ *
+ * 🔴 And the floor is the CARD's, never the module's. Raising `flows`' own
+ * `min_erplora_version` would put this floor on the twenty other cards that do not need it, and
+ * take the gallery away from hubs using it perfectly well today.
+ *
+ * The probe is the same one the editor uses for the control (flows#75) and it is **fail-closed**,
+ * unlike the module probe two describes above: «not asked yet» there costs a card that flickers
+ * in, and here it would cost an automation that installs broken. Measured on the real schemas:
+ * `v1.1.15` declares neither key and `v1.1.16` declares both.
+ */
+describe('the floor of a card is the card’s, not the module’s (flows#92)', () => {
+  const everything: Record<string, boolean> = Object.fromEntries(
+    TEMPLATES.flatMap((tpl) => tpl.witnesses.map((w) => [w.module, true])),
+  );
+
+  /** A hub whose flow schema declares exactly these step keys. */
+  const hubDeclaring = (...keys: string[]) =>
+    schemaFacts({
+      $defs: { step: { properties: Object.fromEntries(keys.map((k) => [k, { type: 'object' }])) } },
+    });
+
+  const beautyOn = (facts?: SchemaFacts): string[] =>
+    availableTemplates('beauty', everything, facts).map((tpl) => tpl.id);
+
+  it('offers it on a hub that declares both keys', () => {
+    expect(beautyOn(hubDeclaring('interactive', 'output'))).toContain(
+      'whatsapp-appointment-unattended',
+    );
+  });
+
+  it('hides it on a hub that declares neither, which is every hub on v1.1.15', () => {
+    expect(beautyOn(hubDeclaring())).not.toContain('whatsapp-appointment-unattended');
+  });
+
+  it('hides it on a hub that declares only half of what the document carries', () => {
+    // A build between the two kernel merges. Fail-closed means BOTH or nothing.
+    expect(beautyOn(hubDeclaring('interactive'))).not.toContain('whatsapp-appointment-unattended');
+    expect(beautyOn(hubDeclaring('output'))).not.toContain('whatsapp-appointment-unattended');
+  });
+
+  it('hides it while the hub has not answered yet: this probe is fail-closed', () => {
+    // The opposite of the module probe, and on purpose: an unanswered module probe costs a card
+    // that appears a second late; an unanswered kernel probe would cost an automation that
+    // installs and then refuses to parse.
+    expect(beautyOn()).not.toContain('whatsapp-appointment-unattended');
+  });
+
+  it('keeps offering every OTHER card of the sector on that same old hub', () => {
+    const shown = beautyOn(hubDeclaring());
+    const others = templatesOf('beauty')
+      .map((tpl) => tpl.id)
+      .filter((id) => id !== 'whatsapp-appointment-unattended');
+    expect(shown.sort()).toEqual(others.sort());
+    expect(shown.length).toBeGreaterThan(0);
   });
 });

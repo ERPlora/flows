@@ -1,6 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import './erp-flows-gallery';
+import { schemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery, offScreen } from './erp-flows-gallery';
+
+/**
+ * **The hub these tests are about: one on a current core** (flows#92).
+ *
+ * The gallery's kernel probe is fail-closed, so a mount that says nothing about the hub is a hub
+ * that declares nothing — and the card whose document needs `interactive`/`output` is correctly
+ * absent from it. Every test here that is about something ELSE says «a normal hub» once, right
+ * here, so the floor is asserted where it belongs and nowhere else.
+ */
+const CURRENT_CORE = schemaFacts({
+  $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+});
+
 
 /**
  * **Scrolling to the card when the screen is not on screen yet** (flows#58).
@@ -87,6 +101,7 @@ function cachedPage(): HTMLElement {
 
 async function mountIn(parent: HTMLElement): Promise<ErpFlowsGallery> {
   const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+  el.facts = CURRENT_CORE;
   el.client = hub() as never;
   el.t = t;
   parent.appendChild(el);

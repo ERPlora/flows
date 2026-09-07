@@ -1226,6 +1226,7 @@ export class ErpFlowsApp extends LitElement {
         <erp-flows-gallery
           .client=${this.client}
           .t=${this.t}
+          .facts=${this.facts}
           @flows-template-used=${(e: Event) =>
             this.onTemplateUsed(e as CustomEvent<{ flow: Flow; needsGrants: boolean }>)}
           @flows-open-flow=${(e: Event) =>

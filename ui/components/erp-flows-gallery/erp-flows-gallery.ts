@@ -17,6 +17,8 @@ import {
   unavailableModules,
 } from '../../lib/templates';
 import type { FlowTemplate, InstalledState, Sector } from '../../lib/templates';
+import { schemaFacts } from '../../lib/ai-draft';
+import type { SchemaFacts } from '../../lib/ai-draft';
 import { errorCode } from '../../lib/hub-flows';
 import { grantPin } from '../../lib/flow-doc';
 import type { Grant } from '../../lib/flow-doc';
@@ -313,6 +315,17 @@ export class ErpFlowsGallery extends LitElement {
   @property({ attribute: false }) client: ModuleClient | null = null;
 
   @property({ attribute: false }) t: Translator = (k) => k;
+
+  /**
+   * **What this hub's kernel can parse**, as the schema it serves declares it (flows#92).
+   *
+   * A card whose document carries a step key an older core does not know is not offered here: the
+   * core answers `flow.invalid_definition` for the WHOLE document, so installing it from the
+   * gallery would hand the owner an automation that refuses to save. `schemaFacts(undefined)`
+   * answers `false` to everything, which makes the default **fail-closed** — «not asked yet» is
+   * not offered. That is the opposite of the module probe on purpose: see `coreTakes`.
+   */
+  @property({ attribute: false }) facts: SchemaFacts = schemaFacts(undefined);
 
   /** Which card is expanded. One at a time: this is a decision, not a comparison table. */
   @state() private picked: string | null = null;
@@ -855,7 +868,7 @@ export class ErpFlowsGallery extends LitElement {
   }
 
   private renderSector(sector: Sector) {
-    const templates = availableTemplates(sector, this.known);
+    const templates = availableTemplates(sector, this.known, this.facts);
     if (!templates.length) return nothing;
     return html`<section data-sector=${sector}>
       <h3>${this.t(`ui.sector_${sector}`)}</h3>
