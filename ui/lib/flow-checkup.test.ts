@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ECHO_AND_BACKLOG,
   WHATSAPP_MESSAGE_EVENT,
+  WHATSAPP_MODULE_MESSAGE_EVENT,
   flowProblems,
   repairedDefinition,
 } from './flow-checkup';
@@ -41,6 +42,55 @@ const documentBeforeTheFix = (): StoredDoc => ({
     { id: 'know_the_customer', kind: 'ai', prompt: 'the owner may have reworded this' },
     { id: 'tell_her', kind: 'notify', channel: 'whatsapp' },
   ],
+});
+
+/**
+ * **The task card of flows#67, as it is sitting in `_flow` on every hub that installed it.**
+ *
+ * Same flaw, one hop further away: this one waits on the MODULE's event rather than the core's,
+ * and the module re-emits the core payload verbatim (a manifest listener has no mapping layer), so
+ * it inherits the owner's echo and Meta's backlog just the same. Fixing the card in the gallery
+ * reaches nobody who already tapped «Usar esta» — this is what reaches them.
+ */
+const taskDocumentBeforeTheFix = (): StoredDoc => ({
+  schema_version: 1,
+  triggers: [
+    {
+      kind: 'event',
+      event: WHATSAPP_MODULE_MESSAGE_EVENT,
+      filter: {},
+      input: {},
+    },
+  ],
+  steps: [{ id: 's1', kind: 'command', command: 'tasks.tasks.create' }],
+});
+
+describe('the task card that opens a job for every message (flows#67)', () => {
+  it('is reported too — the module’s event carries the same echo and the same backlog', () => {
+    expect(flowProblems(taskDocumentBeforeTheFix()).map((p) => p.id)).toEqual([ECHO_AND_BACKLOG]);
+  });
+
+  it('is NOT reported on the document the gallery builds today', () => {
+    const template = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-answer');
+    expect(flowProblems(buildTemplate(template!, t))).toEqual([]);
+  });
+
+  it('is repaired with `neq`, so a hub that sends neither field keeps firing', () => {
+    const repaired = repairedDefinition(taskDocumentBeforeTheFix(), ECHO_AND_BACKLOG) as any;
+    expect(repaired.triggers[0].filter).toEqual({
+      'event.direction': { neq: 'outbound' },
+      'event.source': { neq: 'history' },
+    });
+  });
+
+  it('leaves alone an automation waiting on some other event of the same module', () => {
+    const doc = {
+      schema_version: 1,
+      triggers: [{ kind: 'event', event: 'whatsapp_inbox.request.created', filter: {} }],
+      steps: [],
+    };
+    expect(flowProblems(doc)).toEqual([]);
+  });
 });
 
 describe('the automation that answers the echo and the backlog', () => {
