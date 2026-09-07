@@ -886,7 +886,7 @@ export interface InstalledFlowFacts {
  * flow on this event with a command of its own is a different automation the business finished.
  *
  * A card that does not start on an event answers `absent` and gets no badge: two flows on «every
- * Friday at 18:00» are not the same automation, and a wrong badge is worse than none (flows#67).
+ * Friday at 18:00» are not the same automation, and a wrong badge is worse than none (flows#68).
  */
 export function templateInstallation<T extends InstalledFlowFacts>(
   template: FlowTemplate,

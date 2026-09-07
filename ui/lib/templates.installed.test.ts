@@ -94,7 +94,7 @@ describe('a template this hub already runs', () => {
   it('says nothing about a template that does not start on an event', () => {
     // A cron card cannot be identified this way: what a flow listens to is an event name, and two
     // flows on «every Friday at 18:00» are not the same automation. Out of scope on purpose
-    // (flows#67), and silence is the honest answer — never a wrong badge.
+    // (flows#68), and silence is the honest answer — never a wrong badge.
     const template = tpl('friday-week-review');
     const flow = {
       id: 'f9',

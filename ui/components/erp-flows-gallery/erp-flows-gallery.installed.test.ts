@@ -197,7 +197,7 @@ describe('what the badge costs, and what happens when the hub will not answer', 
     const client = hub([cron, installedFlow()]);
     await mount(client);
     // The ids asked about, not how many times: the element loads once on connect and again when
-    // the shell hands it a client, which is how `list` and `probe` have always behaved (flows#68).
+    // the shell hands it a client, which is how `list` and `probe` have always behaved (flows#69).
     // What this pins is that the question is asked about the candidate and about nothing else.
     const asked = new Set(client.flows.grants.mock.calls.map((call) => call[0]));
     expect([...asked]).toEqual(['f1']);
