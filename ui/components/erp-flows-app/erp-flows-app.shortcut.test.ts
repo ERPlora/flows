@@ -158,6 +158,34 @@ describe('coming back through the same shortcut with the editor open (flows#58)'
   });
 
   /**
+   * And again. And again after that — the shortcut is served on EVERY navigation that names a
+   * card, never «once» (flows#57, and the whole reason this file exists).
+   *
+   * This is the guard, not a variation: the fix above is one `popstate` listener with no memory of
+   * what it has already answered, and the cheapest way to break it is to give it one. A flag —
+   * «already served», «same id as last time» — reads like an optimisation and passes every other
+   * test in this file, because they all stop at the second tap. The owner does not: they set up
+   * one automation, come back, set up the next, come back again. The third tap is where a served-
+   * once screen puts them back in the editor, which is the exact complaint of #58 reappearing
+   * under a new cause.
+   */
+  it('serves the same shortcut every single time, not just the second', async () => {
+    landOn(`?template=${LINKED}`);
+    const el = await mount();
+
+    for (const tap of [2, 3, 4]) {
+      await useTheCard(el);
+      expect(editor(el), `tap ${tap}: the card did not open the editor, so this test is not driving the flow`).toBeTruthy();
+
+      await tapTheShortcutAgain(el);
+
+      expect(gallery(el), `tap ${tap} left the owner in the editor: the shortcut is being served only once`).toBeTruthy();
+      expect(editor(el), `tap ${tap}: the editor is still up over the gallery`).toBeNull();
+      expect(openCard(el), `tap ${tap}: the gallery came back without the card the shortcut named`).toBeTruthy();
+    }
+  });
+
+  /**
    * The guide is the same shape of screen — it replaces the gallery — so it answers the same way.
    * Left out, a shortcut tapped while the guide is open lands on a page about automations in
    * general instead of the card the owner asked for.
