@@ -4,8 +4,16 @@ import {
   moduleTemplateId,
   moduleTemplates,
 } from './module-templates';
-import { mergeTemplates, TEMPLATES, templateGrants, templateName, templateSummary } from './templates';
+import {
+  carriedPins,
+  mergeTemplates,
+  TEMPLATES,
+  templateGrants,
+  templateName,
+  templateSummary,
+} from './templates';
 import type { FlowTemplate } from './templates';
+import { grantAllowsCall, grantPin } from './flow-doc';
 import { schemaFacts } from './ai-draft';
 import en from '../../locales/en.json';
 
@@ -296,8 +304,13 @@ describe('the payload limits a served recipe asks with', () => {
     expect(templateGrants(card, t)).toEqual([{ kind: 'query', value: 'customers.list' }]);
   });
 
-  /** Every copy that carries a limit, not just today's one: the next pinned mirror is covered too. */
-  const pinnedMirrors = TEMPLATES.filter((tpl) => tpl.mirrors && tpl.grantPins);
+  /**
+   * Every copy that carries a limit, not just today's one: the next pinned mirror is covered too.
+   *
+   * `carriedPins` and not `grantPins`, so a limit STAGED for the twin (flows#103) is watched by
+   * this test from the day it is written rather than from the day the recipe grows the operation.
+   */
+  const pinnedMirrors = TEMPLATES.filter((tpl) => tpl.mirrors && Object.keys(carriedPins(tpl)).length);
 
   it('has a copy carrying a limit in the first place — otherwise the test below proves nothing', () => {
     expect(pinnedMirrors.length).toBeGreaterThan(0);
@@ -305,7 +318,7 @@ describe('the payload limits a served recipe asks with', () => {
 
   it('asks with the retired copy’s limit while the door cannot carry it', () => {
     for (const mirror of pinnedMirrors) {
-      const pins = Object.entries(mirror.grantPins!);
+      const pins = Object.entries(carriedPins(mirror));
       const served = moduleTemplates(
         [
           row({
@@ -354,5 +367,89 @@ describe('the payload limits a served recipe asks with', () => {
     const served = moduleTemplates([row({ grants: [{ kind: 'command', value: 'customers.create' }] })], 'en');
     const card = mergeTemplates(TEMPLATES, served).cards.find((c) => c.id === served[0].id)!;
     expect(templateGrants(card, t)).toEqual([{ kind: 'command', value: 'customers.create' }]);
+  });
+});
+
+/**
+ * **The unattended card may only MOVE an appointment as the customer** (flows#103).
+ *
+ * The twin above pins *cancelling*. Moving is the operation the recipe is about to grow
+ * (whatsapp_inbox#118, on top of appointments#142's `channel` + `customer_id`), and it needs the
+ * very same containment for the very same reason: `book_appointment` runs `policy: "auto"`, so
+ * there is no tray and nobody reads the model's work before the diary is written. Left wide, a
+ * well-written WhatsApp message moves somebody else's hour on the salon's behalf — the staff
+ * channel does not check whose appointment it is.
+ *
+ * It is pinned HERE, from this repo, and deliberately BEFORE the recipe grows the operation: while
+ * hub#1654 is open the module's own `payload` never reaches the gallery, so the hand copy is the
+ * only carrier of the limit. Landing the recipe first would put the wide permission on the fleet.
+ */
+describe('the unattended WhatsApp card moves an appointment only as the customer (flows#103)', () => {
+  const RESCHEDULE = 'appointments.appointments.reschedule';
+  const CANCEL = 'appointments.appointments.cancel';
+  const unattended = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment-unattended')!;
+
+  /**
+   * The unattended family as the hub serves it once whatsapp_inbox#118 lands: the two operations
+   * it contains, plus one it does not, and every one of them WIDE — which is all `FlowTemplateGrant`
+   * can carry while hub#1654 is open.
+   */
+  const servedGrants = () => {
+    const served = moduleTemplates(
+      [
+        row({
+          ...unattended.mirrors,
+          grants: [
+            { kind: 'command', value: CANCEL },
+            { kind: 'command', value: RESCHEDULE },
+            { kind: 'command', value: 'appointments.appointments.create' },
+          ],
+        }),
+      ],
+      'en',
+    );
+    const card = mergeTemplates(TEMPLATES, served).cards.find((c) => c.id === served[0].id)!;
+    return templateGrants(card, t);
+  };
+
+  // The control that proves the harness above sees the positive: cancelling is pinned TODAY, by
+  // the same path, so a red on the move below is about the move and not about the plumbing.
+  it('still carries the limit onto the cancellation', () => {
+    expect(servedGrants().find((g) => g.value === CANCEL)?.payload).toEqual({ channel: 'customer' });
+  });
+
+  it('carries the limit onto the move as well', () => {
+    const grant = servedGrants().find((g) => g.value === RESCHEDULE);
+    expect(grant, 'the served card asks to move appointments').toBeTruthy();
+    expect(grant!.payload).toEqual({ channel: 'customer' });
+  });
+
+  // 🔴 THE assertion this issue exists for, and it is about the call the recipe must NOT be able to
+  // make. Asserting only that its own move gets through would pass just as well with no limit at all.
+  it('refuses a move asked for on the salon’s behalf', () => {
+    const grant = servedGrants().find((g) => g.value === RESCHEDULE)!;
+    const move = { appointment_id: 'a1', start_datetime: '2026-09-10T10:00:00Z' };
+    // What the recipe is for: the customer who wrote in, moving her own hour.
+    expect(grantAllowsCall(grant, { ...move, channel: 'customer', customer_id: 'c1' })).toBe(true);
+    // What a stranger's message must never talk the model into.
+    expect(grantAllowsCall(grant, { ...move, channel: 'staff' })).toBe(false);
+    // And the same refusal by omission — `channel` defaults to `staff` in the command's schema.
+    expect(grantAllowsCall(grant, move)).toBe(false);
+  });
+
+  it('leaves every other permission the hub served exactly as wide as it was', () => {
+    const pinned = servedGrants()
+      .filter((g) => Object.keys(grantPin(g)).length > 0)
+      .map((g) => `${g.kind} ${g.value}`);
+    expect(pinned).toEqual([`command ${CANCEL}`, `command ${RESCHEDULE}`]);
+  });
+
+  it('does not touch the hand copy, which cannot move an appointment at all', () => {
+    // The copy mirrors the family as PUBLISHED today (13 grants, no move — whatsapp_inbox#74's
+    // scope cut). A pin staged for the served twin must not read as a permission this document
+    // asks for: on a hub that serves nothing, the card is still exactly what it was.
+    const asked = templateGrants(unattended, t).map((g) => g.value);
+    expect(asked).toContain(CANCEL);
+    expect(asked).not.toContain(RESCHEDULE);
   });
 });
