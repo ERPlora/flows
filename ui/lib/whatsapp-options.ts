@@ -204,3 +204,30 @@ export function setTapOptions(doc: FlowDoc, index: number, options: TapOptions |
     'vars',
   ]);
 }
+
+/**
+ * **The mode switch itself — the copy travels with it** (flows#90).
+ *
+ * Turning the options on has to take `vars` away (see {@link setTapOptions}), and the screen has
+ * no undo: `setDoc` is an assignment, so a sentence dropped here is a sentence typed again. It is
+ * the SAME sentence either side — the line that sits above the options is the message — so the
+ * owner has no reason to know it changed shelf, and every editor that switches a message's type
+ * (Twilio Studio, ManyChat, Zapier) carries the body across for exactly that reason.
+ *
+ * Deliberately NOT symmetric with an empty value: coming back with nothing written adds no `vars`
+ * at all, because `{text: ''}` is a key the document never had, not «the copy came back».
+ */
+export function setTapMode(doc: FlowDoc, index: number, wants: boolean): FlowDoc {
+  const step = doc.steps[index];
+  if (!step) return doc;
+  if (wants) {
+    return setTapOptions(doc, index, {
+      ...blankTapOptions('button'),
+      body: copy(obj(step.vars)?.text),
+    });
+  }
+  const off = setTapOptions(doc, index, null);
+  const body = readTapOptions(step)?.body;
+  if (!textOf(body)) return off;
+  return patchStep(off, index, { vars: { ...(obj(step.vars) ?? {}), text: body } });
+}

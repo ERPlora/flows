@@ -11,8 +11,8 @@ import {
   MAX_BUTTONS,
   MAX_LIST_ROWS,
   TAP_KINDS,
-  blankTapOptions,
   readTapOptions,
+  setTapMode,
   setTapOptions,
   tapOptionProblems,
 } from '../../lib/whatsapp-options';
@@ -2098,8 +2098,10 @@ export class ErpFlowsEditor extends LitElement {
             const channel = (e.target as HTMLSelectElement).value as 'email' | 'whatsapp';
             const next = patchStep(this.document, index, { channel });
             // An email has nothing to tap, and the options left behind would be invisible on the
-            // email panel — right up to the save that refuses the whole document.
-            this.setDoc(channel === 'whatsapp' ? next : setTapOptions(next, index, null));
+            // email panel — right up to the save that refuses the whole document. Through
+            // setTapMode, so the message she wrote lands in the copy box instead of vanishing
+            // into a panel that shows an empty one (flows#90).
+            this.setDoc(channel === 'whatsapp' ? next : setTapMode(next, index, false));
           }}
         >
           <!-- Two options, and sms is not one of them: it has no transport anywhere and is
@@ -2150,12 +2152,11 @@ export class ErpFlowsEditor extends LitElement {
               .value=${taps ? 'options' : 'text'}
               @change=${(e: Event) => {
                 const wants = (e.target as HTMLSelectElement).value === 'options';
-                // ALWAYS through setTapOptions, never a loose patch: copy and options are two
+                // ALWAYS through setTapMode, never a loose patch: copy and options are two
                 // messages and one send, and the hub answers conflicting_message_type for a step
-                // that carries both. The swap has to be one edit.
-                this.setDoc(
-                  setTapOptions(this.document, index, wants ? blankTapOptions('button') : null),
-                );
+                // that carries both. The swap has to be one edit — and it carries the sentence
+                // across, because there is no undo on this screen (flows#90).
+                this.setDoc(setTapMode(this.document, index, wants));
               }}
             >
               ${option('text', this.t('ui.notifyModeText'), taps ? 'options' : 'text')}

@@ -4,6 +4,7 @@ import {
   MAX_LIST_ROWS,
   blankTapOptions,
   readTapOptions,
+  setTapMode,
   setTapOptions,
   tapOptionProblems,
   toInteractive,
@@ -303,5 +304,97 @@ describe('options and text are two messages and ONE send', () => {
     const after = setTapOptions(two, 1, blankTapOptions('list'));
     expect(after.steps[0].vars).toEqual({ text: 'uno' });
     expect(after.steps[1].interactive).toBeTruthy();
+  });
+});
+
+/**
+ * **The sentence is the same sentence, wherever it is stored** (flows#90).
+ *
+ * The owner writes «Tenemos estos huecos libres esta semana» and only then realises she wants it
+ * TAPPED rather than answered. Switching the mode used to hand her an empty box: the copy went
+ * away with `vars` — which it has to, the hub refuses a step carrying both — and nothing brought
+ * it back. There is no undo here (`setDoc` is an assignment), so the sentence was simply gone.
+ */
+describe('switching the mode carries the message across (flows#90)', () => {
+  it('starts the options with the copy that was already written', () => {
+    const before = doc({ template: 'hello_world', vars: { text: 'Tenemos huecos el jueves' } });
+    const step = setTapMode(before, 0, true).steps[0];
+    expect((step.interactive as Record<string, Record<string, unknown>>).body.text).toBe(
+      'Tenemos huecos el jueves',
+    );
+    // …and it still leaves nothing behind: the hub answers `conflicting_message_type` otherwise.
+    expect('vars' in step).toBe(false);
+    expect('template' in step).toBe(false);
+  });
+
+  it('gives the copy back when the mode goes off again', () => {
+    const before = doc({
+      interactive: {
+        type: 'button',
+        body: { text: '¿Cuándo te viene bien?' },
+        action: { buttons: [{ type: 'reply', reply: { id: 'a', title: 'A' } }] },
+      },
+    });
+    const step = setTapMode(before, 0, false).steps[0];
+    expect('interactive' in step).toBe(false);
+    expect((step.vars as Record<string, unknown>).text).toBe('¿Cuándo te viene bien?');
+  });
+
+  it('survives the round trip the owner actually does: on, and off again', () => {
+    const before = doc({ vars: { text: 'Hola {{input.name}}' } });
+    const back = setTapMode(setTapMode(before, 0, true), 0, false).steps[0];
+    // A composed value travels whole — it is the same string the picker produced.
+    expect((back.vars as Record<string, unknown>).text).toBe('Hola {{input.name}}');
+  });
+
+  it('still opens blank when there was nothing written to carry', () => {
+    const step = setTapMode(doc({}), 0, true).steps[0];
+    const interactive = step.interactive as Record<string, Record<string, unknown>>;
+    expect(interactive.body.text).toBe('');
+    expect((interactive.action.buttons as unknown[]).length).toBe(1);
+  });
+
+  it('does not invent an empty message on the way back', () => {
+    // `vars: { text: '' }` is not «the copy came back», it is a key the document did not have.
+    const step = setTapMode(doc({ interactive: { type: 'button', body: { text: '' } } }), 0, false)
+      .steps[0];
+    expect('vars' in step).toBe(false);
+  });
+
+  it('keeps the other copy of a document that arrived carrying both', () => {
+    // The hub refuses this pair at SAVE, but nothing stops an API or a template from handing one
+    // to the screen — and on screen it reads as options, so what she sees is the interactive body.
+    // Coming back overwrites the message and leaves every other key of `vars` where it was.
+    const before = doc({
+      interactive: { type: 'button', body: { text: 'la que se ve' } },
+      vars: { text: 'la vieja', name: 'Ana' },
+    });
+    expect(setTapMode(before, 0, false).steps[0].vars).toEqual({
+      text: 'la que se ve',
+      name: 'Ana',
+    });
+  });
+
+  it('leaves the rest of the step, and the other steps, alone', () => {
+    const two: FlowDoc = {
+      schema_version: 1,
+      triggers: [{ kind: 'manual' }],
+      steps: [
+        { id: 'a', kind: 'notify', channel: 'whatsapp', vars: { text: 'uno' } },
+        {
+          id: 'b',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: { query: 'q', params: {}, field: 'f' },
+          vars: { text: 'dos', other: 'kept' },
+        },
+      ],
+    };
+    const after = setTapMode(two, 1, true);
+    expect(after.steps[0].vars).toEqual({ text: 'uno' });
+    expect(after.steps[1].to).toEqual({ query: 'q', params: {}, field: 'f' });
+    expect(
+      (after.steps[1].interactive as Record<string, Record<string, unknown>>).body.text,
+    ).toBe('dos');
   });
 });
