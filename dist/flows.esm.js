@@ -6502,6 +6502,10 @@ function moduleName(id, t3) {
 }
 
 // ui/components/erp-flows-gallery/erp-flows-gallery.ts
+function templateFromSearch(search) {
+  const id = new URLSearchParams(search).get("template") ?? "";
+  return templateById(id) ? id : "";
+}
 var ErpFlowsGallery = class extends i3 {
   constructor() {
     super(...arguments);
@@ -6512,6 +6516,15 @@ var ErpFlowsGallery = class extends i3 {
     this.existing = [];
     this.busy = false;
     this.error = "";
+    /**
+     * The id `?template=` last asked for and this screen already served, so a shortcut is honoured
+     * ONCE. The URL says where the owner was sent; it does not say what the screen must keep
+     * showing, and re-reading it on every render is how a card becomes impossible to close.
+     */
+    this.linked = "";
+    /** The linked card, once it has been brought on screen. Same «once» as {@link linked}. */
+    this.revealed = "";
+    this.onPopState = () => this.followShortcut();
   }
   static {
     this.styles = i`
@@ -6690,14 +6703,58 @@ var ErpFlowsGallery = class extends i3 {
   }
   connectedCallback() {
     super.connectedCallback();
+    window.addEventListener("popstate", this.onPopState);
+    this.followShortcut();
     void this.probe();
     void this.loadExisting();
+  }
+  disconnectedCallback() {
+    window.removeEventListener("popstate", this.onPopState);
+    super.disconnectedCallback();
   }
   updated(changed) {
     if (changed.has("client")) {
       void this.probe();
       void this.loadExisting();
     }
+    this.reveal();
+  }
+  /**
+   * Opens the card a shortcut named (flows#56).
+   *
+   * Everything that is not a card of this catalogue — no parameter, an id that was retired, a hub
+   * whose shell hands out no URL at all — leaves the gallery exactly as it was. That is the whole
+   * error handling this deserves, and it is deliberate: the fallback IS the screen the owner
+   * expected before shortcuts existed.
+   */
+  followShortcut() {
+    let id = "";
+    try {
+      id = templateFromSearch(window.location.search);
+    } catch {
+      return;
+    }
+    if (!id || id === this.linked) return;
+    this.linked = id;
+    this.picked = id;
+    this.error = "";
+  }
+  /**
+   * Scrolls the linked card into view once it is actually rendered.
+   *
+   * It is not on screen at mount time: the gallery hides every card whose modules this hub cannot
+   * prove it has, and that answer arrives one round trip later (`probe`). And «opened» is not
+   * «found» — the gallery sits under however many automations the business already has, so a card
+   * opened below the fold looks like a screen that ignored the tap, which is the complaint this
+   * whole change answers. If the probe ends up hiding the card, there is nothing to scroll to and
+   * the plain gallery is the answer.
+   */
+  reveal() {
+    if (!this.linked || this.revealed === this.linked) return;
+    const card = this.renderRoot.querySelector(`[data-template="${this.linked}"]`);
+    if (!card) return;
+    this.revealed = this.linked;
+    card.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }
   /**
    * The hub's own flows, read once, only to warn about a trigger that is already taken.
