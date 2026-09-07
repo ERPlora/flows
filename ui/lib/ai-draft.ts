@@ -139,6 +139,12 @@ export interface SchemaFacts {
   triggerKinds: string[];
   operators: string[];
   toolsIsObject: boolean;
+  /**
+   * Whether this hub's `notify` can carry options the customer TAPS (hub#1633).
+   *
+   * The only fact in here with a **fail-closed** floor — see {@link schemaFacts}.
+   */
+  interactiveNotify: boolean;
 }
 
 function at(root: unknown, path: string[]): unknown {
@@ -199,6 +205,13 @@ export function schemaFacts(schema: unknown): SchemaFacts {
     // `false` only when the hub explicitly says something else. A schema this module could not
     // read must not turn the hub#786 check off: absence of proof is not proof of an array.
     toolsIsObject: at(schema, ['$defs', 'step', 'properties', 'tools', 'type']) !== 'array',
+    // The exception to this function's own rule, and it has to be: every other fact FALLS BACK to
+    // the mirror because being wrong about it costs the owner a warning that does not apply. Being
+    // wrong about this one costs them the flow. A step carrying `interactive` on a hub older than
+    // hub#1633 is not ignored and does not degrade — the unknown key takes the WHOLE definition
+    // down with it (`flow.invalid_definition`), and today's fleet has not shipped that core yet.
+    // A schema this module could not read is therefore a hub that does not have it.
+    interactiveNotify: !!at(schema, ['$defs', 'step', 'properties', 'interactive']),
   };
 }
 

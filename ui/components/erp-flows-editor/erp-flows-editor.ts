@@ -8,6 +8,16 @@ import '../erp-flows-value/erp-flows-value';
 import '../erp-flows-field-picker/erp-flows-field-picker';
 import type { ErpFlowsValue } from '../erp-flows-value/erp-flows-value';
 import {
+  MAX_BUTTONS,
+  MAX_LIST_ROWS,
+  TAP_KINDS,
+  blankTapOptions,
+  readTapOptions,
+  setTapOptions,
+  tapOptionProblems,
+} from '../../lib/whatsapp-options';
+import type { TapKind, TapOptions } from '../../lib/whatsapp-options';
+import {
   DEFAULT_APPROVAL_TTL_SECONDS,
   EXPIRY_POLICIES,
   HTTP_METHODS,
@@ -34,6 +44,7 @@ import {
   partsToValue,
   patchStep,
   patchTrigger,
+  removeStepKeys,
   readDoc,
   removeStep,
   httpPatternFor,
@@ -809,6 +820,18 @@ export class ErpFlowsEditor extends LitElement {
    * on `permissions`, because until it holds a grant it does nothing at all and says nothing.
    */
   @property({ attribute: false }) tab: Tab = 'editor';
+
+  /**
+   * **Whether THIS hub can take options the customer taps** (flows#75), read off the schema the
+   * hub served (`schemaFacts().interactiveNotify`) rather than assumed.
+   *
+   * Default `false`, and that is the whole guard. A step carrying `interactive` on a core older
+   * than hub#1633 is not ignored and does not degrade: the unknown key is refused and takes the
+   * WHOLE definition down with it, so the flow stops running. Hiding the control is therefore the
+   * only honest thing to do where it is not supported — a disabled one would still let a template
+   * or the assistant put the key there and leave the owner reading `flow.invalid_definition`.
+   */
+  @property({ attribute: false }) interactiveNotify = false;
 
   @state() private openStep: string | null = null;
 
@@ -2037,6 +2060,11 @@ export class ErpFlowsEditor extends LitElement {
       );
     const setVar = (key: string, value: unknown): void =>
       this.setDoc(patchStep(this.document, index, { vars: { ...vars, [key]: value } }));
+    const taps = readTapOptions(step);
+    // Only where the hub declared the key AND the channel has something to tap. Both halves
+    // matter: the kernel refuses the pair email+interactive by name, and an older core refuses
+    // the whole document. See the docblock on interactiveNotify.
+    const canTap = this.interactiveNotify && step.channel === 'whatsapp';
     return html`
       <div class="field">
         <label for="ch-${step.id}">${this.t('ui.notifyChannel')}</label>
@@ -2044,12 +2072,13 @@ export class ErpFlowsEditor extends LitElement {
           id="ch-${step.id}"
           data-field="channel"
           .value=${String(step.channel ?? 'email')}
-          @change=${(e: Event) =>
-            this.setDoc(
-              patchStep(this.document, index, {
-                channel: (e.target as HTMLSelectElement).value as 'email' | 'whatsapp',
-              }),
-            )}
+          @change=${(e: Event) => {
+            const channel = (e.target as HTMLSelectElement).value as 'email' | 'whatsapp';
+            const next = patchStep(this.document, index, { channel });
+            // An email has nothing to tap, and the options left behind would be invisible on the
+            // email panel — right up to the save that refuses the whole document.
+            this.setDoc(channel === 'whatsapp' ? next : setTapOptions(next, index, null));
+          }}
         >
           <!-- Two options, and sms is not one of them: it has no transport anywhere and is
                refused by name at save AND at grant time. A third option here would be a step that
@@ -2090,27 +2119,182 @@ export class ErpFlowsEditor extends LitElement {
         </div>
       </div>
 
+      ${canTap
+        ? html`<div class="field">
+            <label for="nm-${step.id}">${this.t('ui.notifyMode')}</label>
+            <select
+              id="nm-${step.id}"
+              data-field="notify-mode"
+              .value=${taps ? 'options' : 'text'}
+              @change=${(e: Event) => {
+                const wants = (e.target as HTMLSelectElement).value === 'options';
+                // ALWAYS through setTapOptions, never a loose patch: copy and options are two
+                // messages and one send, and the hub answers conflicting_message_type for a step
+                // that carries both. The swap has to be one edit.
+                this.setDoc(
+                  setTapOptions(this.document, index, wants ? blankTapOptions('button') : null),
+                );
+              }}
+            >
+              ${option('text', this.t('ui.notifyModeText'), taps ? 'options' : 'text')}
+              ${option('options', this.t('ui.notifyModeOptions'), taps ? 'options' : 'text')}
+            </select>
+            <span class="hint">${this.t('ui.notifyModeHint')}</span>
+          </div>`
+        : nothing}
+
+      ${taps && canTap
+        ? this.renderTapOptions(step, index, taps)
+        : html`
+            <div class="field">
+              <label for="tp-${step.id}">${this.t('ui.notifyTemplate')}</label>
+              <input
+                id="tp-${step.id}"
+                data-field="template"
+                type="text"
+                .value=${String(step.template ?? '')}
+                @change=${(e: Event) =>
+                  this.setDoc(
+                    patchStep(this.document, index, {
+                      template: (e.target as HTMLInputElement).value,
+                    }),
+                  )}
+              />
+              <span class="hint">${this.t('ui.notifyTemplateHint')}</span>
+            </div>
+
+            ${this.renderValue({
+              field: 'var-text',
+              label: this.t('ui.notifyText'),
+              value: vars.text ?? '',
+              onChange: (text) => setVar('text', text),
+            })}
+          `}
+    `;
+  }
+
+  /**
+   * **The options the customer taps**, edited as three flat things: the message, the kind, and the
+   * rows — with every piece of copy composed in the SAME picker the message body uses, because an
+   * option's label is a value like any other (`{{steps.slots.0.label}}` is the whole point).
+   *
+   * What is deliberately NOT here is a block. The SaaS checks Meta's limits before it pays for the
+   * send and answers with a code; re-implementing them would be a second table ageing on its own,
+   * and it would strand an owner whose hub is newer than this module. What the screen owes them is
+   * finding out while they type, which is what the warnings do.
+   */
+  private renderTapOptions(step: Step, index: number, taps: TapOptions) {
+    const write = (next: TapOptions): void => this.setDoc(setTapOptions(this.document, index, next));
+    const patchOption = (at: number, patch: Record<string, unknown>): void =>
+      write({
+        ...taps,
+        options: taps.options.map((o, i) => (i === at ? { ...o, ...patch } : o)),
+      });
+    const max = taps.kind === 'button' ? MAX_BUTTONS : MAX_LIST_ROWS;
+    const problems = tapOptionProblems(taps);
+    return html`
       <div class="field">
-        <label for="tp-${step.id}">${this.t('ui.notifyTemplate')}</label>
-        <input
-          id="tp-${step.id}"
-          data-field="template"
-          type="text"
-          .value=${String(step.template ?? '')}
+        <label for="tk-${step.id}">${this.t('ui.tapKind')}</label>
+        <select
+          id="tk-${step.id}"
+          data-field="tap-kind"
+          .value=${taps.kind}
           @change=${(e: Event) =>
-            this.setDoc(
-              patchStep(this.document, index, { template: (e.target as HTMLInputElement).value }),
-            )}
-        />
-        <span class="hint">${this.t('ui.notifyTemplateHint')}</span>
+            write({ ...taps, kind: (e.target as HTMLSelectElement).value as TapKind })}
+        >
+          ${TAP_KINDS.map((k) => option(k, this.t(`ui.tapKind_${k}`), taps.kind))}
+        </select>
+        <span class="hint">${this.t(`ui.tapKindHint_${taps.kind}`, { max })}</span>
       </div>
 
       ${this.renderValue({
-        field: 'var-text',
-        label: this.t('ui.notifyText'),
-        value: vars.text ?? '',
-        onChange: (text) => setVar('text', text),
+        field: 'tap-body',
+        label: this.t('ui.tapBody'),
+        value: taps.body,
+        // Meta's body.text is a string on the wire, so a lone field still travels as {{...}} —
+        // the same rule the http step applies to its url.
+        template: true,
+        onChange: (body) => write({ ...taps, body }),
       })}
+
+      ${taps.kind === 'list'
+        ? this.renderValue({
+            field: 'tap-open-label',
+            label: this.t('ui.tapOpenLabel'),
+            value: taps.openLabel,
+            template: true,
+            onChange: (openLabel) => write({ ...taps, openLabel }),
+          })
+        : nothing}
+
+      <span class="eyebrow">${this.t('ui.tapOptions')}</span>
+      <span class="hint">${this.t('ui.tapOptionsHint')}</span>
+
+      ${taps.options.map(
+        (opt, i) => html`
+          <div class="tap-option" data-tap-option=${i}>
+            <div class="param-row">
+              <div class="field">
+                <label for="ti-${step.id}-${i}">${this.t('ui.tapId')}</label>
+                <input
+                  id="ti-${step.id}-${i}"
+                  data-field="tap-id-${i}"
+                  type="text"
+                  .value=${opt.id}
+                  @change=${(e: Event) =>
+                    patchOption(i, { id: (e.target as HTMLInputElement).value.trim() })}
+                />
+              </div>
+              <ion-button
+                size="small"
+                fill="clear"
+                data-act="remove-tap-option-${i}"
+                aria-label=${this.t('ui.tapRemoveOption')}
+                @click=${() =>
+                  write({ ...taps, options: taps.options.filter((_, at) => at !== i) })}
+              >
+                <ion-icon name="trash-outline" slot="icon-only"></ion-icon>
+              </ion-button>
+            </div>
+            <!-- The identifier above is a plain box on purpose: it is what comes home as
+                 event.reply_id and what a later guard compares against, so it has to be a
+                 literal. The label below is copy, and copy is composed. -->
+            ${this.renderValue({
+              field: `tap-title-${i}`,
+              label: this.t('ui.tapTitle'),
+              value: opt.title,
+              template: true,
+              onChange: (title) => patchOption(i, { title }),
+            })}
+            ${taps.kind === 'list'
+              ? this.renderValue({
+                  field: `tap-desc-${i}`,
+                  label: this.t('ui.tapDescription'),
+                  value: opt.description ?? '',
+                  template: true,
+                  onChange: (description) => patchOption(i, { description }),
+                })
+              : nothing}
+          </div>
+        `,
+      )}
+
+      <ion-button
+        size="small"
+        fill="clear"
+        data-act="add-tap-option"
+        @click=${() => write({ ...taps, options: [...taps.options, { id: '', title: '' }] })}
+      >
+        <ion-icon name="add-outline" slot="start"></ion-icon>
+        ${this.t('ui.tapAddOption')}
+      </ion-button>
+
+      ${problems.map(
+        (p) =>
+          html`<ok-inline-feedback tone="warning" icon="alert-circle-outline"
+            >${this.t(p.key, p.params)}</ok-inline-feedback
+          >`,
+      )}
     `;
   }
 
