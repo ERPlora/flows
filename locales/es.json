@@ -17,7 +17,7 @@
     "retry": "Reintentar",
     "unnamed": "Automatización sin nombre",
     "errGeneric": "Algo ha fallado. No se ha guardado nada.",
-    "errLimitNotApplied": "La receta se instaló y quedó apagada, sin ningún permiso concedido: este hub no pudo guardar el límite que necesita. Encenderla con el permiso abierto la dejaría hacer más de lo que promete.",
+    "errLimitNotApplied": "La receta se instaló y quedó apagada, sin ningún permiso concedido: este hub no pudo guardar el límite que necesita. Encenderla con el permiso abierto la dejaría hacer más de lo que promete. No le concedas el permiso a mano en Permisos: eso vuelve a dejarlo abierto. Déjala como está: la receta funcionará sola cuando este hub se actualice.",
     "listTitle": "Automatizaciones",
     "newAutomation": "Nueva automatización",
     "emptyTitle": "Todavía no hay nada automatizado",

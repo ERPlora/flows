@@ -159,6 +159,57 @@ describe('a recipe with a limit installs LIMITED, or it does not install the per
     const el = await install(h.client, LIMITED);
     expect(el.renderRoot.querySelector('ok-inline-feedback')).toBeTruthy();
   });
+
+  /**
+   * **The sentence has to end with what to DO, because the obvious move makes it worse.**
+   *
+   * The flow is left paused and asking for permissions, so the owner's natural next click is
+   * Permissions — and granting `appointments.appointments.cancel` by hand there rebuilds the WIDE
+   * grant this whole issue removes, on a hub that cannot hold the limit. A warning that stops at
+   * «it did not work» hands her straight to that click.
+   *
+   * Asserted on MEANING and in both locales, the way the card's own «nobody reviews this» line is:
+   * each language has to say, in its own words, «do not grant it by hand» AND «it will work once
+   * the hub is updated». The prose may be rewritten; those two promises may not quietly leave.
+   */
+  it('tells the owner what to do next — and that the manual grant is the wrong move', async () => {
+    const localised = (dict: unknown) => (key: string, params?: Record<string, unknown>): string => {
+      let cur: unknown = dict;
+      for (const part of key.split('.')) {
+        cur = cur && typeof cur === 'object' ? (cur as Record<string, unknown>)[part] : undefined;
+      }
+      const found = typeof cur === 'string' ? cur : key;
+      return params
+        ? found.replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? ''))
+        : found;
+    };
+
+    for (const [lang, dict, dontGrant, willWork] of [
+      ['en', en, /do not grant|don.t grant|without granting|never grant/i, /updat/i],
+      ['es', es, /no (le )?conced|sin conced/i, /actualic|actualiz/i],
+    ] as const) {
+      const h = hub({ keepsPins: false });
+      const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+      el.client = h.client as never;
+      el.t = localised(dict);
+      document.body.appendChild(el);
+      await el.updateComplete;
+      for (let i = 0; i < 6; i += 1) await Promise.resolve();
+      el.open(LIMITED);
+      await el.updateComplete;
+      await el.use();
+      await el.updateComplete;
+
+      const said = el.renderRoot.querySelector('ok-inline-feedback')?.textContent ?? '';
+      // The key resolved: an untranslated string would render the key itself.
+      expect(said, `${lang}: the warning is still the i18n key`).not.toContain(
+        'ui.errLimitNotApplied',
+      );
+      expect(said, `${lang}: does not say the manual grant is the wrong move`).toMatch(dontGrant);
+      expect(said, `${lang}: does not say it works once the hub is updated`).toMatch(willWork);
+      el.remove();
+    }
+  });
 });
 
 describe('the card SAYS the limit, in the panel the owner reads before installing', () => {
