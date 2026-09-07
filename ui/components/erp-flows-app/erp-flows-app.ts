@@ -6,6 +6,7 @@ import '@erplora/outfitkit/ok-inline-feedback';
 import '@erplora/outfitkit/ok-status-pill';
 import '../erp-flows-editor/erp-flows-editor';
 import '../erp-flows-gallery/erp-flows-gallery';
+import { namesTemplate } from '../erp-flows-gallery/erp-flows-gallery';
 import '../erp-flows-guide/erp-flows-guide';
 import '../erp-flows-approvals/erp-flows-approvals';
 import '../erp-flows-dead-letter/erp-flows-dead-letter';
@@ -405,6 +406,44 @@ export class ErpFlowsApp extends LitElement {
 
   private readonly onLocaleChange = (): void => this.requestUpdate();
 
+  /**
+   * **A shortcut that names a card gets this screen out of its way** (flows#58).
+   *
+   * From Settings → WhatsApp, «Configurar» pushes `/m/flows/automations?template=<id>` and fires
+   * `popstate` (`whatsapp_inbox/ui/lib/whatsapp-uses.ts`). The gallery already answers that on its
+   * own (flows#56/#57) — but only while it is on screen, and it is not: with the editor or the
+   * guide up, `render()` never puts it in the document, so the one element that listens is not
+   * there to listen. Nothing else saves it either, because the shell keeps this page alive when
+   * the owner leaves the module and re-creates the element only when `route.fullPath` changes
+   * (`ModuleView.vue`, hub#1099) — and the same shortcut, tapped again, is the same address.
+   *
+   * So the second tap on «Configurar» lands the owner in the editor of whatever they made the
+   * first time. Stepping aside is this screen's job, and it does it for an unknown id too: the
+   * gallery decides WHICH card, and its answer to an id it does not have is still the gallery.
+   *
+   * A navigation that names NO card is left alone on purpose — the Back button, a jump to another
+   * module, the shell tidying the address. Closing the editor on any of those would throw away
+   * what the owner was writing, which is a worse bug than the one this fixes.
+   */
+  private readonly onShortcut = (): void => {
+    let named = false;
+    try {
+      named = namesTemplate(window.location.search);
+    } catch {
+      return; // No address bar, no shortcut. Nothing to step aside from.
+    }
+    if (!named || (!this.editing && !this.isNew && !this.guideOpen)) return;
+    this.editing = null;
+    this.isNew = false;
+    this.editorTab = 'editor';
+    this.reviewing = null;
+    this.draftReview = null;
+    this.guideOpen = false;
+    // Same reason «Back» reloads: the owner has been in the editor, so the list under the gallery
+    // is one save behind.
+    void this.reload();
+  };
+
   /** The module catalogue, resolved against the shell's active language (ADR-0055). */
   private readonly t = (key: string, params?: Record<string, unknown>): string => {
     const client = this.client as (ModuleClient & { t?: unknown }) | null;
@@ -419,12 +458,14 @@ export class ErpFlowsApp extends LitElement {
   async connectedCallback(): Promise<void> {
     super.connectedCallback();
     window.addEventListener('erplora:locale-changed', this.onLocaleChange);
+    window.addEventListener('popstate', this.onShortcut);
     await this.open();
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     window.removeEventListener('erplora:locale-changed', this.onLocaleChange);
+    window.removeEventListener('popstate', this.onShortcut);
   }
 
   /** Resolves the door, checks the contract, loads the list. Every failure has its own screen. */

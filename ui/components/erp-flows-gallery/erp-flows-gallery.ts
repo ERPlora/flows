@@ -41,6 +41,44 @@ export function templateFromSearch(search: string): string {
 }
 
 /**
+ * Whether a navigation names a card at all — including one this catalogue does not have.
+ *
+ * Deliberately a different question from the one above, and the difference is the whole of
+ * flows#58. WHICH card is this gallery's business, and its answer to an id that matches nothing is
+ * «the whole gallery». WHETHER the owner asked for the gallery is the business of the screen
+ * around it (`erp-flows-app`), which has to get an editor out of the way to answer — and there an
+ * id that matches nothing is still somebody tapping «Set it up»: they land on the gallery, never
+ * on whatever that screen happened to be showing.
+ */
+export function namesTemplate(search: string): boolean {
+  return (new URLSearchParams(search).get('template') ?? '') !== '';
+}
+
+/**
+ * Whether `el` sits on a page the shell is keeping alive OFF screen.
+ *
+ * The shell does not throw a module's page away when the owner leaves it (`ModuleView.vue`,
+ * hub#1099): Ionic hides it with `.ion-page-hidden`, which is `display: none !important`. This
+ * element stays mounted inside it and keeps hearing `popstate`, so a shortcut can perfectly well
+ * arrive while there is no screen to scroll — and `scrollIntoView` on a box that does not exist
+ * does nothing, silently, which is exactly how a card ended up «revealed» and never seen.
+ *
+ * It has to WALK, and cross every shadow root on the way: an element under a hidden ancestor keeps
+ * its own computed `display`, and the card is inside this element's shadow root while the hidden
+ * page is several roots above it. Stopping at the first boundary would answer «on screen» for
+ * every card there is.
+ */
+export function offScreen(el: Element): boolean {
+  let node: Node | null = el;
+  while (node) {
+    if (node instanceof Element && getComputedStyle(node).display === 'none') return true;
+    const parent: Node | null = node.parentNode;
+    node = parent instanceof ShadowRoot ? parent.host : parent;
+  }
+  return false;
+}
+
+/**
  * **The gallery: what the owner sees first** (flows#1).
  *
  * The screen this replaces was a list with nothing in it and a button saying «New automation».
@@ -317,6 +355,14 @@ export class ErpFlowsGallery extends LitElement {
   private revealed = '';
 
   /**
+   * Set while the linked card is waiting for its page to come back on screen (flows#58).
+   *
+   * One at a time, and never left behind: a second observer per render would pile up for as long
+   * as the page stays hidden, and each of them would scroll.
+   */
+  private waiting: ResizeObserver | null = null;
+
+  /**
    * The client this screen has already asked, so it is not asked the same thing twice (flows#69).
    *
    * Opening Automations used to cost two of everything — the flow list, the shape of every witness
@@ -355,6 +401,7 @@ export class ErpFlowsGallery extends LitElement {
 
   disconnectedCallback(): void {
     window.removeEventListener('popstate', this.onPopState);
+    this.stopWaiting();
     super.disconnectedCallback();
   }
 
@@ -379,6 +426,8 @@ export class ErpFlowsGallery extends LitElement {
       return; // No address bar, no shortcut. Still a gallery.
     }
     if (!id) return;
+    // Whatever the previous shortcut was still waiting to show is not what the owner asked for now.
+    this.stopWaiting();
     this.linked = id;
     this.revealed = '';
     this.picked = id;
@@ -402,8 +451,34 @@ export class ErpFlowsGallery extends LitElement {
     if (!this.linked || this.revealed === this.linked) return;
     const card = this.renderRoot.querySelector(`[data-template="${this.linked}"]`);
     if (!card) return;
+    if (offScreen(card) && this.waitForTheScreen(card)) return;
+    this.stopWaiting();
     this.revealed = this.linked;
     (card as HTMLElement).scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }
+
+  /**
+   * Holds the reveal until the card has a box again, and says whether it could.
+   *
+   * The card getting a size IS the page coming back — there is no event for it that reaches in
+   * here: the shell's `ionViewDidEnter` fires on the Ionic page and does not cross into this
+   * element. Where there is no `ResizeObserver` to hold it with, the answer is `false` and the
+   * caller scrolls anyway: an attempt that may land on nothing costs nothing, and «never» is the
+   * complaint this whole thing is about.
+   */
+  private waitForTheScreen(card: Element): boolean {
+    const Observer = (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+    if (typeof Observer !== 'function') return false;
+    if (!this.waiting) {
+      this.waiting = new Observer(() => this.reveal());
+      this.waiting.observe(card);
+    }
+    return true;
+  }
+
+  private stopWaiting(): void {
+    this.waiting?.disconnect();
+    this.waiting = null;
   }
 
   /**
