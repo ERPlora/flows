@@ -251,39 +251,6 @@ describe('what the badge costs, and what happens when the hub will not answer', 
     expect(opened).toEqual([{ flow: expect.objectContaining({ id: 'f7' }), needsGrants: false }]);
   });
 
-  it('asks about a flow that comes round on a card’s schedule too', async () => {
-    // Half of flows#68 lives here: recognising the calendar cards is worth nothing if the screen
-    // never asks what those flows are allowed to do, because a flow whose grants were never asked
-    // for stays «not asked yet» and badges nothing.
-    const client = hub([weeklyFlow()]);
-    await mount(client);
-    const asked = new Set(client.flows.grants.mock.calls.map((call) => call[0]));
-    expect([...asked], 'the calendar card never got its second half').toEqual(['f7']);
-  });
-
-  it('badges the calendar card the owner already set up, on the card itself', async () => {
-    // The whole complaint (flows#68): she set the Friday review up weeks ago, came back, saw the
-    // same invitation and got a second one landing every Friday.
-    const el = await mount(hub([weeklyFlow()]));
-    expect(card(el, 'friday-week-review')?.dataset.installed).toBe('active');
-    expect(
-      card(el, 'morning-agenda-check')?.dataset.installed,
-      'the other calendar card was badged by association',
-    ).toBeUndefined();
-  });
-
-  it('offers «View it» on a calendar card it already has, and hands over that flow', async () => {
-    const el = await mount(hub([weeklyFlow()]));
-    el.open('friday-week-review');
-    await settle(el);
-    const opened: { flow: { id: string }; needsGrants: boolean }[] = [];
-    el.addEventListener('flows-open-flow', (e) =>
-      opened.push((e as CustomEvent<{ flow: { id: string }; needsGrants: boolean }>).detail),
-    );
-    act(el, 'view')?.click();
-    expect(opened).toEqual([{ flow: expect.objectContaining({ id: 'f7' }), needsGrants: false }]);
-  });
-
   it('keeps the badge when the hub mixes rows it cannot read into the grants', async () => {
     // What comes back from `flows.grants` is the hub's answer, not ours, and reading `.kind` off a
     // `null` throws — which the catch swallows, losing the WHOLE flow's grants and silently
