@@ -445,15 +445,22 @@ const SOURCES: readonly MirrorSource[] = [
     // and the 180 days of backlog Meta hands over on connection. This is the other half of the
     // drill — the neighbour test above went red on the digests, not the pin, because the source
     // documents changed rather than merely moving commit.
-    commit: 'c4b536808ce74171ba6c39b3f52d89b663c310e6',
+    //
+    // And moved again by whatsapp_inbox#82 (squashed as `0f8eb60`), digests with it: point 5 of
+    // CANCELLING now orders the `customer_id` the first point already looked up by phone, because
+    // from appointments 1.1.72 (appointments#140) a cancellation on the customer channel without
+    // it is refused whole with `invalid_payload`. Until this landed the gallery kept handing out
+    // the version that cannot cancel (flows#64) — and NOTHING here went red, which is why the
+    // third pin test below now exists.
+    commit: '0f8eb60f9cdc2f9bafa818dd19fc45d3f2e91e45',
     files: {
       en: 'flows/appointment-from-whatsapp.en.flow.json',
       es: 'flows/appointment-from-whatsapp.es.flow.json',
       grants: 'flows/appointment-from-whatsapp.grants.json',
     },
     digest: {
-      en: '48c6b243aa25f1f87728ed69de0a126167d382e98cacdfd99805f461a9188902',
-      es: '7c153ee52ae96fff2da5d1ad7390dbbf335218c8b7a00ef7c1b62b67a89e6ab4',
+      en: '96f1ab71dc27a4519efecc039e5140a92d9fac05917c541caa41fd5118b30af6',
+      es: '32a2112096288db6d93c2051d620ffc93788a8e77982a601a7bab3cda01cc43b',
     },
   },
   {
@@ -472,15 +479,19 @@ const SOURCES: readonly MirrorSource[] = [
     // Moved again by whatsapp_inbox#90 (`c4b5368`), with the digests: this family books without
     // asking anybody, so the echo and the backlog it used to answer went straight into the diary
     // as appointments. Its trigger now carries the same two clauses as the twin's.
-    commit: 'c4b536808ce74171ba6c39b3f52d89b663c310e6',
+    //
+    // And by whatsapp_inbox#82 (`0f8eb60`), the same identified cancellation as the twin — with
+    // nobody watching, here it mattered more: the customer was told nothing and no salon saw the
+    // refusal.
+    commit: '0f8eb60f9cdc2f9bafa818dd19fc45d3f2e91e45',
     files: {
       en: 'flows/appointment-from-whatsapp-unattended.en.flow.json',
       es: 'flows/appointment-from-whatsapp-unattended.es.flow.json',
       grants: 'flows/appointment-from-whatsapp-unattended.grants.json',
     },
     digest: {
-      en: '49dd54fd210f82c07beca738bc027691e5ba0c0292dd09a62a9f9d7fdff02ed5',
-      es: '3364e4c5724589993e5518a6f6fde4e4be4d112856bba08996c0f8514f900806',
+      en: 'bb4b97da3a2856d38ffc08f248d459f924c7f512d1fdb17ad46cce25a8e2d652',
+      es: 'bd4c253874dccaa2de5a35e256d8482a72f8b3b9006f5749b928ad13dbe57887',
     },
   },
 ] as const;
@@ -548,6 +559,37 @@ function sourceCheckout(source: MirrorSource = SOURCE): string | null {
     }
   }
   return best?.dir ?? null;
+}
+
+/**
+ * **The source's `origin/main`, which is where the PUBLISHED document lives.** {@link
+ * sourceCheckout} answers with a working tree, and a working tree is whatever branch somebody left
+ * it on: the fleet keeps a dozen `whatsapp_inbox-*` worktrees beside this module, so «the newest
+ * HEAD at or past the pin» can be a branch that predates a fix already on `main` — on flows#64 it
+ * was, and it agreed with a stale mirror. It also disappears the moment the pin moves ahead of
+ * every local checkout, taking its test with it, silently, as a skip.
+ *
+ * A ref does neither. This returns the canonical checkout's `refs/remotes/origin/main` as last
+ * fetched, and a `git` bound to it — `null` where there is no canonical checkout at all (CI, until
+ * module-toolkit#211 brings the source repo to the runner). `git fetch` is not something a test
+ * does, so on a stale checkout this reports late; it never reports a drift that is not there.
+ */
+function sourceMain(
+  module: string,
+): { sha: string; git: (...args: string[]) => string | null } | null {
+  const canonical = join(resolve(__dirname, '../../..'), module);
+  const git = (...args: string[]): string | null => {
+    try {
+      return execFileSync('git', ['-C', canonical, ...args], { stdio: ['ignore', 'pipe', 'ignore'] })
+        .toString()
+        .trim();
+    } catch {
+      return null;
+    }
+  };
+  if (!existsSync(join(canonical, 'module.json'))) return null;
+  const sha = git('rev-parse', 'refs/remotes/origin/main');
+  return sha === null ? null : { sha, git };
 }
 describe('WhatsApp → appointment, the card the WhatsApp module has always shipped (flows#52)', () => {
   const template = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment');
@@ -917,19 +959,9 @@ describe.each(SOURCES)(
 describe.each(SOURCES)(
   'the $template pin names a commit of whatsapp_inbox main (whatsapp_inbox#61, twice)',
   (mirror: MirrorSource) => {
-  const canonical = join(resolve(__dirname, '../../..'), mirror.module);
-  const git = (...args: string[]): string | null => {
-    try {
-      return execFileSync('git', ['-C', canonical, ...args], { stdio: ['ignore', 'pipe', 'ignore'] })
-        .toString()
-        .trim();
-    } catch {
-      return null;
-    }
-  };
-  const main = existsSync(join(canonical, 'module.json'))
-    ? git('rev-parse', 'refs/remotes/origin/main')
-    : null;
+  const on = sourceMain(mirror.module);
+  const git = on?.git ?? ((): string | null => null);
+  const main = on?.sha ?? null;
   const pinned =
     main !== null && git('merge-base', '--is-ancestor', mirror.commit, 'refs/remotes/origin/main') !== null;
   const landed =
@@ -983,6 +1015,65 @@ describe.each(SOURCES)(
       ).toBe(mirror.digest[lang]);
     }
   });
+
+  /**
+   * **…and the source must not have MOVED PAST it.** The two tests above both judge the mirror
+   * against the commit it names, so once that commit is on `main` they stay green for ever — which
+   * is the hole whatsapp_inbox#97 fell through. Its squash (`0f8eb60`) rewrote all four documents,
+   * the pin at `c4b5368` was still an ancestor of `main`, and the documents AT `c4b5368` still
+   * hashed to what the cards carry, so all 76 tests here passed while the gallery handed out a
+   * cancellation `appointments` rejects with `invalid_payload` (flows#64).
+   *
+   * The neighbour test far above is not that alarm either, twice over: it reads the WORKING TREE of
+   * whichever checkout beside this module has the newest HEAD, and the fleet keeps a dozen
+   * `whatsapp_inbox-*` worktrees — on flows#64 it picked one whose branch predates the fix and
+   * agreed with the stale mirror. This reads `refs/remotes/origin/main`, which is the one place the
+   * PUBLISHED document lives, and names both the sha and the digests to set.
+   *
+   * Only when the pin is already on `main`, and that is the whole point of the condition: a mirror
+   * written while its source is still a branch legitimately carries documents `main` has never
+   * seen, and that case is the two tests above (`landed` → re-pin; neither → skipped out loud).
+   * Skipped where there is no canonical checkout at all (CI, until module-toolkit#211). `git fetch`
+   * is not something a test does, so a stale checkout reports what was last fetched — late, never
+   * a false red.
+   */
+  it.skipIf(main === null || !pinned)(`is what whatsapp_inbox publishes TODAY, not a document it has moved past (${state})`, () => {
+    const template = TEMPLATES.find((tpl) => tpl.id === mirror.template);
+    /** The commit the published document actually comes from — the sha to re-pin to, not the tip. */
+    const carrier = (file: string): string =>
+      git('log', '-1', '--format=%H', 'refs/remotes/origin/main', '--', file) ?? main!;
+    for (const lang of ['en', 'es'] as const) {
+      const body = git('show', `refs/remotes/origin/main:${mirror.files[lang]}`);
+      expect(body, `${mirror.files[lang]} is not in whatsapp_inbox origin/main`).not.toBeNull();
+      const published = digest(JSON.parse(body!) as Record<string, unknown>);
+      expect(
+        published,
+        `${mirror.template}: the ${lang} document whatsapp_inbox publishes on origin/main is NOT ` +
+          `the one this card carries. The source moved past the pin (${mirror.commit.slice(0, 7)}) ` +
+          `and the gallery is handing out the old automation — re-sync the card and the ${lang} ` +
+          `locale file from the source, set \`commit\` to ${carrier(mirror.files[lang])}, and set ` +
+          `the ${lang} digest to ${published}.`,
+      ).toBe(mirror.digest[lang]);
+    }
+    // The grants file the same way: it moves on its own (whatsapp_inbox#55 dropped one, #61 added
+    // two), and a card that keeps asking for a permission the source has stopped publishing is an
+    // automation the hub refuses to create — or, the other way round, one that books without being
+    // allowed to.
+    const grants = git('show', `refs/remotes/origin/main:${mirror.files.grants}`);
+    expect(grants, `${mirror.files.grants} is not in whatsapp_inbox origin/main`).not.toBeNull();
+    expect(
+      templateGrants(template!, t)
+        .map((g) => `${g.kind} ${g.value}`)
+        .sort(),
+      `${mirror.template}: the permissions this card derives are not the ones whatsapp_inbox ` +
+        `publishes on origin/main (${carrier(mirror.files.grants).slice(0, 7)}).`,
+    ).toEqual(
+      (JSON.parse(grants!) as { grants: { kind: string; value: string }[] }).grants
+        .map((g) => `${g.kind} ${g.value}`)
+        .sort(),
+    );
+  });
+
   },
 );
 
@@ -1071,11 +1162,19 @@ describe('the gallery only offers what this hub can run (flows#52)', () => {
  * one nobody turns on.
  */
 describe('every family whatsapp_inbox publishes has a card in this gallery (whatsapp_inbox#58)', () => {
-  const source = sourceCheckout();
-  const where = source ? `read from ${source}` : 'SKIPPED: no checkout at or past the pin beside this module';
+  // Off `origin/main` and not off a neighbouring working tree: PUBLISHED is what this test is
+  // about, and a family still on a branch is not published yet. The working-tree version of this
+  // read also went quiet — a skip, and a green run — the moment a re-pin outran every local
+  // checkout, which is exactly when a new family is most likely to be arriving (flows#64).
+  const on = sourceMain(SOURCE.module);
+  const where = on
+    ? `read from origin/main as fetched, ${on.sha.slice(0, 7)}`
+    : 'SKIPPED: no canonical checkout beside this module';
 
-  it.skipIf(!source)(`leaves no published family without a mirror (${where})`, () => {
-    const families = readdirSync(join(source!, 'flows'))
+  it.skipIf(!on)(`leaves no published family without a mirror (${where})`, () => {
+    const families = (on!.git('ls-tree', '--name-only', 'refs/remotes/origin/main', 'flows/') ?? '')
+      .split('\n')
+      .map((f) => f.replace('flows/', ''))
       .filter((f) => f.endsWith('.en.flow.json'))
       .sort();
     // The control that stops a green from meaning «the directory was empty»: whatever else is
