@@ -8,6 +8,7 @@ import {
   SECTORS,
   availableTemplates,
   buildTemplate,
+  carriedPins,
   missingModules,
   moduleName,
   templateGrants,
@@ -1518,7 +1519,12 @@ describe('every family whatsapp_inbox publishes has a card in this gallery (what
   it('marks in PRODUCTION the very family each pin mirrors', () => {
     for (const s of SOURCES) {
       const card = TEMPLATES.find((tpl) => tpl.id === s.template);
-      expect(card?.mirrors, `${s.template} is pinned to a published family but is not marked as a copy of it`)
+      // The PAIRING, and only the pairing: `mirrors` also carries the limits staged for the served
+      // twin (flows#103), which say nothing about which family is mirrored and have their own two
+      // guards. Anything else new in there would still have to pass the type — the field is a
+      // closed object literal — so nothing is let through by narrowing the comparison here.
+      const pairing = card?.mirrors && { module: card.mirrors.module, family: card.mirrors.family };
+      expect(pairing, `${s.template} is pinned to a published family but is not marked as a copy of it`)
         .toEqual({ module: s.module, family: s.files.en.replace('flows/', '').replace('.en.flow.json', '') });
     }
     // And nothing is marked as a copy of something no pin watches: a mirror nobody checks against
@@ -1721,6 +1727,40 @@ describe('a card installs the permission it PROMISED, not the wide one next to i
           command,
         );
       }
+    }
+  });
+
+  // The other half of the rule above, and the reason there are two fields (flows#103). A limit
+  // STAGED for the served twin is one this copy cannot apply to itself; the day the copy grows the
+  // operation, the entry has to move to `grantPins` — where the rule above starts watching it —
+  // rather than sit here leaving the copy's own permission wide.
+  it('stages for the twin only the limits its own document cannot carry', () => {
+    for (const template of TEMPLATES) {
+      const derived = new Set(
+        templateGrants(template, t)
+          .filter((g) => g.kind === 'command')
+          .map((g) => g.value),
+      );
+      for (const command of Object.keys(template.mirrors?.pins ?? {})) {
+        expect(
+          derived,
+          `${template.id} stages \`${command}\` for its twin, but its own document runs it — ` +
+            'that limit belongs in `grantPins`',
+        ).not.toContain(command);
+      }
+    }
+  });
+
+  // Both halves at once, anchored from the fields rather than from the documents: one limit, one
+  // home. Written twice, an edit to either copy is a containment that silently disagrees with
+  // itself — and `carriedPins` would apply whichever the spread happened to put last.
+  it('never says the same limit in both places', () => {
+    for (const template of TEMPLATES) {
+      const own = Object.keys(template.grantPins ?? {});
+      const staged = Object.keys(template.mirrors?.pins ?? {});
+      expect(own.filter((command) => staged.includes(command)), template.id).toEqual([]);
+      // …and everything the merge applies comes from exactly those two.
+      expect(Object.keys(carriedPins(template)).sort()).toEqual([...own, ...staged].sort());
     }
   });
 
