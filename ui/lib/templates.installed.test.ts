@@ -304,9 +304,11 @@ describe('a template this hub already runs', () => {
   });
 
   it('recognises nothing at all from a scheduled card that seeds no command', () => {
-    // «Every seeded step is there» is vacuously true of a card that seeds none, which would badge
-    // every scheduled flow in the hub off a card that does nothing. No card is like this today;
-    // this is the guard that stops one being added by accident.
+    // «Every seeded step is there» is vacuously true of a card that seeds none, which would make
+    // every scheduled flow in the hub a candidate. Two things stop that, and the second is why the
+    // explicit guard in `carriesSeededSteps` cannot be observed on its own: a card that seeds no
+    // command step also DECLARES no command, because grants are read off the built document — so
+    // the command half answers `absent` no matter what the candidate half said.
     const template = {
       ...tpl('friday-week-review'),
       build: (tr: (k: string) => string) => ({
@@ -315,6 +317,7 @@ describe('a template this hub already runs', () => {
       }),
     };
     const flow = scheduledFlow('0 18 * * 5', ['tasks.tasks.create']);
+    expect(templateCommands(template, t), 'a card with no steps declares no command').toEqual([]);
     expect(templateInstallation(template, t, [flow])).toEqual({ state: 'absent' });
   });
 
