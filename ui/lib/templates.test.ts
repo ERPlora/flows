@@ -452,7 +452,7 @@ const SOURCES: readonly MirrorSource[] = [
     // it is refused whole with `invalid_payload`. Until this landed the gallery kept handing out
     // the version that cannot cancel (flows#64) — and NOTHING here went red, which is why the
     // third pin test below now exists.
-    // And moved by whatsapp_inbox#74: the proposing step gained MOVING. It had book and cancel and
+    // And moved by whatsapp_inbox#74: the proposing step gained MOVING — in THIS family only. It had book and cancel and
     // no way to change an appointment's hour, so «can you change it to Thursday?» fell into the
     // «anything else» branch — or was read as a new booking and the customer ended up with two.
     // Moving is `appointments.appointments.reschedule`, ONE call and never cancel-then-book, and
@@ -461,10 +461,14 @@ const SOURCES: readonly MirrorSource[] = [
     // The grants list grows by one (13 → 14) and `reply_to_customer` learns to say that a refused
     // MOVE leaves the appointment she already had exactly where it was.
     //
+    // Its twin below did NOT gain it, and that asymmetry is the whole point: `reschedule` cannot
+    // be bound to the customer asking (no `channel`, no `customer_id`, and the handler never looks
+    // at whose appointment it is), so the move only ships where a PERSON approves the write.
+    //
     // 🔴 Pinned at the branch head while whatsapp_inbox#102 is open: `merge-pr.sh` squashes it, so
     // the last test of this file goes red naming the squash sha, and this pin is set to that. The
     // digests do not change with the re-pin.
-    commit: '50658dfaf7d2d41ff100e9f50ed24fa14bb15ec2',
+    commit: '5cdfb79d8c031896abe28971c3c1d9a3f5c9491d',
     files: {
       en: 'flows/appointment-from-whatsapp.en.flow.json',
       es: 'flows/appointment-from-whatsapp.es.flow.json',
@@ -495,20 +499,26 @@ const SOURCES: readonly MirrorSource[] = [
     // And by whatsapp_inbox#82 (`0f8eb60`), the same identified cancellation as the twin — with
     // nobody watching, here it mattered more: the customer was told nothing and no salon saw the
     // refusal.
-    // And by whatsapp_inbox#74, the same MOVING as the twin — and here it matters more: with nobody
-    // reading the tray, a cancel-then-book that fails halfway leaves the customer with no
-    // appointment and no salon to notice. Same one call, same id out of `list_for_customer`.
     //
-    // 🔴 Same branch-head pin as the twin while whatsapp_inbox#102 is open (see above).
-    commit: '50658dfaf7d2d41ff100e9f50ed24fa14bb15ec2',
+    // 🔴 whatsapp_inbox#74 did NOT touch this family, and the pin stays where it was to say so:
+    // the twin above learned to MOVE an appointment and this one deliberately did not, so it keeps
+    // thirteen permissions against the twin's fourteen. `appointments.appointments.reschedule`
+    // carries no `channel` and no `customer_id` (`additionalProperties: false` over
+    // `appointment_id`, `start_datetime`, `duration_minutes`) and its handler never checks whose
+    // appointment it is, so nothing downstream can refuse a stranger's. Cancelling CAN be bound
+    // that way — which is why whatsapp_inbox#100 can pin `payload` in its grant once hub#1632
+    // ships, and why the same trick has nothing to bite on here. With `policy: "auto"` there is no
+    // person in the loop either, so the family answers «somebody from the salon will get back to
+    // you». It reopens with appointments#142 first, then whatsapp_inbox#103.
+    commit: '0f8eb60f9cdc2f9bafa818dd19fc45d3f2e91e45',
     files: {
       en: 'flows/appointment-from-whatsapp-unattended.en.flow.json',
       es: 'flows/appointment-from-whatsapp-unattended.es.flow.json',
       grants: 'flows/appointment-from-whatsapp-unattended.grants.json',
     },
     digest: {
-      en: 'e5086d07e4d1a2a5bca8943988de1272e7fbd85a76aced04a4d3ad1b6a1aac78',
-      es: '29efdda91f1ba06215715ebd02b30145383b3dbc34bf6e5b9ac79212f1c44560',
+      en: 'bb4b97da3a2856d38ffc08f248d459f924c7f512d1fdb17ad46cce25a8e2d652',
+      es: 'bd4c253874dccaa2de5a35e256d8482a72f8b3b9006f5749b928ad13dbe57887',
     },
   },
 ] as const;
@@ -872,12 +882,30 @@ describe('WhatsApp → appointment BOOKED, the family that runs with nobody watc
     expect(confirm?.to).toEqual(steps[0].to);
   });
 
-  it('asks for the same fourteen permissions as its attended twin, and not one more', () => {
-    // Running unattended is a reason to skip the tray, never a reason to want more authority.
+  /**
+   * **Thirteen against the twin's fourteen, and the missing one is MOVING** (whatsapp_inbox#74).
+   *
+   * Running unattended is a reason to skip the tray, never a reason to want more authority — and
+   * here it is a reason to want LESS. `appointments.appointments.reschedule` cannot be scoped to
+   * the customer who is writing: it takes no `channel` and no `customer_id`, and its handler
+   * checks state, notice, hours, blocks and overlap — never whose appointment it is. The grants
+   * this card already holds reach any of them (`customers.list` searches by name,
+   * `list_for_customer` takes any `customer_id`), so with `policy: "auto"` the only thing between
+   * a customer and a stranger's hour would be a paragraph of prompt (hub#1623: not a control).
+   *
+   * Asserted as «the twin's set MINUS the move» and not as a literal list, so the day the twin
+   * gains a permission this card gains it too — the one asymmetry that is deliberate is named
+   * here, and any other one is a red. It goes back to being identical when appointments#142 gives
+   * `reschedule` its `channel` + `customer_id` and whatsapp_inbox#103 re-adds the branch.
+   */
+  it('asks for its attended twin’s permissions MINUS the move it must not have', () => {
     const mine = templateGrants(template!, t).map((g) => `${g.kind} ${g.value}`).sort();
     const theirs = templateGrants(attended!, t).map((g) => `${g.kind} ${g.value}`).sort();
-    expect(mine).toEqual(theirs);
-    expect(mine).toHaveLength(14);
+    expect(mine).not.toContain('command appointments.appointments.reschedule');
+    expect(theirs).toContain('command appointments.appointments.reschedule');
+    expect(mine).toEqual(theirs.filter((g) => g !== 'command appointments.appointments.reschedule'));
+    expect(mine).toHaveLength(13);
+    expect(theirs).toHaveLength(14);
   });
 
   it('needs the same five modules, so a hub short of one never sees it', () => {

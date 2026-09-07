@@ -662,7 +662,6 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       'appointments.appointments.create': 'tpl.grant.appointmentsCreate',
       'appointments.appointments.list_for_customer': 'tpl.grant.appointmentsListForCustomer',
       'appointments.appointments.cancel': 'tpl.grant.appointmentsCancel',
-      'appointments.appointments.reschedule': 'tpl.grant.appointmentsReschedule',
     },
     build: (t) => ({
       schema_version: SCHEMA_VERSION,
@@ -714,11 +713,21 @@ export const TEMPLATES: readonly FlowTemplate[] = [
         },
         // `auto`, and this is the step the whole family exists for: it books. Named
         // `book_appointment` and not `propose_appointment` because that is what it does — there is
-        // no proposal and no tray. Same tools and same budget as the twin (the cap: booking chains
-        // up to nine calls, moving six), same «decide first what they are asking for» branch that
-        // cancels or moves instead of booking when that is what the message says. With nobody
-        // watching, moving as ONE call matters more here: a cancel-then-book that fails halfway
-        // leaves the customer with no appointment and no salon reading the tray (whatsapp_inbox#74).
+        // no proposal and no tray. Same budget as the twin (the cap: booking chains up to nine
+        // calls), same «decide first what they are asking for» branch that cancels instead of
+        // booking when that is what the message says.
+        //
+        // 🔴 ONE tool fewer than the twin, on purpose: this family CANNOT MOVE an appointment
+        // (13 grants, not 14 — whatsapp_inbox#74's scope cut). Cancelling can be bound to the
+        // customer who is asking — `channel: "customer"` makes the handler compare the
+        // appointment's `customer_id` with the one passed — but `appointments.appointments.reschedule`
+        // has no such field (`additionalProperties: false` over `appointment_id`,
+        // `start_datetime`, `duration_minutes`) and its handler never checks whose appointment it
+        // is. `customers.list` searches by name, `list_for_customer` takes any `customer_id`: with
+        // `policy: "auto"` the only thing between a customer and a stranger's hour is a paragraph
+        // of prompt, which is exactly what hub#1623 says is NOT a control. The twin is `manual`,
+        // so a person sees the move before it happens. Reopening this is appointments#142 (give
+        // `reschedule` its `channel` + `customer_id`) and then whatsapp_inbox#103, in that order.
         {
           id: 'book_appointment',
           kind: 'ai',
@@ -737,7 +746,6 @@ export const TEMPLATES: readonly FlowTemplate[] = [
               'appointments.availability.check',
               'appointments.appointments.create',
               'appointments.appointments.cancel',
-              'appointments.appointments.reschedule',
             ],
           },
           policy: 'auto',
