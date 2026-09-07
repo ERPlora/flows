@@ -7,6 +7,9 @@ import {
   describeRunStep,
   dailyCron,
   readDailyCron,
+  readSchedule,
+  scheduleCron,
+  readCronTime,
   humaniseField,
   describeSample,
 } from './plain-language';
@@ -86,6 +89,73 @@ describe('the daily-schedule builder, which is the only cron most owners will ev
     expect(readDailyCron('30 9 * * *')).toBe('09:30');
     expect(readDailyCron('0 9 * * MON-FRI')).toBeNull();
     expect(readDailyCron('*/5 * * * *')).toBeNull();
+  });
+});
+
+/**
+ * The three shapes the screen can both READ and WRITE without losing anything (flows#77).
+ *
+ * `readDailyCron` above only knows «every day», and the editor used to write with it whatever it
+ * had read — so «every Friday» came back empty and left as «every day» the moment the owner
+ * touched the hour. `readSchedule` is the wider pair: it either understands the whole expression
+ * or says `null`, and `scheduleCron` writes back exactly what was understood.
+ */
+describe('the schedule an owner can edit without losing the rest of it (flows#77)', () => {
+  it('reads every day, every week and every month', () => {
+    expect(readSchedule('30 9 * * *')).toEqual({ every: 'day', time: '09:30' });
+    expect(readSchedule('0 18 * * 5')).toEqual({ every: 'week', time: '18:00', weekday: 5 });
+    expect(readSchedule('0 8 1 * *')).toEqual({ every: 'month', time: '08:00', monthday: 1 });
+  });
+
+  it('treats `7` the way crontab does — Sunday, the same day as `0`', () => {
+    expect(readSchedule('0 8 * * 7')).toEqual({ every: 'week', time: '08:00', weekday: 0 });
+  });
+
+  it('writes back the expression the kernel parses', () => {
+    expect(scheduleCron({ every: 'day', time: '09:30' })).toBe('30 9 * * *');
+    expect(scheduleCron({ every: 'week', time: '18:00', weekday: 5 })).toBe('0 18 * * 5');
+    expect(scheduleCron({ every: 'month', time: '08:00', monthday: 15 })).toBe('0 8 15 * *');
+  });
+
+  it('round-trips every shape it claims to understand', () => {
+    for (const cron of ['30 9 * * *', '0 18 * * 5', '0 8 15 * *', '5 0 * * 0']) {
+      expect(scheduleCron(readSchedule(cron)!)).toBe(cron);
+    }
+  });
+
+  it('refuses what it cannot draw, instead of returning the nearest thing', () => {
+    // Every one of these ran fine on the hub and was flattened to `M H * * *` by the old box.
+    for (const cron of [
+      '0 9 * * MON-FRI',
+      '*/15 * * * *',
+      '0 9 1,15 * *',
+      '30 8,20 * * *',
+      '0 9 1 1 *',
+      '0 9 1 * 5',
+      '@daily',
+      '',
+    ]) {
+      expect(readSchedule(cron)).toBeNull();
+    }
+  });
+
+  it('reads the hour out of a schedule it cannot draw, so replacing one keeps it', () => {
+    // `0 9 * * MON-FRI` cannot be drawn, but its 9:00 is unambiguous and is the one thing worth
+    // carrying over when the owner deliberately replaces it.
+    expect(readCronTime('0 9 * * MON-FRI')).toBe('09:00');
+    expect(readCronTime('30 18 1,15 * *')).toBe('18:30');
+    expect(readCronTime('*/15 * * * *')).toBeNull();
+    expect(readCronTime('0 8,20 * * *')).toBeNull();
+    expect(readCronTime('@daily')).toBeNull();
+  });
+
+  it('says a weekly and a monthly schedule in words, so the card is not raw cron', () => {
+    expect(describeTrigger({ kind: 'cron', cron: '0 18 * * 5' }, t)).toBe(
+      'ui.triggerWeekly(day=ui.weekday5,time=18:00)',
+    );
+    expect(describeTrigger({ kind: 'cron', cron: '0 8 15 * *' }, t)).toBe(
+      'ui.triggerMonthly(day=15,time=08:00)',
+    );
   });
 });
 
