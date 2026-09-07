@@ -478,15 +478,15 @@ const SOURCES: readonly MirrorSource[] = [
     // did not touch the files hashes the same), and the pin would stop saying WHICH change it
     // mirrors, which is the one job it has. `git log -1 <file>` on the source's `main` is the
     // answer, and it is what the third test names in its own remedy.
-    commit: '33e7c0fab69d875e8bd530a1939d59efe1dfd27c',
+    commit: '6737f5a5e649ed6561e26a453f91858e5db0d93d',
     files: {
       en: 'flows/appointment-from-whatsapp.en.flow.json',
       es: 'flows/appointment-from-whatsapp.es.flow.json',
       grants: 'flows/appointment-from-whatsapp.grants.json',
     },
     digest: {
-      en: '2119e9a89c7df1d5cef5ff6b4ef4b8bc5a4f07c2d5079a27076c631964de3c2e',
-      es: '219531d57fb72433f051d48176164b7e04fa5aa23729ce226b39b408f6d0bff1',
+      en: '4f2407b2267d31ea1d0c791a571769d6181f560c88d9e4c50d32644d02f0c369',
+      es: '6314b92900d7d37781e7fd20e6f2bcda53881796d7e537a7db6fbc9d00c7e319',
     },
   },
   {
@@ -520,15 +520,15 @@ const SOURCES: readonly MirrorSource[] = [
     // ships, and why the same trick has nothing to bite on here. With `policy: "auto"` there is no
     // person in the loop either, so the family answers «somebody from the salon will get back to
     // you». It reopens with appointments#142 first, then whatsapp_inbox#103.
-    commit: '0f8eb60f9cdc2f9bafa818dd19fc45d3f2e91e45',
+    commit: '6737f5a5e649ed6561e26a453f91858e5db0d93d',
     files: {
       en: 'flows/appointment-from-whatsapp-unattended.en.flow.json',
       es: 'flows/appointment-from-whatsapp-unattended.es.flow.json',
       grants: 'flows/appointment-from-whatsapp-unattended.grants.json',
     },
     digest: {
-      en: 'bb4b97da3a2856d38ffc08f248d459f924c7f512d1fdb17ad46cce25a8e2d652',
-      es: 'bd4c253874dccaa2de5a35e256d8482a72f8b3b9006f5749b928ad13dbe57887',
+      en: '233ab8c1f9a296aa06962675cfcfde5c859e1d9e9bc89f3cb5e334cb36ca1ccf',
+      es: 'cd5195b5905eb8b6abbe63bd397fef0c5ba74ba88f9c5a9f0e9e4d75f1f34a9a',
     },
   },
   {
@@ -556,15 +556,15 @@ const SOURCES: readonly MirrorSource[] = [
     // answer «somebody from the restaurant will take care of it» instead, and the module's battery
     // pins that with `unowned_table_problems`. It reopens with ERPlora/reservations#50 — the twin
     // of appointments#140, and the same shape as appointments#142 for `reschedule`.
-    commit: '6a8e1d7910af7ba2e0b276601fc03e3bd46015ae',
+    commit: '6737f5a5e649ed6561e26a453f91858e5db0d93d',
     files: {
       en: 'flows/reservation-from-whatsapp.en.flow.json',
       es: 'flows/reservation-from-whatsapp.es.flow.json',
       grants: 'flows/reservation-from-whatsapp.grants.json',
     },
     digest: {
-      en: '6ae2ee8e9b8476335b83e32c58e64cb0f056fb69d28f2d8e071df5b2db482721',
-      es: '48c26dc29ddb6a465ab6f453cd8eafe52c3234f769f4703b1886194164e6b887',
+      en: '607670f78eda3396b25b28b72702916bf732fa026454502957b5fe50144a1a46',
+      es: 'ceb3f5ab6669efa2b6de866e0e76467da6ce374b5a93a460699094f906e9c5df',
     },
   },
   {
@@ -579,15 +579,15 @@ const SOURCES: readonly MirrorSource[] = [
     // sentence, not the salon's — «You never choose the hour or how many people are coming. They
     // do.» — because the harm has one more field here: an hour nobody asked for seats people while
     // the kitchen is shut, and a party size nobody said seats four at a table for two.
-    commit: '6a8e1d7910af7ba2e0b276601fc03e3bd46015ae',
+    commit: '6737f5a5e649ed6561e26a453f91858e5db0d93d',
     files: {
       en: 'flows/reservation-from-whatsapp-unattended.en.flow.json',
       es: 'flows/reservation-from-whatsapp-unattended.es.flow.json',
       grants: 'flows/reservation-from-whatsapp-unattended.grants.json',
     },
     digest: {
-      en: '8a2229fabb0f3c6105c7a43fcd466df05b76264fc7245614836c01677caa4d98',
-      es: 'f8de23188bd2d749fb6a7161b082fd0deeff1939bd8be97397a72156061375d1',
+      en: '9b69f8cfc1346522bccca9a3e1981b2055378963cf5973825acba0a8730c7907',
+      es: '2060f14bdd40ac51db49ecc97b9fee5002e3d14a883190e04d26f2ab3ea0e19c',
     },
   },
 ] as const;
@@ -737,19 +737,30 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
     // them. The fourth step is whatsapp_inbox#67's: the one that knows how the salon DECIDED and
     // writes what the customer actually reads — it is what makes the fifth (whatsapp_inbox#58's
     // first half, the only thing that ever speaks to her) say something on a «no» too.
+    //
+    // The two `query` steps are whatsapp_inbox#103's: the customer is looked up DETERMINISTICALLY,
+    // by the phone the message came from, because a model holding `customers.list` can search the
+    // address book by NAME and read out a stranger's diary. Twice, and not once, because
+    // `know_the_customer` may CREATE her in between: the first read answers «is she on file», the
+    // second carries the id that exists afterwards.
     expect(steps.map((s) => [s.id, s.kind])).toEqual([
       ['acknowledge', 'notify'],
+      ['find_customer', 'query'],
       ['know_the_customer', 'ai'],
+      ['resolve_customer', 'query'],
       ['propose_appointment', 'ai'],
       ['reply_to_customer', 'ai'],
       ['confirm_to_customer', 'notify'],
     ]);
     // Every model step waits for a person: the first two WRITE (a customer card, a booking), and
     // the third carries no tools at all, so `manual` costs it nothing — there is never a proposal
-    // to approve.
+    // to approve. The `query` steps carry no policy: they are the document's own read, not a
+    // model's, so there is nothing for anybody to approve.
     expect(steps.map((s) => s.policy)).toEqual([
       undefined,
+      undefined,
       'manual',
+      undefined,
       'manual',
       'manual',
       undefined,
@@ -928,15 +939,29 @@ describe('WhatsApp → appointment BOOKED, the family that runs with nobody watc
 
   it('books inside the turn: BOTH model steps are `auto`, and there is no approval step', () => {
     const steps = buildTemplate(template!, t).steps;
+    // The two `query` steps are whatsapp_inbox#103's, and this is the family it was opened
+    // against: with nobody reading the model's work before the customer does, a `customers.list`
+    // in its hands turned «what has María got booked?» into a stranger's diary sent over WhatsApp.
+    // The lookup is the document's now, keyed on the number the message came from.
     expect(steps.map((s) => [s.id, s.kind])).toEqual([
       ['acknowledge', 'notify'],
+      ['find_customer', 'query'],
       ['know_the_customer', 'ai'],
+      ['resolve_customer', 'query'],
       ['book_appointment', 'ai'],
       ['confirm_to_customer', 'notify'],
     ]);
     // The one word this family is: `manual` parks the write in `_flow_approvals` and ends the turn,
-    // which is the tray this salon has nobody to empty.
-    expect(steps.map((s) => s.policy)).toEqual([undefined, 'auto', 'auto', undefined]);
+    // which is the tray this salon has nobody to empty. The `query` steps have no policy at all —
+    // a deterministic read the document mapped is nobody's proposal to approve.
+    expect(steps.map((s) => s.policy)).toEqual([
+      undefined,
+      undefined,
+      'auto',
+      undefined,
+      'auto',
+      undefined,
+    ]);
     // And the kernel's explicit pause (hub#950) is not smuggled back in by another name.
     expect(steps.some((s) => s.kind === 'approval')).toBe(false);
   });
