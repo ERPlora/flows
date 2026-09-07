@@ -120,6 +120,30 @@ describe('the contract is read off the LIVE schema, not remembered', () => {
     expect(facts.toolsIsObject).toBe(true);
   });
 
+  // The one fact in here that CANNOT fall back to the mirror. Everything else degrades: a hub that
+  // served nothing usable still runs the document, it just judges it against `flow-doc.ts`. A
+  // document carrying `interactive` on a hub older than hub#1633 does not degrade — `parse_step`
+  // refuses the unknown key and takes the WHOLE definition down with it (`flow.invalid_definition`).
+  // So the floor here is `false`: no proof, no control.
+  it('offers the options that get tapped only where the hub declared the key', () => {
+    const declaring = JSON.parse(JSON.stringify(liveSchema));
+    declaring.$defs.step.properties.interactive = { type: 'object' };
+    expect(schemaFacts(declaring).interactiveNotify).toBe(true);
+  });
+
+  it('hides them on a hub whose schema does not name the key', () => {
+    // `liveSchema` is a pre-hub#1633 hub: `interactive` is simply not among the step's properties.
+    expect(schemaFacts(liveSchema).interactiveNotify).toBe(false);
+  });
+
+  it('hides them when the schema could not be read at all, unlike every other fact here', () => {
+    expect(schemaFacts(undefined).interactiveNotify).toBe(false);
+    expect(schemaFacts({ $defs: { step: {} } }).interactiveNotify).toBe(false);
+    // ...while the neighbouring facts DO fall back to the mirror, which is the contrast that
+    // makes this one deliberate rather than an oversight.
+    expect(schemaFacts(undefined).stepKinds).toContain('notify');
+  });
+
   it('obeys a hub that froze a NARROWER vocabulary than this editor mirrors', () => {
     const narrower = JSON.parse(JSON.stringify(liveSchema));
     narrower.$defs.step.properties.kind.enum = ['command', 'condition'];

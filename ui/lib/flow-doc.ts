@@ -95,6 +95,8 @@ export interface Step {
   to?: Recipient;
   template?: string;
   vars?: Record<string, unknown>;
+  /** `notify`, whatsapp only — Meta's own object, forwarded untranslated (see `whatsapp-options`). */
+  interactive?: Record<string, unknown>;
   /** `query` — `params` is shared with `command`. */
   query?: string;
   result?: QueryResult;
@@ -110,7 +112,7 @@ export interface Step {
 }
 
 /**
- * **The keys the kernel allows, per kind** — mirror of `def.rs:1018-1025`, which is a STRICT
+ * **The keys the kernel allows, per kind** — mirror of `def.rs::allowed_keys`, which is a STRICT
  * whitelist: an unknown key is refused at SAVE, not ignored. Mirrored rather than discovered,
  * because the editor has to build a step before it has anywhere to ask.
  */
@@ -120,7 +122,7 @@ export const STEP_KEYS: Readonly<Record<StepKind, readonly string[]>> = {
   delay: ['id', 'kind', 'seconds', 'until'],
   http: ['id', 'kind', 'method', 'url', 'headers', 'body', 'timeout'],
   ai: ['id', 'kind', 'prompt', 'tools', 'policy', 'max_iters'],
-  notify: ['id', 'kind', 'channel', 'to', 'template', 'vars'],
+  notify: ['id', 'kind', 'channel', 'to', 'template', 'vars', 'interactive'],
   query: ['id', 'kind', 'query', 'params', 'result', 'limit'],
   approval: ['id', 'kind', 'title', 'summary', 'assignee', 'expires_in', 'on_expire', 'on_reject'],
 };
@@ -347,6 +349,26 @@ export function patchStep(doc: FlowDoc, index: number, patch: Partial<Step>): Fl
   return {
     ...doc,
     steps: doc.steps.map((s, i) => (i === index ? { ...s, ...patch } : s)),
+  };
+}
+
+/**
+ * The other half of {@link patchStep}: a key that has to **go**, gone.
+ *
+ * Patching with `{vars: undefined}` would leave the key in place holding `undefined`, and whether
+ * it ever reaches the hub would come down to `JSON.stringify` dropping it on the way out. That is
+ * a save that works by accident — and this is the edit where being wrong is loud: the kernel
+ * refuses a `notify` carrying both the copy and the options (`conflicting_message_type`).
+ */
+export function removeStepKeys(doc: FlowDoc, index: number, keys: readonly string[]): FlowDoc {
+  return {
+    ...doc,
+    steps: doc.steps.map((s, i) => {
+      if (i !== index) return s;
+      const next = { ...s };
+      for (const key of keys) delete next[key];
+      return next;
+    }),
   };
 }
 

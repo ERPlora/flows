@@ -288,3 +288,51 @@ describe('the approval tray on the automations screen (flows#3)', () => {
     expect(el.renderRoot.querySelector('.flow')).toBeTruthy();
   });
 });
+
+describe('what the hub can do reaches the screen that draws it (flows#75)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+    (globalThis as { erplora?: unknown }).erplora = undefined;
+  });
+
+  const withSchema = (schema: Record<string, unknown>) =>
+    fakeClient({
+      flows: {
+        list: vi.fn(async () => [FLOW]),
+        get: vi.fn(async () => FLOW),
+        grants: vi.fn(async () => []),
+        schema: vi.fn(async () => ({ schema_version: 1, core_version: '1.0.2', schema })),
+      },
+    });
+
+  const editorOf = async (client: unknown) => {
+    const el = await mount(client);
+    (el.renderRoot.querySelector('[data-act="new"]') as HTMLElement | null)?.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, composed: true }),
+    );
+    await el.updateComplete;
+    for (let i = 0; i < 4; i += 1) await Promise.resolve();
+    await el.updateComplete;
+    return el.renderRoot.querySelector('erp-flows-editor') as HTMLElement & {
+      interactiveNotify: boolean;
+    };
+  };
+
+  /**
+   * The wiring, and it is worth a test of its own: the fact is READ correctly in `schemaFacts`
+   * (its own suite proves that) and APPLIED correctly in the editor (likewise), and if the value
+   * never travelled between them both suites would stay green while the control never appeared on
+   * any hub at all.
+   */
+  it('hands the editor what the hub said about tappable options', async () => {
+    const editor = await editorOf(
+      withSchema({ $defs: { step: { properties: { interactive: { type: 'object' } } } } }),
+    );
+    expect(editor?.interactiveNotify).toBe(true);
+  });
+
+  it('hands it a NO for a hub whose schema never mentions them', async () => {
+    const editor = await editorOf(withSchema({ $defs: { step: { properties: {} } } }));
+    expect(editor?.interactiveNotify).toBe(false);
+  });
+});

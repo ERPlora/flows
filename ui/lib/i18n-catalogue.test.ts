@@ -79,6 +79,11 @@ const COMPOSED_KEYS = [
   // `ui.queryResult_${first|count}` — and NOT rows, which the mapping language cannot read
   'ui.queryResult_first',
   'ui.queryResult_count',
+  // `ui.tapKind_${button|list}` and its hint — the two shapes Meta has for a tappable message
+  'ui.tapKind_button',
+  'ui.tapKind_list',
+  'ui.tapKindHint_button',
+  'ui.tapKindHint_list',
   // the plural helper's `${base}One`
   'ui.delayDaysOne',
   'ui.delayHoursOne',

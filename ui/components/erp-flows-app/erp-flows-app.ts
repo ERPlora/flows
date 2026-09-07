@@ -1158,6 +1158,7 @@ export class ErpFlowsApp extends LitElement {
         .t=${this.t}
         .tab=${this.editorTab}
         .draft=${this.draftReview}
+        .interactiveNotify=${this.facts.interactiveNotify}
         @flows-back=${() => {
           this.editing = null;
           this.isNew = false;

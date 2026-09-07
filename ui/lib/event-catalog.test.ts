@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { groupByFamily, loadEventCatalog } from './event-catalog';
+import { groupByFamily, loadEventCatalog, mergeContractFields } from './event-catalog';
+import type { EventShape } from './hub-flows';
 import { TRIGGER_CATALOG } from './trigger-catalog';
 import es from '../../locales/es.json';
 
@@ -165,5 +166,55 @@ describe('the dropdown is grouped by the module the event comes from', () => {
 
   it('has no groups for no options', () => {
     expect(groupByFamily([], t)).toEqual([]);
+  });
+});
+
+describe('the fields a tap comes home in (flows#75)', () => {
+  const shape = (fields: { path: string; seen_in?: number }[]): EventShape => ({
+    event_name: 'hub.whatsapp.message_received',
+    declared_by: ['core'],
+    samples: 4,
+    fields: fields.map((f) => ({
+      path: f.path,
+      type: 'string',
+      redacted: false,
+      truncated: false,
+      seen_in: f.seen_in ?? 4,
+    })),
+  });
+
+  /**
+   * The shape endpoint answers with the fields this hub has really SEEN, and until somebody taps
+   * an option for the first time `reply_id` is not among them. That is the chicken and the egg:
+   * the guard that reacts to a tap cannot be built until a tap has happened, so nobody can build
+   * the automation that produces the first tap.
+   */
+  it('offers the tap fields on the WhatsApp event even before anyone has tapped', () => {
+    const merged = mergeContractFields(shape([{ path: 'text' }]), true)!;
+    expect(merged.fields.map((f) => f.path)).toEqual(['text', 'reply_id', 'reply_title']);
+    // `seen_in: 0` is not a detail: it is what makes the picker say «not always there», which is
+    // the truth an owner needs — a message nobody tapped brings them empty.
+    expect(merged.fields.find((f) => f.path === 'reply_id')!.seen_in).toBe(0);
+  });
+
+  it("leaves the hub's own word alone once it has really seen one", () => {
+    const merged = mergeContractFields(shape([{ path: 'reply_id', seen_in: 2 }]), true)!;
+    // Not listed twice, and with the hub's own count rather than the contract's zero: this fills
+    // a silence, it does not correct the hub.
+    expect(merged.fields.filter((f) => f.path === 'reply_id')).toHaveLength(1);
+    expect(merged.fields.find((f) => f.path === 'reply_id')!.seen_in).toBe(2);
+    // …while the one it has still never seen is added, so the pair is always pickable together.
+    expect(merged.fields.map((f) => f.path)).toEqual(['reply_id', 'reply_title']);
+  });
+
+  it('adds nothing on a hub that cannot send options in the first place', () => {
+    const merged = mergeContractFields(shape([{ path: 'text' }]), false)!;
+    expect(merged.fields.map((f) => f.path)).toEqual(['text']);
+  });
+
+  it('adds nothing to any other event, and survives having no shape at all', () => {
+    const other = { ...shape([{ path: 'total' }]), event_name: 'sale.completed' };
+    expect(mergeContractFields(other, true)!.fields.map((f) => f.path)).toEqual(['total']);
+    expect(mergeContractFields(null, true)).toBeNull();
   });
 });

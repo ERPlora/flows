@@ -2,7 +2,7 @@ import { LitElement, html, css, nothing } from 'lit';
 import { property } from 'lit/decorators.js';
 import { define } from '@erplora/outfitkit/define';
 import type { EventFieldShape, EventShape } from '../../lib/hub-flows';
-import { describeSample, humaniseField } from '../../lib/plain-language';
+import { describeSample, fieldPhrase } from '../../lib/plain-language';
 import type { Translator } from '../../lib/plain-language';
 
 /**
@@ -187,7 +187,10 @@ export class ErpFlowsFieldPicker extends LitElement {
     const q = this.query.trim().toLowerCase();
     if (!q) return fields;
     return fields.filter((f) => {
-      const label = humaniseField(f.path).toLowerCase();
+      // Searched by the words on screen, not by the mechanical ones: somebody typing «opción»
+      // is looking for the row that SAYS «La opción que tocó», and matching only `Reply id`
+      // would hide the one field they came here for.
+      const label = fieldPhrase(f.path, this.t).toLowerCase();
       const sample = describeSample(f, this.t).toLowerCase();
       return label.includes(q) || f.path.toLowerCase().includes(q) || sample.includes(q);
     });
@@ -221,7 +224,7 @@ export class ErpFlowsFieldPicker extends LitElement {
         aria-disabled=${skipped ? 'true' : 'false'}
         @click=${() => this.pick(field)}
       >
-        <span class="name">${humaniseField(field.path)}</span>
+        <span class="name">${fieldPhrase(field.path, this.t)}</span>
         ${meta ? html`<span class="meta">${meta}</span>` : nothing}
       </button>
     </li>`;

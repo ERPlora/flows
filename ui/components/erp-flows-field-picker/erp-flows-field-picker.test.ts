@@ -119,3 +119,40 @@ describe('picking a field out of REAL data', () => {
     expect(el.renderRoot.textContent).toContain('ui.pickFieldEmpty');
   });
 });
+
+describe('the fields the contract names, in the owner\'s words (flows#75)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const TAP_SHAPE = {
+    event_name: 'hub.whatsapp.message_received',
+    declared_by: ['core'],
+    samples: 4,
+    fields: [
+      { path: 'text', type: 'string', sample: 'hola', redacted: false, truncated: false, seen_in: 4 },
+      { path: 'reply_id', type: 'string', redacted: false, truncated: false, seen_in: 0 },
+    ],
+  };
+
+  // `humaniseField` would call this row «Reply id», which is not something anybody says. It is
+  // not somebody's column either: it is the core's own contract for what a tap comes back as, so
+  // it gets a sentence — the same argument `event-phrasing.ts` makes for an event's name.
+  it('shows the sentence, not the mechanical name', async () => {
+    const el = await mount({ shape: TAP_SHAPE as never });
+    const row = rows(el).find((r) => r.textContent?.includes('ui.fieldReplyId'));
+    expect(row, 'the tap field is not named by its phrase').toBeTruthy();
+    expect(el.renderRoot.textContent).not.toContain('Reply id');
+  });
+
+  // Searching by the words on screen: somebody typing what the row SAYS has to find the row.
+  it('is found by searching the words it shows', async () => {
+    const el = await mount({ shape: TAP_SHAPE as never });
+    const box = el.renderRoot.querySelector('input') as HTMLInputElement;
+    box.value = 'fieldreplyid';
+    box.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    await el.updateComplete;
+    expect(rows(el)).toHaveLength(1);
+    expect(rows(el)[0].textContent).toContain('ui.fieldReplyId');
+  });
+});
