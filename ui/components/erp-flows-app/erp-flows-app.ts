@@ -23,6 +23,8 @@ import { describeTrigger } from '../../lib/plain-language';
 import { catalogEntry } from '../../lib/trigger-catalog';
 import { CAPABILITY_DENIED, errorCode, resolveClient } from '../../lib/hub-flows';
 import type { Flow, ModuleClient } from '../../lib/hub-flows';
+import { flowProblems, repairedDefinition } from '../../lib/flow-checkup';
+import type { FlowProblem } from '../../lib/flow-checkup';
 import { contractProblems, draftGaps, readDraft, schemaFacts } from '../../lib/ai-draft';
 import type { Draft, DraftGap, DraftProblem, DraftRow, SchemaFacts } from '../../lib/ai-draft';
 // The module's i18n catalogue (ADR-0055): esbuild inlines these JSONs into the bundle and the
@@ -265,6 +267,42 @@ export class ErpFlowsApp extends LitElement {
       background: transparent;
       color: inherit;
     }
+    /* Its own line under the row, like the delete question: what it says has to be READ, and
+       sharing the line with the name and the switch is how it gets skipped. */
+    .flow > .checkup {
+      flex: 1 0 100%;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      border-top: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
+      background: var(--ok-warning-soft, rgba(214, 158, 46, 0.12));
+    }
+    .flow > .checkup .said {
+      flex: 1 1 14rem;
+      min-width: 0;
+      font-size: 0.9rem;
+    }
+    .flow > .checkup .said strong {
+      display: block;
+    }
+    .flow > .checkup button {
+      font: inherit;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border-radius: var(--ok-radius-pill, 999px);
+      padding: 0 1rem;
+      min-height: 2.5rem;
+      border: 1px solid transparent;
+      background: var(--ok-primary, var(--ion-color-primary, #3880ff));
+      color: var(--ok-primary-contrast, var(--ion-color-primary-contrast, #fff));
+      font-weight: 600;
+    }
+    .flow > .checkup button[disabled] {
+      opacity: 0.6;
+      cursor: default;
+    }
     .empty-filter {
       display: flex;
       align-items: center;
@@ -358,6 +396,9 @@ export class ErpFlowsApp extends LitElement {
 
   /** What the editor is told to shout about: the assistant's notes and the holes it left. */
   @state() private draftReview: { notes: string[]; gaps: DraftGap[] } | null = null;
+
+  /** The automation whose repair is in flight, so its button cannot be pressed twice. */
+  @state() private repairing = '';
 
   /** The contract THIS hub serves, read from `GET /api/hub/flows/schema` — never bundled. */
   private facts: SchemaFacts = schemaFacts(undefined);
@@ -656,6 +697,40 @@ export class ErpFlowsApp extends LitElement {
     }
   }
 
+  /**
+   * **Put the missing guards on an automation that is already running** (flows#63).
+   *
+   * A SURGICAL patch and not today's card in place of hers: the owner may have renamed this
+   * automation and reworded every prompt in it, and replacing the document would throw that away
+   * to fix two lines. Only the trigger's filter grows, so no permission has to be granted again
+   * and the switch stays where she left it — an automation that came back PAUSED from a repair
+   * would be a WhatsApp that goes quiet without anybody deciding it should.
+   *
+   * The state is written from what the hub echoed back, not from what we sent: the warning may
+   * only leave the row because the save landed.
+   */
+  private async repair(flow: Flow, problem: FlowProblem): Promise<void> {
+    if (!this.client || this.repairing) return;
+    const definition = repairedDefinition(flow.definition, problem.id);
+    if (!definition) return;
+    this.repairing = flow.id;
+    this.error = '';
+    this.notice = '';
+    try {
+      const saved = await this.client.flows.update(flow.id, {
+        name: flow.name,
+        enabled: flow.enabled,
+        definition,
+      });
+      this.flows = this.flows.map((f) => (f.id === flow.id ? { ...f, ...saved, definition } : f));
+      this.notice = this.t('ui.checkupFixed', { name: flow.name || this.t('ui.unnamed') });
+    } catch (e) {
+      this.error = (e as Error)?.message || this.t('ui.errGeneric');
+    } finally {
+      this.repairing = '';
+    }
+  }
+
   private async remove(flow: Flow): Promise<void> {
     if (!this.client) return;
     this.confirmDelete = '';
@@ -889,6 +964,27 @@ export class ErpFlowsApp extends LitElement {
             </button>
           </div>`
         : nothing}
+      <!-- The gallery hands out a COPY and keeps no link back to the card, so a card we fix
+           reaches everybody who taps it from now on and nobody who already did. This row is the
+           only place that owner can be told. It warns and offers; it never rewrites her
+           automation on its own — which is what Zapier, Shopify Flow, Power Automate and n8n all
+           do with a workflow somebody has already built. -->
+      ${flowProblems(flow.definition).map(
+        (problem) => html`<div class="checkup" data-checkup=${problem.id}>
+          <span class="said">
+            <strong>${this.t(problem.titleKey)}</strong>
+            ${this.t(problem.bodyKey)}
+          </span>
+          <button
+            type="button"
+            data-act="checkup-fix"
+            ?disabled=${this.repairing === flow.id}
+            @click=${() => void this.repair(flow, problem)}
+          >
+            ${this.repairing === flow.id ? this.t('ui.saving') : this.t(problem.fixKey)}
+          </button>
+        </div>`,
+      )}
     </div>`;
   }
 

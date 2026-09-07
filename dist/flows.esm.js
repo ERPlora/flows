@@ -8178,6 +8178,51 @@ function copyName(name, taken, t3) {
   return base;
 }
 
+// ui/lib/flow-checkup.ts
+var WHATSAPP_MESSAGE_EVENT = "hub.whatsapp.message_received";
+var ECHO_AND_BACKLOG = "whatsapp_echo_and_backlog";
+var ECHO_GUARDS = [
+  ["event.direction", "outbound"],
+  ["event.source", "history"]
+];
+var isRecord = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+function isGuarded(filter, path) {
+  const clause = filter?.[path];
+  return isRecord(clause) && Object.keys(clause).length > 0;
+}
+var isWhatsappTrigger = (trigger) => trigger?.kind === "event" && trigger?.event === WHATSAPP_MESSAGE_EVENT;
+var answersEchoAndBacklog = (trigger) => isWhatsappTrigger(trigger) && ECHO_GUARDS.some(([path]) => !isGuarded(trigger.filter, path));
+function flowProblems(definition) {
+  const doc = readDoc(definition);
+  if (!doc.triggers.some((trigger) => answersEchoAndBacklog(trigger))) return [];
+  return [
+    {
+      id: ECHO_AND_BACKLOG,
+      titleKey: "ui.checkupEchoTitle",
+      bodyKey: "ui.checkupEchoBody",
+      fixKey: "ui.checkupEchoFix"
+    }
+  ];
+}
+function repairedDefinition(definition, problemId) {
+  if (problemId !== ECHO_AND_BACKLOG) return null;
+  if (!isRecord(definition)) return null;
+  if (!flowProblems(definition).some((problem) => problem.id === ECHO_AND_BACKLOG)) return null;
+  const repaired = structuredClone(definition);
+  const triggers = repaired.triggers;
+  if (!Array.isArray(triggers)) return null;
+  for (const raw of triggers) {
+    const trigger = raw;
+    if (!answersEchoAndBacklog(trigger)) continue;
+    const filter = isRecord(trigger.filter) ? trigger.filter : {};
+    for (const [path, unwanted] of ECHO_GUARDS) {
+      if (!isGuarded(filter, path)) filter[path] = { neq: unwanted };
+    }
+    trigger.filter = filter;
+  }
+  return repaired;
+}
+
 // ui/lib/ai-draft.ts
 var DRAFT_STEP_KINDS = ["command", "condition", "delay"];
 function readNotes(raw) {
@@ -8429,6 +8474,10 @@ var es_default = {
     copyOf: "Copia de {name}",
     copyMade: "Copiada, y la copia est\xE1 en pausa. No lleva ninguno de los permisos de la original: conc\xE9dele lo que necesite antes de encenderla.",
     copySecrets: "Sale fuera usando: {names}. Comprueba que son los correctos para la copia.",
+    checkupEchoTitle: "Esta automatizaci\xF3n contesta a tus propios mensajes",
+    checkupEchoBody: "Se mont\xF3 antes de que lo corrigi\xE9ramos, as\xED que tambi\xE9n responde a lo que escribes t\xFA desde tu m\xF3vil y a conversaciones de hace meses. Actual\xEDzala y solo contestar\xE1 a lo que escriba un cliente ahora. No cambia nada m\xE1s de ella.",
+    checkupEchoFix: "Actualizarla",
+    checkupFixed: "\xAB{name}\xBB ya solo contesta a lo que escribe un cliente.",
     active: "Activa",
     paused: "En pausa",
     activate: "Activar",
@@ -9235,6 +9284,10 @@ var en_default = {
     copyOf: "Copy of {name}",
     copyMade: "Copied, and the copy is paused. It carries none of the original's permissions \u2014 allow what it needs before turning it on.",
     copySecrets: "It reaches out using: {names}. Check those are the right ones for the copy.",
+    checkupEchoTitle: "This automation replies to your own messages",
+    checkupEchoBody: "It was set up before we corrected it, so it also answers the replies you send from your own phone and conversations from months ago. Update it and it will only answer what a customer writes now. Nothing else about it changes.",
+    checkupEchoFix: "Update it",
+    checkupFixed: "\u201C{name}\u201D now only replies to what a customer writes.",
     active: "Active",
     paused: "Paused",
     activate: "Activate",
@@ -10011,6 +10064,7 @@ var ErpFlowsApp = class extends i3 {
     this.notice = "";
     this.reviewing = null;
     this.draftReview = null;
+    this.repairing = "";
     /** The contract THIS hub serves, read from `GET /api/hub/flows/schema` — never bundled. */
     this.facts = schemaFacts(void 0);
     this.onLocaleChange = () => this.requestUpdate();
@@ -10219,6 +10273,42 @@ var ErpFlowsApp = class extends i3 {
       border: 1px solid var(--ok-border, #d7d5cc);
       background: transparent;
       color: inherit;
+    }
+    /* Its own line under the row, like the delete question: what it says has to be READ, and
+       sharing the line with the name and the switch is how it gets skipped. */
+    .flow > .checkup {
+      flex: 1 0 100%;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      border-top: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
+      background: var(--ok-warning-soft, rgba(214, 158, 46, 0.12));
+    }
+    .flow > .checkup .said {
+      flex: 1 1 14rem;
+      min-width: 0;
+      font-size: 0.9rem;
+    }
+    .flow > .checkup .said strong {
+      display: block;
+    }
+    .flow > .checkup button {
+      font: inherit;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border-radius: var(--ok-radius-pill, 999px);
+      padding: 0 1rem;
+      min-height: 2.5rem;
+      border: 1px solid transparent;
+      background: var(--ok-primary, var(--ion-color-primary, #3880ff));
+      color: var(--ok-primary-contrast, var(--ion-color-primary-contrast, #fff));
+      font-weight: 600;
+    }
+    .flow > .checkup button[disabled] {
+      opacity: 0.6;
+      cursor: default;
     }
     .empty-filter {
       display: flex;
@@ -10507,6 +10597,39 @@ var ErpFlowsApp = class extends i3 {
       this.error = e4?.message || this.t("ui.errGeneric");
     }
   }
+  /**
+   * **Put the missing guards on an automation that is already running** (flows#63).
+   *
+   * A SURGICAL patch and not today's card in place of hers: the owner may have renamed this
+   * automation and reworded every prompt in it, and replacing the document would throw that away
+   * to fix two lines. Only the trigger's filter grows, so no permission has to be granted again
+   * and the switch stays where she left it — an automation that came back PAUSED from a repair
+   * would be a WhatsApp that goes quiet without anybody deciding it should.
+   *
+   * The state is written from what the hub echoed back, not from what we sent: the warning may
+   * only leave the row because the save landed.
+   */
+  async repair(flow, problem) {
+    if (!this.client || this.repairing) return;
+    const definition = repairedDefinition(flow.definition, problem.id);
+    if (!definition) return;
+    this.repairing = flow.id;
+    this.error = "";
+    this.notice = "";
+    try {
+      const saved = await this.client.flows.update(flow.id, {
+        name: flow.name,
+        enabled: flow.enabled,
+        definition
+      });
+      this.flows = this.flows.map((f3) => f3.id === flow.id ? { ...f3, ...saved, definition } : f3);
+      this.notice = this.t("ui.checkupFixed", { name: flow.name || this.t("ui.unnamed") });
+    } catch (e4) {
+      this.error = e4?.message || this.t("ui.errGeneric");
+    } finally {
+      this.repairing = "";
+    }
+  }
   async remove(flow) {
     if (!this.client) return;
     this.confirmDelete = "";
@@ -10719,6 +10842,27 @@ var ErpFlowsApp = class extends i3 {
               ${this.t("ui.deleteNo")}
             </button>
           </div>` : A}
+      <!-- The gallery hands out a COPY and keeps no link back to the card, so a card we fix
+           reaches everybody who taps it from now on and nobody who already did. This row is the
+           only place that owner can be told. It warns and offers; it never rewrites her
+           automation on its own — which is what Zapier, Shopify Flow, Power Automate and n8n all
+           do with a workflow somebody has already built. -->
+      ${flowProblems(flow.definition).map(
+      (problem) => b2`<div class="checkup" data-checkup=${problem.id}>
+          <span class="said">
+            <strong>${this.t(problem.titleKey)}</strong>
+            ${this.t(problem.bodyKey)}
+          </span>
+          <button
+            type="button"
+            data-act="checkup-fix"
+            ?disabled=${this.repairing === flow.id}
+            @click=${() => void this.repair(flow, problem)}
+          >
+            ${this.repairing === flow.id ? this.t("ui.saving") : this.t(problem.fixKey)}
+          </button>
+        </div>`
+    )}
     </div>`;
   }
   /** «Cuando se reserva una cita» — never the raw event name. */
@@ -10941,4 +11085,7 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsApp.prototype, "draftReview", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApp.prototype, "repairing", 2);
 define("erp-flows-app", ErpFlowsApp);
