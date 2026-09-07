@@ -1133,6 +1133,39 @@ describe.each(SOURCES)(
     );
   });
 
+  /**
+   * **…and the pin has to be the commit that CARRIES the documents, not just any commit that has
+   * them** (whatsapp_inbox#102's re-pin).
+   *
+   * The three tests above are all satisfied by a DESCENDANT of the right commit: `main`'s tip
+   * hashes the same documents as the squash that wrote them, so a pin moved to the tip passes
+   * every one of them. Measured on the re-pin of whatsapp_inbox#102 — pinned at
+   * `0fd8a74` (`chore(release): v2.1.40`, which touches no template) the suite was 77 green.
+   *
+   * That is not cosmetic. The `commit` has ONE job: say which change of the source this card
+   * mirrors, so a reader who finds the two drifting knows what to diff against (whatsapp_inbox#73)
+   * — and the release bump the fleet pushes minutes after every merge is the sha most likely to be
+   * grabbed by mistake, because it is what the FIRST test names in its remedy (it can only offer
+   * the tip it fetched). `git log -1 <file>` is the answer, and this is the test that insists on it.
+   *
+   * Judged per FILE and satisfied by any of them: the two documents and the grants file move in
+   * different commits (the unattended grants last moved in `a44a3f1`, its documents in `0f8eb60`),
+   * so demanding one single carrier for all three would be a red the day only one of them changes.
+   */
+  it.skipIf(main === null || !pinned)(`is the commit that carries them, not a later one (${state})`, () => {
+    const carrier = (file: string): string | null =>
+      git('log', '-1', '--format=%H', 'refs/remotes/origin/main', '--', file);
+    const carriers = [mirror.files.en, mirror.files.es, mirror.files.grants].map(carrier);
+    expect(
+      carriers,
+      `${mirror.template} pins ${mirror.commit.slice(0, 7)}, which is not the commit any of its ` +
+        `three files last moved in (${carriers
+          .map((c) => (c === null ? '—' : c.slice(0, 7)))
+          .join(', ')}). A pin on a later commit — a \`chore(release)\` bump, or the tip the first ` +
+        `test names — passes every other check here and stops saying WHICH change it mirrors.`,
+    ).toContain(mirror.commit);
+  });
+
   },
 );
 
