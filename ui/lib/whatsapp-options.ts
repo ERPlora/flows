@@ -51,10 +51,15 @@ export interface TapOption {
   /** `list` only. Meta has no description on a button. */
   description?: unknown;
   /**
-   * `list` only, and only when the groups carry something of their own — more than one of them, or
-   * a single one with a title: which group this row came from, so writing it back can put it there
-   * again (flows#91). There is no control for it — the screen edits a flat list of rows on purpose,
-   * ten rows being ten rows wherever they sit. It is carried, not edited.
+   * `list` only, and only when there is MORE THAN ONE group: which one this row came from, so
+   * writing it back can put it there again (flows#91). There is no control for it — the screen
+   * edits a flat list of rows on purpose, ten rows being ten rows wherever they sit. It is
+   * carried, not edited.
+   *
+   * A message with a SINGLE group is deliberately not tagged, and that is not the same as losing
+   * its title: {@link toSections} keeps the group whole when nothing is tagged. Tagging it too
+   * would be the same fix written twice — and it WAS, until a mutation run found both copies alive
+   * because each one hid the other.
    */
   group?: number;
   /**
@@ -319,4 +324,31 @@ export function setTapOptions(doc: FlowDoc, index: number, options: TapOptions |
   if (!options) return removeStepKeys(doc, index, ['interactive']);
   const interactive = toInteractive(options, obj(doc.steps[index]?.interactive));
   return removeStepKeys(patchStep(doc, index, { interactive }), index, ['template', 'vars']);
+}
+
+/**
+ * **The mode switch itself — the copy travels with it** (flows#90).
+ *
+ * Turning the options on has to take `vars` away (see {@link setTapOptions}), and the screen has
+ * no undo: `setDoc` is an assignment, so a sentence dropped here is a sentence typed again. It is
+ * the SAME sentence either side — the line that sits above the options is the message — so the
+ * owner has no reason to know it changed shelf, and every editor that switches a message's type
+ * (Twilio Studio, ManyChat, Zapier) carries the body across for exactly that reason.
+ *
+ * Deliberately NOT symmetric with an empty value: coming back with nothing written adds no `vars`
+ * at all, because `{text: ''}` is a key the document never had, not «the copy came back».
+ */
+export function setTapMode(doc: FlowDoc, index: number, wants: boolean): FlowDoc {
+  const step = doc.steps[index];
+  if (!step) return doc;
+  if (wants) {
+    return setTapOptions(doc, index, {
+      ...blankTapOptions('button'),
+      body: copy(obj(step.vars)?.text),
+    });
+  }
+  const off = setTapOptions(doc, index, null);
+  const body = readTapOptions(step)?.body;
+  if (!textOf(body)) return off;
+  return patchStep(off, index, { vars: { ...(obj(step.vars) ?? {}), text: body } });
 }
