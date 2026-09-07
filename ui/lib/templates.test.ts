@@ -452,7 +452,8 @@ const SOURCES: readonly MirrorSource[] = [
     // it is refused whole with `invalid_payload`. Until this landed the gallery kept handing out
     // the version that cannot cancel (flows#64) — and NOTHING here went red, which is why the
     // third pin test below now exists.
-    // And moved by whatsapp_inbox#74: the proposing step gained MOVING — in THIS family only. It had book and cancel and
+    // And moved by whatsapp_inbox#74 (squashed as `33e7c0f`): the proposing step gained MOVING —
+    // in THIS family only. It had book and cancel and
     // no way to change an appointment's hour, so «can you change it to Thursday?» fell into the
     // «anything else» branch — or was read as a new booking and the customer ended up with two.
     // Moving is `appointments.appointments.reschedule`, ONE call and never cancel-then-book, and
@@ -465,10 +466,19 @@ const SOURCES: readonly MirrorSource[] = [
     // be bound to the customer asking (no `channel`, no `customer_id`, and the handler never looks
     // at whose appointment it is), so the move only ships where a PERSON approves the write.
     //
-    // 🔴 Pinned at the branch head while whatsapp_inbox#102 is open: `merge-pr.sh` squashes it, so
-    // the last test of this file goes red naming the squash sha, and this pin is set to that. The
-    // digests do not change with the re-pin.
-    commit: '5cdfb79d8c031896abe28971c3c1d9a3f5c9491d',
+    // Re-pinned from the branch head (`5cdfb79`) to that squash the day whatsapp_inbox#102 landed,
+    // which is the drill this file enforces: the mirror was opened while its source was still a
+    // branch, `merge-pr.sh` squashed it, and the first pin test went red naming the sha to set.
+    // The four digests did NOT move — the documents are the same, only the commit that carries
+    // them is new.
+    //
+    // 🪤 And the sha to set is the one that CARRIES the documents, not the tip: that red names
+    // `main` as fetched, which the day of this re-pin was `0fd8a74` — a `chore(release)` bump that
+    // touches no template. Pinned there, the two tests below would still pass (a descendant that
+    // did not touch the files hashes the same), and the pin would stop saying WHICH change it
+    // mirrors, which is the one job it has. `git log -1 <file>` on the source's `main` is the
+    // answer, and it is what the third test names in its own remedy.
+    commit: '33e7c0fab69d875e8bd530a1939d59efe1dfd27c',
     files: {
       en: 'flows/appointment-from-whatsapp.en.flow.json',
       es: 'flows/appointment-from-whatsapp.es.flow.json',
@@ -1121,6 +1131,39 @@ describe.each(SOURCES)(
         .map((g) => `${g.kind} ${g.value}`)
         .sort(),
     );
+  });
+
+  /**
+   * **…and the pin has to be the commit that CARRIES the documents, not just any commit that has
+   * them** (whatsapp_inbox#102's re-pin).
+   *
+   * The three tests above are all satisfied by a DESCENDANT of the right commit: `main`'s tip
+   * hashes the same documents as the squash that wrote them, so a pin moved to the tip passes
+   * every one of them. Measured on the re-pin of whatsapp_inbox#102 — pinned at
+   * `0fd8a74` (`chore(release): v2.1.40`, which touches no template) the suite was 77 green.
+   *
+   * That is not cosmetic. The `commit` has ONE job: say which change of the source this card
+   * mirrors, so a reader who finds the two drifting knows what to diff against (whatsapp_inbox#73)
+   * — and the release bump the fleet pushes minutes after every merge is the sha most likely to be
+   * grabbed by mistake, because it is what the FIRST test names in its remedy (it can only offer
+   * the tip it fetched). `git log -1 <file>` is the answer, and this is the test that insists on it.
+   *
+   * Judged per FILE and satisfied by any of them: the two documents and the grants file move in
+   * different commits (the unattended grants last moved in `a44a3f1`, its documents in `0f8eb60`),
+   * so demanding one single carrier for all three would be a red the day only one of them changes.
+   */
+  it.skipIf(main === null || !pinned)(`is the commit that carries them, not a later one (${state})`, () => {
+    const carrier = (file: string): string | null =>
+      git('log', '-1', '--format=%H', 'refs/remotes/origin/main', '--', file);
+    const carriers = [mirror.files.en, mirror.files.es, mirror.files.grants].map(carrier);
+    expect(
+      carriers,
+      `${mirror.template} pins ${mirror.commit.slice(0, 7)}, which is not the commit any of its ` +
+        `three files last moved in (${carriers
+          .map((c) => (c === null ? '—' : c.slice(0, 7)))
+          .join(', ')}). A pin on a later commit — a \`chore(release)\` bump, or the tip the first ` +
+        `test names — passes every other check here and stops saying WHICH change it mirrors.`,
+    ).toContain(mirror.commit);
   });
 
   },
