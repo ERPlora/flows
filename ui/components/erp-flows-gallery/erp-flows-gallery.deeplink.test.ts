@@ -3,8 +3,22 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import './erp-flows-gallery';
+import { schemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery, templateFromSearch } from './erp-flows-gallery';
 import { TEMPLATES } from '../../lib/templates';
+
+/**
+ * **The hub these tests are about: one on a current core** (flows#92).
+ *
+ * The gallery's kernel probe is fail-closed, so a mount that says nothing about the hub is a hub
+ * that declares nothing — and the card whose document needs `interactive`/`output` is correctly
+ * absent from it. Every test here that is about something ELSE says «a normal hub» once, right
+ * here, so the floor is asserted where it belongs and nowhere else.
+ */
+const CURRENT_CORE = schemaFacts({
+  $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+});
+
 
 /**
  * **A shortcut that names a card has to open THAT card** (flows#56).
@@ -50,6 +64,7 @@ function landOn(search: string): void {
 
 async function mount(client: unknown = hub()): Promise<ErpFlowsGallery> {
   const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+  el.facts = CURRENT_CORE;
   el.client = client as never;
   el.t = t;
   document.body.appendChild(el);

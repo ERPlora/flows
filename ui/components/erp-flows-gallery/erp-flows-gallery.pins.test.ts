@@ -1,10 +1,24 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
+import { schemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery } from './erp-flows-gallery';
 import { templateById, templateGrants } from '../../lib/templates';
 import { grantPin, type Grant } from '../../lib/flow-doc';
 import en from '../../../locales/en.json';
 import es from '../../../locales/es.json';
+
+/**
+ * **The hub these tests are about: one on a current core** (flows#92).
+ *
+ * The gallery's kernel probe is fail-closed, so a mount that says nothing about the hub is a hub
+ * that declares nothing — and the card whose document needs `interactive`/`output` is correctly
+ * absent from it. Every test here that is about something ELSE says «a normal hub» once, right
+ * here, so the floor is asserted where it belongs and nowhere else.
+ */
+const CURRENT_CORE = schemaFacts({
+  $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+});
+
 
 const t = (key: string, params?: Record<string, unknown>): string => {
   let cur: unknown = en;
@@ -59,6 +73,7 @@ function hub(over: { keepsPins?: boolean; noGrantsSurface?: boolean; failWrite?:
 
 async function install(client: unknown, id: string): Promise<ErpFlowsGallery> {
   const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+  el.facts = CURRENT_CORE;
   el.client = client as never;
   el.t = t;
   document.body.appendChild(el);
@@ -104,6 +119,7 @@ describe('a recipe with a limit installs LIMITED, or it does not install the per
   it('does not move the owner along as though the recipe had installed as promised', async () => {
     const h = hub({ keepsPins: false });
     const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+  el.facts = CURRENT_CORE;
     el.client = h.client as never;
     el.t = t;
     document.body.appendChild(el);
@@ -137,6 +153,7 @@ describe('a recipe with a limit installs LIMITED, or it does not install the per
   it('says so on a core whose flows surface predates grants at all', async () => {
     const h = hub({ noGrantsSurface: true });
     const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+  el.facts = CURRENT_CORE;
     el.client = h.client as never;
     el.t = t;
     document.body.appendChild(el);
@@ -190,6 +207,7 @@ describe('a recipe with a limit installs LIMITED, or it does not install the per
     ] as const) {
       const h = hub({ keepsPins: false });
       const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+  el.facts = CURRENT_CORE;
       el.client = h.client as never;
       el.t = localised(dict);
       document.body.appendChild(el);
@@ -217,6 +235,7 @@ describe('the card SAYS the limit, in the panel the owner reads before installin
 
   const panel = async (id: string, translate = t): Promise<ErpFlowsGallery> => {
     const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+  el.facts = CURRENT_CORE;
     el.client = hub().client as never;
     el.t = translate;
     document.body.appendChild(el);

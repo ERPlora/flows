@@ -1,10 +1,24 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
+import { schemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery } from './erp-flows-gallery';
 import '../erp-flows-app/erp-flows-app';
 import type { ErpFlowsApp } from '../erp-flows-app/erp-flows-app';
 import { templateById, buildTemplate } from '../../lib/templates';
 import en from '../../../locales/en.json';
+
+/**
+ * **The hub these tests are about: one on a current core** (flows#92).
+ *
+ * The gallery's kernel probe is fail-closed, so a mount that says nothing about the hub is a hub
+ * that declares nothing — and the card whose document needs `interactive`/`output` is correctly
+ * absent from it. Every test here that is about something ELSE says «a normal hub» once, right
+ * here, so the floor is asserted where it belongs and nowhere else.
+ */
+const CURRENT_CORE = schemaFacts({
+  $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+});
+
 
 /** The shell's translator, reduced to the lookup a test needs. */
 const t = (key: string, params?: Record<string, unknown>): string => {
@@ -63,6 +77,7 @@ function hub(flows: Record<string, unknown>[] = [], over: Record<string, unknown
 
 async function mount(client: unknown): Promise<ErpFlowsGallery> {
   const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+  el.facts = CURRENT_CORE;
   el.client = client as never;
   el.t = t;
   document.body.appendChild(el);
@@ -435,6 +450,7 @@ describe('opening the gallery', () => {
     // notice that same client arrived.
     const client = hub([installedFlow()]);
     const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+  el.facts = CURRENT_CORE;
     el.client = client as never;
     el.t = t;
     document.body.appendChild(el);

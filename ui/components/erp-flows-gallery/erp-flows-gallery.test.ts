@@ -1,9 +1,24 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
+import { schemaFacts } from '../../lib/ai-draft';
+import type { SchemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery } from './erp-flows-gallery';
 import { ErpFlowsApp } from '../erp-flows-app/erp-flows-app';
 import { TEMPLATES, templateById, buildTemplate } from '../../lib/templates';
 import en from '../../../locales/en.json';
+
+/**
+ * **The hub these tests are about: one on a current core** (flows#92).
+ *
+ * The gallery's kernel probe is fail-closed, so a mount that says nothing about the hub is a hub
+ * that declares nothing — and the card whose document needs `interactive`/`output` is correctly
+ * absent from it. Every test here that is about something ELSE says «a normal hub» once, right
+ * here, so the floor is asserted where it belongs and nowhere else.
+ */
+const CURRENT_CORE = schemaFacts({
+  $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+});
+
 
 /** The shell's translator, reduced to the lookup a test needs, `{param}` included. */
 const t = (key: string, params?: Record<string, unknown>): string => {
@@ -43,6 +58,7 @@ const notFound = (): never => {
 
 async function mount(client: unknown): Promise<ErpFlowsGallery> {
   const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+  el.facts = CURRENT_CORE;
   el.client = client as never;
   el.t = t;
   document.body.appendChild(el);
@@ -104,6 +120,7 @@ describe('a template this hub cannot run', () => {
       release = resolve as () => void;
     });
     const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+  el.facts = CURRENT_CORE;
     el.client = hub({ events: { shape: vi.fn(() => pending) } }) as never;
     el.t = t;
     document.body.appendChild(el);
@@ -440,5 +457,49 @@ describe('a card that would double up on a trigger says so first (whatsapp_inbox
       el.renderRoot.querySelector('ok-inline-feedback[tone="danger"]'),
       'a refusal to LIST flows became an error on the catalogue',
     ).toBeNull();
+  });
+});
+
+/**
+ * **A card the hub cannot parse is not on the shelf** (flows#92).
+ *
+ * The unattended WhatsApp recipe writes `interactive` (hub#1633) and `output` (hub#1639). Below
+ * `v1.1.16` neither key degrades: the core answers `flow.invalid_definition` for the whole
+ * document, so a hub that installed it from here would end up with an automation that refuses to
+ * save. The floor is the CARD's, so every other card of the sector stays on the shelf.
+ */
+describe('the gallery does not offer a recipe this hub could not parse (flows#92)', () => {
+  const declaring = (...keys: string[]) =>
+    schemaFacts({
+      $defs: { step: { properties: Object.fromEntries(keys.map((k) => [k, { type: 'object' }])) } },
+    });
+
+  async function shelf(facts?: SchemaFacts): Promise<ErpFlowsGallery> {
+    const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+    el.client = hub() as never;
+    el.t = t;
+    if (facts) el.facts = facts;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    await el.updateComplete;
+    return el;
+  }
+
+  it('paints it where the hub declares both keys', async () => {
+    const el = await shelf(declaring('interactive', 'output'));
+    expect(card(el, 'whatsapp-appointment-unattended')).toBeTruthy();
+  });
+
+  it('does not paint it on a hub that declares neither', async () => {
+    const el = await shelf(declaring());
+    expect(card(el, 'whatsapp-appointment-unattended')).toBeNull();
+    // …and the sector is not empty: the floor belongs to this card alone.
+    expect(card(el, 'whatsapp-appointment')).toBeTruthy();
+  });
+
+  it('does not paint it before the hub has answered: fail-closed', async () => {
+    const el = await shelf();
+    expect(card(el, 'whatsapp-appointment-unattended')).toBeNull();
   });
 });

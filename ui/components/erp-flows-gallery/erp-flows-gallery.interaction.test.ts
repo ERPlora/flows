@@ -1,7 +1,21 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
+import { schemaFacts } from '../../lib/ai-draft';
 import type { ErpFlowsGallery } from './erp-flows-gallery';
 import { TEMPLATES } from '../../lib/templates';
+
+/**
+ * **The hub these tests are about: one on a current core** (flows#92).
+ *
+ * The gallery's kernel probe is fail-closed, so a mount that says nothing about the hub is a hub
+ * that declares nothing — and the card whose document needs `interactive`/`output` is correctly
+ * absent from it. Every test here that is about something ELSE says «a normal hub» once, right
+ * here, so the floor is asserted where it belongs and nowhere else.
+ */
+const CURRENT_CORE = schemaFacts({
+  $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+});
+
 
 /**
  * **Every control on the gallery, driven the way a person drives it** (flows#17).
@@ -31,6 +45,7 @@ function hub() {
 
 async function mount(): Promise<ErpFlowsGallery> {
   const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+  el.facts = CURRENT_CORE;
   el.client = hub() as never;
   el.t = t;
   document.body.appendChild(el);

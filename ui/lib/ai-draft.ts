@@ -142,9 +142,18 @@ export interface SchemaFacts {
   /**
    * Whether this hub's `notify` can carry options the customer TAPS (hub#1633).
    *
-   * The only fact in here with a **fail-closed** floor — see {@link schemaFacts}.
+   * One of the two facts in here with a **fail-closed** floor — see {@link schemaFacts}.
    */
   interactiveNotify: boolean;
+  /**
+   * Whether an `ai` step of this hub can DECLARE what it hands on besides its words (hub#1639).
+   *
+   * The other fail-closed fact, and it travels with the one above: both landed in `v1.1.16` and a
+   * document that carries `output` on `v1.1.15` dies exactly the same way. Probed on its own all
+   * the same — a card that needs both asks for both rather than trusting that a hub with one has
+   * the other.
+   */
+  aiOutput: boolean;
 }
 
 function at(root: unknown, path: string[]): unknown {
@@ -212,6 +221,10 @@ export function schemaFacts(schema: unknown): SchemaFacts {
     // down with it (`flow.invalid_definition`), and today's fleet has not shipped that core yet.
     // A schema this module could not read is therefore a hub that does not have it.
     interactiveNotify: !!at(schema, ['$defs', 'step', 'properties', 'interactive']),
+    // Same rule, same reason, other key (hub#1639): `output` on an older core takes the whole
+    // definition down with it too. Measured on the published schemas: `v1.1.15` declares neither
+    // of the two and `v1.1.16` declares both.
+    aiOutput: !!at(schema, ['$defs', 'step', 'properties', 'output']),
   };
 }
 

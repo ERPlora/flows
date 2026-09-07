@@ -30,6 +30,8 @@
 import type { FlowDoc, Grant, Step } from './flow-doc';
 import { requiredGrants, setGrantPin } from './flow-doc';
 import type { Translator } from './plain-language';
+import type { SchemaFacts } from './ai-draft';
+import { schemaFacts } from './ai-draft';
 
 /** The families a gallery groups by. `any` is «any business», and it goes first. */
 export const SECTORS = ['any', 'beauty', 'food'] as const;
@@ -56,6 +58,18 @@ export interface TemplateBlank {
   /** One line saying what to put there — units included, because that is where people slip. */
   hintKey: string;
 }
+
+/**
+ * A kernel capability a card's document depends on, named by the step key that carries it and
+ * answered by the schema the hub serves — see {@link SchemaFacts}.
+ */
+export type TemplateNeed = 'interactive' | 'output';
+
+/** Which fact of the hub's schema answers each need. */
+const NEED_FACT: Record<TemplateNeed, keyof SchemaFacts> = {
+  interactive: 'interactiveNotify',
+  output: 'aiOutput',
+};
 
 export interface FlowTemplate {
   id: string;
@@ -85,6 +99,17 @@ export interface FlowTemplate {
    * value.
    */
   grantPins?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /**
+   * **Step keys this card's document carries that an older core refuses OUTRIGHT** (flows#92).
+   *
+   * Not a nicety: `parse_step` walks an allowlist per step kind, so an unknown key is not ignored
+   * and does not degrade — it answers `flow.invalid_definition` for the WHOLE document and the
+   * recipe dies at save. A card that names one here is not offered to a hub that does not declare
+   * it, which is a floor **per card**: raising the module's own `min_erplora_version` instead
+   * would put this floor on the twenty cards that do not need it and take the gallery away from
+   * hubs that use it perfectly well.
+   */
+  needs?: readonly TemplateNeed[];
   /** Always `false`, and typed as `false` so a template cannot be born running. */
   enabledOnCreate?: false;
   /** The document, in the owner's language. */
@@ -694,6 +719,10 @@ export const TEMPLATES: readonly FlowTemplate[] = [
   {
     id: 'whatsapp-appointment-unattended',
     sector: 'beauty',
+    // The list she TAPS (`interactive`, hub#1633) and the slots the model hands over (`output`,
+    // hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it is refused
+    // whole — so the card is not offered there. See {@link FlowTemplate.needs}.
+    needs: ['interactive', 'output'],
     // A calendar with a tick, against the twin's numbered calendar: this one is already booked.
     icon: 'calendar-clear-outline',
     nameKey: 'tpl.waAppointmentUnattended.name',
@@ -766,6 +795,32 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           input: {
             from: 'event.from',
             text: 'event.text',
+            wa_message_id: 'event.wa_message_id',
+            received_at: 'event.received_at',
+            reply_id: 'event.reply_id',
+            reply_title: 'event.reply_title',
+          },
+        },
+        // **The same automation, woken by a TAP** (whatsapp_inbox#101). A tapped row arrives with
+        // `text` empty and `reply_id` full, so the trigger above — which demands words — never
+        // sees it, and these two are disjoint BY CONSTRUCTION rather than by luck: no message can
+        // satisfy `text: neq ''` and `text: eq ''` at once, so nothing is ever booked twice.
+        // `text` maps from `reply_title` here, so the step reads the same field whichever way she
+        // answered, and `reply_id` carries the slot she actually chose.
+        {
+          kind: 'event',
+          event: 'hub.whatsapp.message_received',
+          filter: {
+            'event.text': { eq: '' },
+            'event.reply_id': { neq: '' },
+            'event.direction': { neq: 'outbound' },
+            'event.source': { neq: 'history' },
+          },
+          input: {
+            from: 'event.from',
+            text: 'event.reply_title',
+            reply_id: 'event.reply_id',
+            reply_title: 'event.reply_title',
             wa_message_id: 'event.wa_message_id',
             received_at: 'event.received_at',
           },
@@ -856,6 +911,16 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           },
           policy: 'auto',
           max_iters: 10,
+          // What the step hands on BESIDES its words (hub#1639). Without it the slots would have
+          // to be parsed back out of the prose, which is the guessing this card exists to stop:
+          // the id of a slot is `2026-09-08T10:30|staff:12|service:3` and it comes home whole when
+          // she taps it.
+          output: {
+            slots: {
+              type: 'options',
+              describe: t('tpl.waAppointmentUnattended.slotsDescribe'),
+            },
+          },
         },
         // What the booking step wrote, sent as it is. With no approval in the middle this is the
         // customer's ONLY notice that the appointment exists, which is why the prompt ends by
@@ -871,6 +936,41 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           },
           template: '',
           vars: { text: '{{steps.book_appointment.text}}' },
+        },
+        // 🔴 The guard, and it is not decoration: `slots` is empty whenever the model booked,
+        // cancelled or answered something else, and a `list` with no rows is refused by Meta —
+        // paid for, and answered with an error the owner never sees. So the list only goes out
+        // when there is something in it.
+        {
+          id: 'any_slot_to_offer',
+          kind: 'condition',
+          when: { 'steps.book_appointment.slots': { neq: [] } },
+        },
+        // The slots as a list she TAPS instead of a paragraph she has to answer (hub#1633). The
+        // rows are the step's own output, so what comes back is the slot itself and not «the
+        // second one» — which is exactly where the bookings used to get lost.
+        {
+          id: 'offer_slots',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: {
+            query: 'whatsapp_inbox.conversations.list',
+            params: { f_wa_contact_id: 'input.from' },
+            field: 'contact_phone',
+          },
+          interactive: {
+            type: 'list',
+            body: { text: t('tpl.waAppointmentUnattended.offerBody') },
+            action: {
+              button: t('tpl.waAppointmentUnattended.offerButton'),
+              sections: [
+                {
+                  title: t('tpl.waAppointmentUnattended.offerSection'),
+                  rows: 'steps.book_appointment.slots',
+                },
+              ],
+            },
+          },
         },
       ],
     }),
@@ -1567,8 +1667,24 @@ export function missingModules(
 export function availableTemplates(
   sector: Sector,
   known: Readonly<Record<string, boolean>>,
+  facts: SchemaFacts = schemaFacts(undefined),
 ): FlowTemplate[] {
-  return templatesOf(sector).filter((tpl) => missingModules(tpl, known).length === 0);
+  return templatesOf(sector).filter(
+    (tpl) => missingModules(tpl, known).length === 0 && coreTakes(tpl, facts),
+  );
+}
+
+/**
+ * Whether this hub can PARSE what the card writes — {@link FlowTemplate.needs}.
+ *
+ * **Fail-closed, unlike the module probe**, and the asymmetry is the point: a module probe that has
+ * not answered yet costs a card that appears a second late, and hiding on it would empty the
+ * gallery and fill it back in. An unanswered KERNEL probe costs an automation that installs and
+ * then refuses to parse, so «not asked yet» has to mean «not offered». `schemaFacts(undefined)`
+ * answers `false` to every need, which is exactly that.
+ */
+function coreTakes(template: FlowTemplate, facts: SchemaFacts): boolean {
+  return (template.needs ?? []).every((need) => facts[NEED_FACT[need]] === true);
 }
 
 /**

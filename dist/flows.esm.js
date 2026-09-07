@@ -6580,8 +6580,219 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "pickerRoot", 2);
 define("erp-flows-editor", ErpFlowsEditor);
 
+// ui/lib/ai-draft.ts
+var DRAFT_STEP_KINDS = ["command", "condition", "delay"];
+function readNotes(raw) {
+  const value = typeof raw === "string" ? safeParse(raw) : raw;
+  if (!Array.isArray(value)) return [];
+  return value.filter((n5) => typeof n5 === "string" && n5.trim() !== "");
+}
+function safeParse(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return void 0;
+  }
+}
+function readDraft(row) {
+  const id = String(row?.id ?? "");
+  const name = typeof row?.name === "string" ? row.name : "";
+  const raw = typeof row?.definition === "string" ? safeParse(row.definition) : row?.definition;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, problem: { key: "draft.errUnreadable", params: { name } } };
+  }
+  return {
+    ok: true,
+    draft: {
+      id,
+      name,
+      doc: readDoc(raw),
+      notes: readNotes(row?.notes),
+      createdAt: typeof row?.created_at === "string" ? row.created_at : ""
+    }
+  };
+}
+function at(root, path) {
+  let cur = root;
+  for (const key2 of path) {
+    if (!cur || typeof cur !== "object") return void 0;
+    cur = cur[key2];
+  }
+  return cur;
+}
+function enumAt(root, path) {
+  const value = at(root, path);
+  if (!Array.isArray(value)) return void 0;
+  const names = value.filter((v2) => typeof v2 === "string");
+  return names.length ? names : void 0;
+}
+function schemaFacts(schema) {
+  const operators = Object.keys(
+    at(schema, ["$defs", "condition", "additionalProperties", "properties"]) ?? {}
+  );
+  const version = at(schema, ["properties", "schema_version", "const"]);
+  return {
+    schemaVersion: typeof version === "number" ? version : SCHEMA_VERSION,
+    stepKinds: enumAt(schema, ["$defs", "step", "properties", "kind", "enum"]) ?? [
+      "command",
+      "condition",
+      "delay",
+      "http",
+      "ai",
+      "notify",
+      "query",
+      "approval"
+    ],
+    triggerKinds: enumAt(schema, ["$defs", "trigger", "properties", "kind", "enum"]) ?? [
+      "event",
+      "cron",
+      "at",
+      "manual"
+    ],
+    operators: operators.length ? operators : [...OPERATORS],
+    // `false` only when the hub explicitly says something else. A schema this module could not
+    // read must not turn the hub#786 check off: absence of proof is not proof of an array.
+    toolsIsObject: at(schema, ["$defs", "step", "properties", "tools", "type"]) !== "array",
+    // The exception to this function's own rule, and it has to be: every other fact FALLS BACK to
+    // the mirror because being wrong about it costs the owner a warning that does not apply. Being
+    // wrong about this one costs them the flow. A step carrying `interactive` on a hub older than
+    // hub#1633 is not ignored and does not degrade — the unknown key takes the WHOLE definition
+    // down with it (`flow.invalid_definition`), and today's fleet has not shipped that core yet.
+    // A schema this module could not read is therefore a hub that does not have it.
+    interactiveNotify: !!at(schema, ["$defs", "step", "properties", "interactive"]),
+    // Same rule, same reason, other key (hub#1639): `output` on an older core takes the whole
+    // definition down with it too. Measured on the published schemas: `v1.1.15` declares neither
+    // of the two and `v1.1.16` declares both.
+    aiOutput: !!at(schema, ["$defs", "step", "properties", "output"])
+  };
+}
+var TRIGGER_FIELD = {
+  event: "event",
+  cron: "cron",
+  at: "at"
+};
+function contractProblems(doc, facts) {
+  const out = [];
+  if (doc.schema_version !== facts.schemaVersion) {
+    out.push({
+      key: "draft.errVersion",
+      params: { got: doc.schema_version, want: facts.schemaVersion }
+    });
+  }
+  for (const trigger of doc.triggers ?? []) {
+    const kind = String(trigger?.kind ?? "");
+    if (!facts.triggerKinds.includes(kind)) {
+      out.push({ key: "draft.errTriggerKind", params: { kind } });
+      continue;
+    }
+    const field = TRIGGER_FIELD[kind];
+    if (field && !String(trigger[field] ?? "").trim()) {
+      out.push({ key: "draft.errTriggerField", params: { kind, field } });
+    }
+  }
+  const steps = Array.isArray(doc.steps) ? doc.steps : [];
+  if (!steps.length) {
+    out.push({ key: "draft.errNoSteps" });
+  }
+  const seen = /* @__PURE__ */ new Set();
+  for (const step of steps) {
+    const id = String(step?.id ?? "").trim();
+    if (!id) {
+      out.push({ key: "draft.errStepId" });
+    } else if (seen.has(id)) {
+      out.push({ key: "draft.errDuplicateId", params: { id } });
+    } else {
+      seen.add(id);
+    }
+    const kind = String(step?.kind ?? "");
+    if (!facts.stepKinds.includes(kind)) {
+      out.push({ key: "draft.errStepKind", params: { id, kind } });
+      continue;
+    }
+    if (kind === "condition") out.push(...operatorProblems(step, facts));
+    if (kind === "ai" && facts.toolsIsObject && step.tools !== void 0 && step.tools !== null) {
+      if (Array.isArray(step.tools) || typeof step.tools !== "object") {
+        out.push({ key: "draft.errToolsShape", params: { id } });
+      }
+    }
+  }
+  return out;
+}
+function operatorProblems(step, facts) {
+  const out = [];
+  for (const ops of Object.values(step.when ?? {})) {
+    for (const op of Object.keys(ops ?? {})) {
+      if (!facts.operators.includes(op)) {
+        out.push({ key: "draft.errOperator", params: { id: step.id, operator: op } });
+      }
+    }
+  }
+  return out;
+}
+function isBlank(value) {
+  if (value === null || value === void 0) return true;
+  if (typeof value === "string") return value.trim() === "";
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+function danglingRoot(value) {
+  if (typeof value !== "string") return false;
+  const root = value.split(".")[0];
+  return PATH_ROOTS.includes(root) && value.length <= root.length + 1;
+}
+function draftGaps(doc, known) {
+  const out = [];
+  for (const trigger of doc.triggers ?? []) {
+    if (trigger?.kind !== "event") continue;
+    const event = String(trigger.event ?? "").trim();
+    if (!event) {
+      out.push({ stepId: "trigger", key: "draft.gapEventMissing" });
+    } else if (known[event] === false) {
+      out.push({ stepId: "trigger", key: "draft.gapEventUnknown", params: { event } });
+    }
+  }
+  for (const step of Array.isArray(doc.steps) ? doc.steps : []) {
+    const stepId = String(step?.id ?? "");
+    const kind = String(step?.kind ?? "");
+    if (!DRAFT_STEP_KINDS.includes(kind)) {
+      out.push({ stepId, key: "draft.gapNotEditable", params: { kind } });
+      continue;
+    }
+    if (kind === "command") {
+      if (isBlank(step.command)) {
+        out.push({ stepId, key: "draft.gapCommandMissing" });
+      }
+      for (const [name, value] of Object.entries(step.params ?? {})) {
+        if (isBlank(value) || danglingRoot(value)) {
+          out.push({ stepId, key: "draft.gapParamEmpty", params: { name } });
+        }
+      }
+    }
+    if (kind === "condition") {
+      const entries = Object.entries(step.when ?? {});
+      if (!entries.length) out.push({ stepId, key: "draft.gapGuardEmpty" });
+      for (const [path, ops] of entries) {
+        if (!path.trim()) {
+          out.push({ stepId, key: "draft.gapGuardField" });
+          continue;
+        }
+        for (const [op, value] of Object.entries(ops ?? {})) {
+          if (op !== "exists" && isBlank(value)) {
+            out.push({ stepId, key: "draft.gapGuardValue", params: { field: path } });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
 // ui/lib/templates.ts
 var SECTORS = ["any", "beauty", "food"];
+var NEED_FACT = {
+  interactive: "interactiveNotify",
+  output: "aiOutput"
+};
 var SCHEMA_VERSION2 = 1;
 function run(id, command, params) {
   return { id, kind: "command", command, params };
@@ -7177,6 +7388,10 @@ var TEMPLATES = [
   {
     id: "whatsapp-appointment-unattended",
     sector: "beauty",
+    // The list she TAPS (`interactive`, hub#1633) and the slots the model hands over (`output`,
+    // hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it is refused
+    // whole — so the card is not offered there. See {@link FlowTemplate.needs}.
+    needs: ["interactive", "output"],
     // A calendar with a tick, against the twin's numbered calendar: this one is already booked.
     icon: "calendar-clear-outline",
     nameKey: "tpl.waAppointmentUnattended.name",
@@ -7249,6 +7464,32 @@ var TEMPLATES = [
           input: {
             from: "event.from",
             text: "event.text",
+            wa_message_id: "event.wa_message_id",
+            received_at: "event.received_at",
+            reply_id: "event.reply_id",
+            reply_title: "event.reply_title"
+          }
+        },
+        // **The same automation, woken by a TAP** (whatsapp_inbox#101). A tapped row arrives with
+        // `text` empty and `reply_id` full, so the trigger above — which demands words — never
+        // sees it, and these two are disjoint BY CONSTRUCTION rather than by luck: no message can
+        // satisfy `text: neq ''` and `text: eq ''` at once, so nothing is ever booked twice.
+        // `text` maps from `reply_title` here, so the step reads the same field whichever way she
+        // answered, and `reply_id` carries the slot she actually chose.
+        {
+          kind: "event",
+          event: "hub.whatsapp.message_received",
+          filter: {
+            "event.text": { eq: "" },
+            "event.reply_id": { neq: "" },
+            "event.direction": { neq: "outbound" },
+            "event.source": { neq: "history" }
+          },
+          input: {
+            from: "event.from",
+            text: "event.reply_title",
+            reply_id: "event.reply_id",
+            reply_title: "event.reply_title",
             wa_message_id: "event.wa_message_id",
             received_at: "event.received_at"
           }
@@ -7338,7 +7579,17 @@ var TEMPLATES = [
             ]
           },
           policy: "auto",
-          max_iters: 10
+          max_iters: 10,
+          // What the step hands on BESIDES its words (hub#1639). Without it the slots would have
+          // to be parsed back out of the prose, which is the guessing this card exists to stop:
+          // the id of a slot is `2026-09-08T10:30|staff:12|service:3` and it comes home whole when
+          // she taps it.
+          output: {
+            slots: {
+              type: "options",
+              describe: t3("tpl.waAppointmentUnattended.slotsDescribe")
+            }
+          }
         },
         // What the booking step wrote, sent as it is. With no approval in the middle this is the
         // customer's ONLY notice that the appointment exists, which is why the prompt ends by
@@ -7354,6 +7605,41 @@ var TEMPLATES = [
           },
           template: "",
           vars: { text: "{{steps.book_appointment.text}}" }
+        },
+        // 🔴 The guard, and it is not decoration: `slots` is empty whenever the model booked,
+        // cancelled or answered something else, and a `list` with no rows is refused by Meta —
+        // paid for, and answered with an error the owner never sees. So the list only goes out
+        // when there is something in it.
+        {
+          id: "any_slot_to_offer",
+          kind: "condition",
+          when: { "steps.book_appointment.slots": { neq: [] } }
+        },
+        // The slots as a list she TAPS instead of a paragraph she has to answer (hub#1633). The
+        // rows are the step's own output, so what comes back is the slot itself and not «the
+        // second one» — which is exactly where the bookings used to get lost.
+        {
+          id: "offer_slots",
+          kind: "notify",
+          channel: "whatsapp",
+          to: {
+            query: "whatsapp_inbox.conversations.list",
+            params: { f_wa_contact_id: "input.from" },
+            field: "contact_phone"
+          },
+          interactive: {
+            type: "list",
+            body: { text: t3("tpl.waAppointmentUnattended.offerBody") },
+            action: {
+              button: t3("tpl.waAppointmentUnattended.offerButton"),
+              sections: [
+                {
+                  title: t3("tpl.waAppointmentUnattended.offerSection"),
+                  rows: "steps.book_appointment.slots"
+                }
+              ]
+            }
+          }
         }
       ]
     })
@@ -7809,8 +8095,13 @@ function missingModules(template, known) {
   }
   return out;
 }
-function availableTemplates(sector, known) {
-  return templatesOf(sector).filter((tpl) => missingModules(tpl, known).length === 0);
+function availableTemplates(sector, known, facts = schemaFacts(void 0)) {
+  return templatesOf(sector).filter(
+    (tpl) => missingModules(tpl, known).length === 0 && coreTakes(tpl, facts)
+  );
+}
+function coreTakes(template, facts) {
+  return (template.needs ?? []).every((need) => facts[NEED_FACT[need]] === true);
 }
 function unavailableModules(known) {
   const out = [];
@@ -7861,6 +8152,7 @@ var ErpFlowsGallery = class extends i3 {
     super(...arguments);
     this.client = null;
     this.t = (k2) => k2;
+    this.facts = schemaFacts(void 0);
     this.picked = null;
     this.known = {};
     this.existing = [];
@@ -8495,7 +8787,7 @@ var ErpFlowsGallery = class extends i3 {
     </div>`;
   }
   renderSector(sector) {
-    const templates = availableTemplates(sector, this.known);
+    const templates = availableTemplates(sector, this.known, this.facts);
     if (!templates.length) return A;
     return b2`<section data-sector=${sector}>
       <h3>${this.t(`ui.sector_${sector}`)}</h3>
@@ -8542,6 +8834,9 @@ __decorateClass([
 __decorateClass([
   n4({ attribute: false })
 ], ErpFlowsGallery.prototype, "t", 2);
+__decorateClass([
+  n4({ attribute: false })
+], ErpFlowsGallery.prototype, "facts", 2);
 __decorateClass([
   r5()
 ], ErpFlowsGallery.prototype, "picked", 2);
@@ -9738,209 +10033,6 @@ function repairedDefinition(definition, problemId) {
   return repaired;
 }
 
-// ui/lib/ai-draft.ts
-var DRAFT_STEP_KINDS = ["command", "condition", "delay"];
-function readNotes(raw) {
-  const value = typeof raw === "string" ? safeParse(raw) : raw;
-  if (!Array.isArray(value)) return [];
-  return value.filter((n5) => typeof n5 === "string" && n5.trim() !== "");
-}
-function safeParse(text) {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return void 0;
-  }
-}
-function readDraft(row) {
-  const id = String(row?.id ?? "");
-  const name = typeof row?.name === "string" ? row.name : "";
-  const raw = typeof row?.definition === "string" ? safeParse(row.definition) : row?.definition;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { ok: false, problem: { key: "draft.errUnreadable", params: { name } } };
-  }
-  return {
-    ok: true,
-    draft: {
-      id,
-      name,
-      doc: readDoc(raw),
-      notes: readNotes(row?.notes),
-      createdAt: typeof row?.created_at === "string" ? row.created_at : ""
-    }
-  };
-}
-function at(root, path) {
-  let cur = root;
-  for (const key2 of path) {
-    if (!cur || typeof cur !== "object") return void 0;
-    cur = cur[key2];
-  }
-  return cur;
-}
-function enumAt(root, path) {
-  const value = at(root, path);
-  if (!Array.isArray(value)) return void 0;
-  const names = value.filter((v2) => typeof v2 === "string");
-  return names.length ? names : void 0;
-}
-function schemaFacts(schema) {
-  const operators = Object.keys(
-    at(schema, ["$defs", "condition", "additionalProperties", "properties"]) ?? {}
-  );
-  const version = at(schema, ["properties", "schema_version", "const"]);
-  return {
-    schemaVersion: typeof version === "number" ? version : SCHEMA_VERSION,
-    stepKinds: enumAt(schema, ["$defs", "step", "properties", "kind", "enum"]) ?? [
-      "command",
-      "condition",
-      "delay",
-      "http",
-      "ai",
-      "notify",
-      "query",
-      "approval"
-    ],
-    triggerKinds: enumAt(schema, ["$defs", "trigger", "properties", "kind", "enum"]) ?? [
-      "event",
-      "cron",
-      "at",
-      "manual"
-    ],
-    operators: operators.length ? operators : [...OPERATORS],
-    // `false` only when the hub explicitly says something else. A schema this module could not
-    // read must not turn the hub#786 check off: absence of proof is not proof of an array.
-    toolsIsObject: at(schema, ["$defs", "step", "properties", "tools", "type"]) !== "array",
-    // The exception to this function's own rule, and it has to be: every other fact FALLS BACK to
-    // the mirror because being wrong about it costs the owner a warning that does not apply. Being
-    // wrong about this one costs them the flow. A step carrying `interactive` on a hub older than
-    // hub#1633 is not ignored and does not degrade — the unknown key takes the WHOLE definition
-    // down with it (`flow.invalid_definition`), and today's fleet has not shipped that core yet.
-    // A schema this module could not read is therefore a hub that does not have it.
-    interactiveNotify: !!at(schema, ["$defs", "step", "properties", "interactive"])
-  };
-}
-var TRIGGER_FIELD = {
-  event: "event",
-  cron: "cron",
-  at: "at"
-};
-function contractProblems(doc, facts) {
-  const out = [];
-  if (doc.schema_version !== facts.schemaVersion) {
-    out.push({
-      key: "draft.errVersion",
-      params: { got: doc.schema_version, want: facts.schemaVersion }
-    });
-  }
-  for (const trigger of doc.triggers ?? []) {
-    const kind = String(trigger?.kind ?? "");
-    if (!facts.triggerKinds.includes(kind)) {
-      out.push({ key: "draft.errTriggerKind", params: { kind } });
-      continue;
-    }
-    const field = TRIGGER_FIELD[kind];
-    if (field && !String(trigger[field] ?? "").trim()) {
-      out.push({ key: "draft.errTriggerField", params: { kind, field } });
-    }
-  }
-  const steps = Array.isArray(doc.steps) ? doc.steps : [];
-  if (!steps.length) {
-    out.push({ key: "draft.errNoSteps" });
-  }
-  const seen = /* @__PURE__ */ new Set();
-  for (const step of steps) {
-    const id = String(step?.id ?? "").trim();
-    if (!id) {
-      out.push({ key: "draft.errStepId" });
-    } else if (seen.has(id)) {
-      out.push({ key: "draft.errDuplicateId", params: { id } });
-    } else {
-      seen.add(id);
-    }
-    const kind = String(step?.kind ?? "");
-    if (!facts.stepKinds.includes(kind)) {
-      out.push({ key: "draft.errStepKind", params: { id, kind } });
-      continue;
-    }
-    if (kind === "condition") out.push(...operatorProblems(step, facts));
-    if (kind === "ai" && facts.toolsIsObject && step.tools !== void 0 && step.tools !== null) {
-      if (Array.isArray(step.tools) || typeof step.tools !== "object") {
-        out.push({ key: "draft.errToolsShape", params: { id } });
-      }
-    }
-  }
-  return out;
-}
-function operatorProblems(step, facts) {
-  const out = [];
-  for (const ops of Object.values(step.when ?? {})) {
-    for (const op of Object.keys(ops ?? {})) {
-      if (!facts.operators.includes(op)) {
-        out.push({ key: "draft.errOperator", params: { id: step.id, operator: op } });
-      }
-    }
-  }
-  return out;
-}
-function isBlank(value) {
-  if (value === null || value === void 0) return true;
-  if (typeof value === "string") return value.trim() === "";
-  if (Array.isArray(value)) return value.length === 0;
-  return false;
-}
-function danglingRoot(value) {
-  if (typeof value !== "string") return false;
-  const root = value.split(".")[0];
-  return PATH_ROOTS.includes(root) && value.length <= root.length + 1;
-}
-function draftGaps(doc, known) {
-  const out = [];
-  for (const trigger of doc.triggers ?? []) {
-    if (trigger?.kind !== "event") continue;
-    const event = String(trigger.event ?? "").trim();
-    if (!event) {
-      out.push({ stepId: "trigger", key: "draft.gapEventMissing" });
-    } else if (known[event] === false) {
-      out.push({ stepId: "trigger", key: "draft.gapEventUnknown", params: { event } });
-    }
-  }
-  for (const step of Array.isArray(doc.steps) ? doc.steps : []) {
-    const stepId = String(step?.id ?? "");
-    const kind = String(step?.kind ?? "");
-    if (!DRAFT_STEP_KINDS.includes(kind)) {
-      out.push({ stepId, key: "draft.gapNotEditable", params: { kind } });
-      continue;
-    }
-    if (kind === "command") {
-      if (isBlank(step.command)) {
-        out.push({ stepId, key: "draft.gapCommandMissing" });
-      }
-      for (const [name, value] of Object.entries(step.params ?? {})) {
-        if (isBlank(value) || danglingRoot(value)) {
-          out.push({ stepId, key: "draft.gapParamEmpty", params: { name } });
-        }
-      }
-    }
-    if (kind === "condition") {
-      const entries = Object.entries(step.when ?? {});
-      if (!entries.length) out.push({ stepId, key: "draft.gapGuardEmpty" });
-      for (const [path, ops] of entries) {
-        if (!path.trim()) {
-          out.push({ stepId, key: "draft.gapGuardField" });
-          continue;
-        }
-        for (const [op, value] of Object.entries(ops ?? {})) {
-          if (op !== "exists" && isBlank(value)) {
-            out.push({ stepId, key: "draft.gapGuardValue", params: { field: path } });
-          }
-        }
-      }
-    }
-  }
-  return out;
-}
-
 // locales/es.json
 var es_default = {
   name: "Automatizaciones",
@@ -10750,7 +10842,11 @@ var es_default = {
       blankReplyHint: "La l\xEDnea que sale en cuanto llega un mensaje, antes incluso de mirar la agenda. Ponla con tus palabras: es lo primero que oye de ti. No prometas que le contestar\xE1 una persona \u2014 con esta automatizaci\xF3n no lo hace nadie.",
       ackText: "\xA1Gracias por escribirnos! Miro la agenda y te contesto ahora mismo.",
       knowPrompt: "Una clienta ha escrito al sal\xF3n por WhatsApp desde el n\xFAmero {{input.from}}. Esto es lo que dice:\n\n\xAB{{input.text}}\xBB\n\nTu \xFAnico trabajo en este turno es asegurarte de que esa persona tiene ficha de cliente, porque una cita se reserva contra un cliente real, nunca contra texto libre.\n\nLa ficha ya se ha buscado por ti, por ese n\xFAmero de tel\xE9fono y por nada m\xE1s. T\xFA no puedes buscar en las fichas del sal\xF3n, y no debes pedirlo: el n\xFAmero desde el que llega el mensaje es la \xFAnica identidad de la que responde WhatsApp, y un nombre escrito en un mensaje no es una identidad. Esto es lo que ha contestado la b\xFAsqueda:\n\n- si hay alguien con ese n\xFAmero: {{steps.find_customer.found}}\n- cu\xE1ntas fichas casan con \xE9l: {{steps.find_customer.count}}\n- el nombre de la ficha, si lo tiene: {{steps.find_customer.name}}\n2. Si `{{steps.find_customer.found}}` es `true`, NO escribas nada. Contesta en una l\xEDnea diciendo qui\xE9n es y para.\n3. Si es `false`, cr\xE9ala con `customers.create`, con el tel\xE9fono `+{{input.from}}` y el nombre que la persona haya dado en su mensaje. Si no ha dado nombre, usa el tel\xE9fono como nombre \u2014 no te lo inventes.\n\nNunca escribas m\xE1s de una vez. Y lee esto dos veces, porque es lo que distingue a esta automatizaci\xF3n de la que lleva revisi\xF3n: **nadie va a comprobar lo que hagas.** Este sal\xF3n tiene el WhatsApp desatendido, as\xED que lo que llames ocurre en el acto, sobre la lista de clientes real del sal\xF3n. La ficha que crees es la que van a tener.",
-      bookPrompt: "Una clienta ha escrito al sal\xF3n por WhatsApp desde el n\xFAmero {{input.from}} a las {{input.received_at}}. Esto es lo que dice:\n\n\xAB{{input.text}}\xBB\n\nEl paso anterior ya se asegur\xF3 de que la ficha existe, y report\xF3: {{steps.know_the_customer.text}}\n\n**Todo lo que hagas aqu\xED OCURRE.** Este sal\xF3n tiene el WhatsApp desatendido: no hay bandeja de aprobaci\xF3n y nadie lee tu trabajo antes que la clienta. En cuanto llames a `appointments.appointments.create` la cita est\xE1 en la agenda, y lo que escribas de vuelta se le manda tal cual.\n\n**Lo primero, averigua qu\xE9 est\xE1 pidiendo.** Lee su mensaje y decide cu\xE1l de estas es:\n\n- **Una cita nueva** \u2014 una hora, un servicio, \xAB\xBFten\xE9is hueco ma\xF1ana?\xBB. Haz RESERVAR, abajo.\n- **Anular una que ya tiene** \u2014 \xABno puedo ir\xBB, \xABcanc\xE9lamela\xBB, \xABme ha surgido algo\xBB. Haz ANULAR, abajo, y NO reserves nada. Que alguien pida cancelar y acabe con una segunda cita es lo peor que esta automatizaci\xF3n le puede hacer a un sal\xF3n.\n- **Cualquier otra cosa** \u2014 un precio, una duda, una queja, mover la cita a otro d\xEDa (que esta automatizaci\xF3n todav\xEDa no sabe hacer). No hagas NADA: contesta en una l\xEDnea si puedes y, si no, di que alguien del sal\xF3n le responder\xE1.\n\n# RESERVAR\n\n\u{1F534} **La hora no la eliges t\xFA. La elige ella.** Solo puedes reservar un inicio que la clienta haya pedido. Si su mensaje no fija a la vez el d\xEDa Y la hora, este turno no reserva nada: contestas con los huecos libres de verdad y le pides que responda con el servicio, el d\xEDa y la hora. No es cortes\xEDa, es el dise\xF1o \u2014 sin nadie en el sal\xF3n que lo cace, un bot que elige la hora mete a la gente en horas a las que no pueden ir, y el sal\xF3n pierde el sill\xF3n y la clienta.\n\nLas herramientas de disponibilidad que tienes aqu\xED solo contestan preguntas: no cambian nada, se ejecutan en cuanto las llamas y su respuesta te vuelve a ti. As\xED que preg\xFAntales primero, y act\xFAa con lo que te hayan dicho.\n\n1. Lee el cat\xE1logo con `services.services.list` y elige el servicio que pide. Si el mensaje es demasiado vago para saber cu\xE1l, no reserves NADA: d\xEDselo en una l\xEDnea y nombra los servicios que podr\xEDan encajar, para que elija.\n2. Calcula cu\xE1nto dura. Si el servicio declara `duration_minutes`, \xFAsalo TAL CUAL \u2014 lo decidi\xF3 el sal\xF3n. Si falta o es cero, EST\xCDMALO por lo que es el servicio: un corte no es un tinte, y un tinte no es un tinte con mechas. S\xE9 honesto y s\xE9 generoso antes que justo; una reserva que se queda quince minutos corta desplaza la tarde entera.\n3. Pregunta a `appointments.availability.day_opening` cu\xE1ndo abre el sal\xF3n el d\xEDa que pide. Contesta `spans` \u2014minutos desde la medianoche de esa misma fecha, con los descansos ya recortados\u2014 y `source`. Si `source` es `schedules` y `spans` viene vac\xEDo, EL SAL\xD3N EST\xC1 CERRADO ese d\xEDa: no reserves nada, d\xEDselo, ofrece el d\xEDa abierto m\xE1s cercano y para. Si `source` es `unset`, el sal\xF3n no tiene ninguna regla que alcance esa fecha, as\xED que no se est\xE1 rechazando nada por ese motivo y no debes filtrar t\xFA por horario.\n4. NUNCA deduzcas el horario por tu cuenta, ni del mensaje ni de ning\xFAn otro sitio \u2014 y lo mismo vale para los huecos libres y para qui\xE9n trabaja. Estas operaciones lo resuelven exactamente igual que la puerta de reserva \u2014d\xEDa especial exacto, d\xEDa especial anual, rango de override, horario semanal, en ese orden\u2014 y tener una segunda opini\xF3n sobre cu\xE1ndo abre el sal\xF3n es justo lo que hace que una reserva con buena pinta la rechace la puerta.\n5. Pide a `appointments.availability.slots` los huecos libres de verdad de esa fecha para esa duraci\xF3n. Si ella ha nombrado una hora, confirma ESA hora con `appointments.availability.check`, pasando la profesional que hayas elegido. Si `check` la rechaza, no la muevas a otra hora en su nombre: cree su motivo \u2014`outside_schedule` es que el sal\xF3n est\xE1 cerrado a esa hora, `held` que otra solicitud lo tiene apartado unos minutos\u2014 y ofr\xE9cele los huecos libres de alrededor.\n6. Usa `staff.members.list` y `staff.schedules.list_for_member` para elegir a una profesional que de verdad trabaje a esa hora, y confirma el hueco para ella pasando su `staff_id`. Elegir QUI\xC9N es tuyo; elegir CU\xC1NDO no.\n7. Si la hora que pidi\xF3 no est\xE1 libre, o no lleg\xF3 a nombrar ninguna, no reserves NADA. Cont\xE9stale con dos o tres de los huecos libres de verdad \u2014d\xEDa, hora y profesional por su nombre\u2014 y p\xEDdele que responda con el servicio, el d\xEDa y la hora, deletre\xE1ndole un ejemplo: \xABcorte, ma\xF1ana a las 10:30\xBB. Su siguiente mensaje es un turno nuevo que empieza de cero, as\xED que tiene que llevar tambi\xE9n el servicio \u2014 un \xAB10:30\xBB a secas te llega sin saber para qu\xE9 es. Si no hay ning\xFAn hueco libre ese d\xEDa, d\xEDselo y ofr\xE9cele el d\xEDa m\xE1s cercano que s\xED tenga.\n8. La clienta ya est\xE1 resuelta: su id es `{{steps.resolve_customer.id}}`.\n9. Res\xE9rvala con `appointments.appointments.create`: la clienta, el servicio, la profesional, el inicio que hayas confirmado y `duration_minutes`.\n\nSobre la duraci\xF3n, esto importa: si la has ESTIMADO en vez de leerla del cat\xE1logo, dilo en `internal_notes`, con palabras y con el n\xFAmero \u2014 por ejemplo \xABDuraci\xF3n estimada por el asistente: 90 min; el cat\xE1logo no declara ninguna para este servicio.\xBB Esta reserva no la aprueba nadie, as\xED que `internal_notes` es donde el sal\xF3n se entera despu\xE9s de que la duraci\xF3n era una estimaci\xF3n y puede corregirla antes de que llegue el d\xEDa. Es solo para el personal: la clienta no lo lee.\n\nPon en `notes` un resumen de una l\xEDnea de lo que ha pedido la clienta, con sus propias palabras.\n\nPreguntar qu\xE9 hay libre no cambia nada. `appointments.appointments.create` es la \xFAnica llamada que mete una cita real en la agenda del sal\xF3n, y lo hace en el acto: no hay bandeja, no hay revisi\xF3n y no hay vuelta atr\xE1s que no sea anularla.\n\n# ANULAR\n\n1. La clienta ya est\xE1 resuelta: su id es `{{steps.resolve_customer.id}}`, y `{{steps.resolve_customer.found}}` dice si hay ficha siquiera. Si no tiene ficha, tampoco tiene cita: dile que no hay nada reservado a ese n\xFAmero y para.\n2. Mira lo que tiene con `appointments.appointments.list_for_customer`. Contesta de la m\xE1s nueva a la m\xE1s vieja e incluye las pasadas y las ya anuladas, as\xED que coge la M\xC1S PR\xD3XIMA que est\xE9 a\xFAn por venir y cuyo `status` sea `pending` o `confirmed`. Lo que est\xE9 `cancelled`, `completed` o `no_show` es historial: eso no se anula.\n3. Si no le queda ninguna por venir, d\xEDselo y para.\n4. Si le queda m\xE1s de una y su mensaje no dice cu\xE1l, no anules NADA: N\xD3MBRALAS \u2014d\xEDa, hora y profesional\u2014 y preg\xFAntale cu\xE1l. No adivines nunca: anular la cita equivocada le cuesta al sal\xF3n el sill\xF3n Y la clienta. Su respuesta llega como un mensaje nuevo y sus citas siguen ah\xED para listarlas, as\xED que volver a nombrarlas es todo lo que hace falta.\n5. An\xFAlala con `appointments.appointments.cancel`: ese `appointment_id`, un `reason` con sus propias palabras, `channel` puesto a `customer`, y el `customer_id` de la persona que encontraste en el punto 1.\n\nEse `channel` no es un adorno: es lo que hace que se apliquen las reglas PROPIAS del sal\xF3n \u2014 si las clientas pueden anular, y con cu\xE1nta antelaci\xF3n. Y es por lo que va con \xE9l el `customer_id`: en el canal de la clienta, Citas rechaza una anulaci\xF3n que no diga qui\xE9n la pide, y la vuelve a rechazar si la cita resulta ser de otra persona. As\xED que tiene que ser el id que buscaste por SU tel\xE9fono en el punto 1, nunca uno sacado del mensaje ni de ning\xFAn otro sitio. Lo dem\xE1s lo decide Citas cuando la anulaci\xF3n se ejecuta, con los ajustes de este negocio. No lo calcules t\xFA, no le digas que ya es tarde, y no la anules \xABigualmente\xBB: ll\xE1malo, y si las reglas del sal\xF3n lo rechazan, dile exactamente lo que ha contestado el sal\xF3n.\n\nNunca anules algo que no le hayas nombrado antes.\n\n**Y ahora la parte que llega a la clienta.** Todo lo que escribas de vuelta se le manda por WhatsApp, palabra por palabra, en cuanto termine este turno \u2014 as\xED que escr\xEDbelo PARA ella, no sobre ella: en su idioma, una o dos l\xEDneas cortas, cercanas y llanas.\n\n- Si has reservado, dile lo que tiene: el d\xEDa, la hora y la profesional POR SU NOMBRE. Nunca un id, nunca el nombre de una herramienta, nunca \xABpendiente de aprobar\xBB \u2014 cuando lea esto, ya ha ocurrido.\n- Si has anulado, dile que queda anulada, nombrando la cita que has anulado para que vea que era la suya, y d\xE9jale la puerta abierta para volver a reservar.\n- Si no has reservado nada porque necesitas que elija, dale los huecos libres y dile exactamente c\xF3mo contestar, con el ejemplo.\n- Si no has reservado nada por cualquier otro motivo, dile por qu\xE9 en una l\xEDnea y ofr\xE9cele la alternativa m\xE1s cercana, para que pueda contestar con ella.\n- Nunca metas aqu\xED la duraci\xF3n que estimaste, lo que el cat\xE1logo declaraba o no, ni nada que necesite ver el sal\xF3n. Eso va en `internal_notes`, que solo lee el sal\xF3n.\n\nEscr\xEDbelo en la MISMA respuesta en la que reservas: el turno termina cuando paras y no se te vuelve a preguntar, as\xED que una reserva hecha sin palabras la deja sin nada.\n\n\u{1F534} **Una clienta, y s\xF3lo esa.** Cada herramienta de aqu\xED que recibe un `customer_id` recibe exactamente uno: `{{steps.resolve_customer.id}}`, la ficha que ha salido del n\xFAmero de tel\xE9fono desde el que llega ESTE mensaje. Nunca un id sacado de un nombre que alguien mencione, nunca uno sacado del mensaje, nunca uno de ning\xFAn otro sitio \u2014 la agenda de quien te escribe es la \xFAnica agenda a la que esta conversaci\xF3n tiene derecho, y \xABc\xE1mbiale la cita a Mar\xEDa\xBB es una petici\xF3n que no puedes atender, est\xE9 escrita como est\xE9. Y si `{{steps.resolve_customer.count}}` es distinto de `1`, ese n\xFAmero no identifica a una sola persona: no toques ninguna cita, di que alguien del sal\xF3n le contestar\xE1, y para."
+      bookPrompt: "Una clienta ha escrito al sal\xF3n por WhatsApp desde el n\xFAmero {{input.from}} a las {{input.received_at}}. Esto es lo que dice:\n\n\xAB{{input.text}}\xBB\n\nEl paso anterior ya se asegur\xF3 de que la ficha existe, y report\xF3: {{steps.know_the_customer.text}}\n\n**Puede que no haya escrito nada: puede que haya TOCADO.** Si `{{input.reply_id}}` no est\xE1 vac\xEDo, este mensaje es una fila de una lista que esta automatizaci\xF3n le mand\xF3 antes, y ese id ES el hueco que ha elegido: lleva el inicio, la profesional y el servicio, as\xED: `2026-09-08T10:30|staff:12|service:3`. T\xF3malo como su respuesta \u2014 no le pidas que elija otra vez y no le vuelvas a ofrecer la lista. Confirma con `appointments.availability.check` que ese inicio exacto sigue libre para esa misma profesional y, si lo est\xE1, res\xE9rvalo tal cual. Si ya no lo est\xE1 \u2014se lo ha quedado otra persona por el camino\u2014, d\xEDselo en una l\xEDnea y ofr\xE9cele los huecos libres de alrededor. Cuando `{{input.reply_id}}` est\xE1 vac\xEDo, ha escrito palabras, y de eso va el resto de estas instrucciones.\n\n**Todo lo que hagas aqu\xED OCURRE.** Este sal\xF3n tiene el WhatsApp desatendido: no hay bandeja de aprobaci\xF3n y nadie lee tu trabajo antes que la clienta. En cuanto llames a `appointments.appointments.create` la cita est\xE1 en la agenda, y lo que escribas de vuelta se le manda tal cual.\n\n**Lo primero, averigua qu\xE9 est\xE1 pidiendo.** Lee su mensaje y decide cu\xE1l de estas es:\n\n- **Una cita nueva** \u2014 una hora, un servicio, \xAB\xBFten\xE9is hueco ma\xF1ana?\xBB. Haz RESERVAR, abajo.\n- **Anular una que ya tiene** \u2014 \xABno puedo ir\xBB, \xABcanc\xE9lamela\xBB, \xABme ha surgido algo\xBB. Haz ANULAR, abajo, y NO reserves nada. Que alguien pida cancelar y acabe con una segunda cita es lo peor que esta automatizaci\xF3n le puede hacer a un sal\xF3n.\n- **Cualquier otra cosa** \u2014 un precio, una duda, una queja, mover la cita a otro d\xEDa (que esta automatizaci\xF3n todav\xEDa no sabe hacer). No hagas NADA: contesta en una l\xEDnea si puedes y, si no, di que alguien del sal\xF3n le responder\xE1.\n\n# RESERVAR\n\n\u{1F534} **La hora no la eliges t\xFA. La elige ella.** Solo puedes reservar un inicio que la clienta haya pedido. Si su mensaje no fija a la vez el d\xEDa Y la hora, este turno no reserva nada: contestas con los huecos libres de verdad y le pides que responda con el servicio, el d\xEDa y la hora. No es cortes\xEDa, es el dise\xF1o \u2014 sin nadie en el sal\xF3n que lo cace, un bot que elige la hora mete a la gente en horas a las que no pueden ir, y el sal\xF3n pierde el sill\xF3n y la clienta.\n\nLas herramientas de disponibilidad que tienes aqu\xED solo contestan preguntas: no cambian nada, se ejecutan en cuanto las llamas y su respuesta te vuelve a ti. As\xED que preg\xFAntales primero, y act\xFAa con lo que te hayan dicho.\n\n1. Lee el cat\xE1logo con `services.services.list` y elige el servicio que pide. Si el mensaje es demasiado vago para saber cu\xE1l, no reserves NADA: d\xEDselo en una l\xEDnea y nombra los servicios que podr\xEDan encajar, para que elija.\n2. Calcula cu\xE1nto dura. Si el servicio declara `duration_minutes`, \xFAsalo TAL CUAL \u2014 lo decidi\xF3 el sal\xF3n. Si falta o es cero, EST\xCDMALO por lo que es el servicio: un corte no es un tinte, y un tinte no es un tinte con mechas. S\xE9 honesto y s\xE9 generoso antes que justo; una reserva que se queda quince minutos corta desplaza la tarde entera.\n3. Pregunta a `appointments.availability.day_opening` cu\xE1ndo abre el sal\xF3n el d\xEDa que pide. Contesta `spans` \u2014minutos desde la medianoche de esa misma fecha, con los descansos ya recortados\u2014 y `source`. Si `source` es `schedules` y `spans` viene vac\xEDo, EL SAL\xD3N EST\xC1 CERRADO ese d\xEDa: no reserves nada, d\xEDselo, ofrece el d\xEDa abierto m\xE1s cercano y para. Si `source` es `unset`, el sal\xF3n no tiene ninguna regla que alcance esa fecha, as\xED que no se est\xE1 rechazando nada por ese motivo y no debes filtrar t\xFA por horario.\n4. NUNCA deduzcas el horario por tu cuenta, ni del mensaje ni de ning\xFAn otro sitio \u2014 y lo mismo vale para los huecos libres y para qui\xE9n trabaja. Estas operaciones lo resuelven exactamente igual que la puerta de reserva \u2014d\xEDa especial exacto, d\xEDa especial anual, rango de override, horario semanal, en ese orden\u2014 y tener una segunda opini\xF3n sobre cu\xE1ndo abre el sal\xF3n es justo lo que hace que una reserva con buena pinta la rechace la puerta.\n5. Pide a `appointments.availability.slots` los huecos libres de verdad de esa fecha para esa duraci\xF3n. Si ella ha nombrado una hora, confirma ESA hora con `appointments.availability.check`, pasando la profesional que hayas elegido. Si `check` la rechaza, no la muevas a otra hora en su nombre: cree su motivo \u2014`outside_schedule` es que el sal\xF3n est\xE1 cerrado a esa hora, `held` que otra solicitud lo tiene apartado unos minutos\u2014 y ofr\xE9cele los huecos libres de alrededor.\n6. Usa `staff.members.list` y `staff.schedules.list_for_member` para elegir a una profesional que de verdad trabaje a esa hora, y confirma el hueco para ella pasando su `staff_id`. Elegir QUI\xC9N es tuyo; elegir CU\xC1NDO no.\n7. Si la hora que pidi\xF3 no est\xE1 libre, o no lleg\xF3 a nombrar ninguna, no reserves NADA. Devuelve los huecos libres de verdad en `slots` \u2014eso es lo que ella va a TOCAR\u2014 y, con palabras, d\xEDle que toque el que le venga bien. No le pidas que escriba el servicio, el d\xEDa y la hora: escribirlos es justo donde se pierden las reservas \u2014 contesta \xAB10:30\xBB, o \xABel segundo\xBB, y lo que llega es un turno nuevo que nunca vio la lista. Como el hueco vuelve entero cuando lo toca, su siguiente mensaje ya no necesita repetir nada. Si no hay ning\xFAn hueco libre ese d\xEDa, d\xEDselo, pon en `slots` los del d\xEDa m\xE1s cercano que s\xED tenga y d\xEDle que toque uno.\n8. La clienta ya est\xE1 resuelta: su id es `{{steps.resolve_customer.id}}`.\n9. Res\xE9rvala con `appointments.appointments.create`: la clienta, el servicio, la profesional, el inicio que hayas confirmado y `duration_minutes`.\n\nSobre la duraci\xF3n, esto importa: si la has ESTIMADO en vez de leerla del cat\xE1logo, dilo en `internal_notes`, con palabras y con el n\xFAmero \u2014 por ejemplo \xABDuraci\xF3n estimada por el asistente: 90 min; el cat\xE1logo no declara ninguna para este servicio.\xBB Esta reserva no la aprueba nadie, as\xED que `internal_notes` es donde el sal\xF3n se entera despu\xE9s de que la duraci\xF3n era una estimaci\xF3n y puede corregirla antes de que llegue el d\xEDa. Es solo para el personal: la clienta no lo lee.\n\nPon en `notes` un resumen de una l\xEDnea de lo que ha pedido la clienta, con sus propias palabras.\n\nPreguntar qu\xE9 hay libre no cambia nada. `appointments.appointments.create` es la \xFAnica llamada que mete una cita real en la agenda del sal\xF3n, y lo hace en el acto: no hay bandeja, no hay revisi\xF3n y no hay vuelta atr\xE1s que no sea anularla.\n\n# ANULAR\n\n1. La clienta ya est\xE1 resuelta: su id es `{{steps.resolve_customer.id}}`, y `{{steps.resolve_customer.found}}` dice si hay ficha siquiera. Si no tiene ficha, tampoco tiene cita: dile que no hay nada reservado a ese n\xFAmero y para.\n2. Mira lo que tiene con `appointments.appointments.list_for_customer`. Contesta de la m\xE1s nueva a la m\xE1s vieja e incluye las pasadas y las ya anuladas, as\xED que coge la M\xC1S PR\xD3XIMA que est\xE9 a\xFAn por venir y cuyo `status` sea `pending` o `confirmed`. Lo que est\xE9 `cancelled`, `completed` o `no_show` es historial: eso no se anula.\n3. Si no le queda ninguna por venir, d\xEDselo y para.\n4. Si le queda m\xE1s de una y su mensaje no dice cu\xE1l, no anules NADA: N\xD3MBRALAS \u2014d\xEDa, hora y profesional\u2014 y preg\xFAntale cu\xE1l. No adivines nunca: anular la cita equivocada le cuesta al sal\xF3n el sill\xF3n Y la clienta. Su respuesta llega como un mensaje nuevo y sus citas siguen ah\xED para listarlas, as\xED que volver a nombrarlas es todo lo que hace falta.\n5. An\xFAlala con `appointments.appointments.cancel`: ese `appointment_id`, un `reason` con sus propias palabras, `channel` puesto a `customer`, y el `customer_id` de la persona que encontraste en el punto 1.\n\nEse `channel` no es un adorno: es lo que hace que se apliquen las reglas PROPIAS del sal\xF3n \u2014 si las clientas pueden anular, y con cu\xE1nta antelaci\xF3n. Y es por lo que va con \xE9l el `customer_id`: en el canal de la clienta, Citas rechaza una anulaci\xF3n que no diga qui\xE9n la pide, y la vuelve a rechazar si la cita resulta ser de otra persona. As\xED que tiene que ser el id que buscaste por SU tel\xE9fono en el punto 1, nunca uno sacado del mensaje ni de ning\xFAn otro sitio. Lo dem\xE1s lo decide Citas cuando la anulaci\xF3n se ejecuta, con los ajustes de este negocio. No lo calcules t\xFA, no le digas que ya es tarde, y no la anules \xABigualmente\xBB: ll\xE1malo, y si las reglas del sal\xF3n lo rechazan, dile exactamente lo que ha contestado el sal\xF3n.\n\nNunca anules algo que no le hayas nombrado antes.\n\n**Y ahora la parte que llega a la clienta.** Todo lo que escribas de vuelta se le manda por WhatsApp, palabra por palabra, en cuanto termine este turno \u2014 as\xED que escr\xEDbelo PARA ella, no sobre ella: en su idioma, una o dos l\xEDneas cortas, cercanas y llanas.\n\n- Si has reservado, dile lo que tiene: el d\xEDa, la hora y la profesional POR SU NOMBRE. Nunca un id, nunca el nombre de una herramienta, nunca \xABpendiente de aprobar\xBB \u2014 cuando lea esto, ya ha ocurrido.\n- Si has anulado, dile que queda anulada, nombrando la cita que has anulado para que vea que era la suya, y d\xE9jale la puerta abierta para volver a reservar.\n- Si no has reservado nada porque necesitas que elija, dale los huecos libres y dile exactamente c\xF3mo contestar, con el ejemplo.\n- Si no has reservado nada por cualquier otro motivo, dile por qu\xE9 en una l\xEDnea y ofr\xE9cele la alternativa m\xE1s cercana, para que pueda contestar con ella.\n- Nunca metas aqu\xED la duraci\xF3n que estimaste, lo que el cat\xE1logo declaraba o no, ni nada que necesite ver el sal\xF3n. Eso va en `internal_notes`, que solo lee el sal\xF3n.\n\nEscr\xEDbelo en la MISMA respuesta en la que reservas: el turno termina cuando paras y no se te vuelve a preguntar, as\xED que una reserva hecha sin palabras la deja sin nada.\n\n**Y termina SIEMPRE llamando a `flow_answer`, una sola vez y la \xFAltima.** Es como le entregas los huecos a la automatizaci\xF3n, que es quien se los manda para que los toque; sin esa llamada este paso falla y la clienta se queda sin respuesta ninguna.\n\n- `slots` lleva los huecos que le est\xE1s ofreciendo, como mucho **10**, en el orden en el que quieres que los vea.\n- El `id` de cada hueco es el hueco de verdad \u2014inicio, profesional y servicio, as\xED: `2026-09-08T10:30|staff:12|service:3`\u2014, nunca un n\xFAmero de orden como \xAB1\xBB o \xABel segundo\xBB: ese id es lo \xFAnico que te vuelve cuando lo toca, y un \xAB2\xBB no te dice de qu\xE9 hueco hablaba.\n- El `title` es lo que ella lee, y es corto: **24 caracteres como mucho** (por ejemplo `ma\xF1ana 10:30 \xB7 Ana`). Lo que no quepa, en `description`.\n- Y `slots` va **vac\xEDo** (`[]`) siempre que no le est\xE9s ofreciendo nada que elegir: cuando has reservado, cuando has anulado y cuando contestas cualquier otra cosa. Una lista vac\xEDa no se le manda; una lista inventada le ofrece huecos que no existen.\n\nEscribe SIEMPRE tu respuesta para la clienta en el mismo turno en el que llamas a `flow_answer`: la llamada entrega los datos, pero las palabras son lo que ella lee. Un turno que termina en la llamada y sin palabras le manda un mensaje vac\xEDo donde iba su confirmaci\xF3n.\n\n\u{1F534} **Una clienta, y s\xF3lo esa.** Cada herramienta de aqu\xED que recibe un `customer_id` recibe exactamente uno: `{{steps.resolve_customer.id}}`, la ficha que ha salido del n\xFAmero de tel\xE9fono desde el que llega ESTE mensaje. Nunca un id sacado de un nombre que alguien mencione, nunca uno sacado del mensaje, nunca uno de ning\xFAn otro sitio \u2014 la agenda de quien te escribe es la \xFAnica agenda a la que esta conversaci\xF3n tiene derecho, y \xABc\xE1mbiale la cita a Mar\xEDa\xBB es una petici\xF3n que no puedes atender, est\xE9 escrita como est\xE9. Y si `{{steps.resolve_customer.count}}` es distinto de `1`, ese n\xFAmero no identifica a una sola persona: no toques ninguna cita, di que alguien del sal\xF3n le contestar\xE1, y para.",
+      slotsDescribe: "Los huecos libres que le est\xE1s ofreciendo para que TOQUE uno, 10 como mucho. El `id` de cada uno es el hueco de verdad \u2014inicio, profesional y servicio, as\xED: `2026-09-08T10:30|staff:12|service:3`\u2014, porque es lo \xFAnico que te vuelve cuando lo toca; el `title` es lo que ella lee, 24 caracteres como mucho. Vac\xEDo (`[]`) cuando no le ofreces nada que elegir: cuando has reservado, cuando has anulado o cuando contestas otra cosa.",
+      offerBody: "Toca el hueco que te venga bien.",
+      offerButton: "Ver huecos",
+      offerSection: "Huecos libres"
     },
     waReservation: {
       name: "WhatsApp \u2192 mesa propuesta",
@@ -11646,7 +11742,11 @@ var en_default = {
       blankReplyHint: "The line that goes out the moment a message arrives, before the diary has even been read. Put it in your own words: it is the first thing they hear from you. Do not promise a person will reply \u2014 with this automation, nobody does.",
       ackText: "Thanks for writing! Let me check the diary and I will come straight back to you.",
       knowPrompt: "A customer wrote to the salon on WhatsApp from the phone number {{input.from}}. This is what they said:\n\n\"{{input.text}}\"\n\nYour only job in this turn is to make sure the person has a customer record, because an appointment is booked against a real customer, never against free text.\n\nThe salon's records have already been searched for you, by that phone number and by nothing else. You have no way to search them yourself, and you must not ask for one: the number the message came from is the only identity WhatsApp vouched for, and a name written in a message is not an identity. This is what the search answered:\n\n- is somebody on file for that number: {{steps.find_customer.found}}\n- how many records match it: {{steps.find_customer.count}}\n- the name on the record, when there is one: {{steps.find_customer.name}}\n2. If `{{steps.find_customer.found}}` is `true`, write NOTHING. Answer in one line saying who they are and stop.\n3. If it is `false`, create them with `customers.create`, with the phone `+{{input.from}}` and the name the person gave in their message. If they gave no name, use the phone number as the name \u2014 do not invent one.\n\nNever write more than once. And read this twice, because it is what makes this automation different from the one with a review step: **nobody is going to check your work.** This salon runs its WhatsApp unattended, so anything you call happens immediately, on the salon's real customer list. The record you create is the record they will have.",
-      bookPrompt: "A customer wrote to the salon on WhatsApp from the phone number {{input.from}} at {{input.received_at}}. This is what they said:\n\n\"{{input.text}}\"\n\nThe previous step already made sure the customer record exists, and reported: {{steps.know_the_customer.text}}\n\n**Everything you do here HAPPENS.** This salon runs its WhatsApp unattended: there is no approval tray, and nobody reads your work before the customer does. The moment you call `appointments.appointments.create` the appointment is in the diary, and what you write back is sent to the customer as it is.\n\n**First, work out what they are asking for.** Read their message and decide which of these it is:\n\n- **A new appointment** \u2014 a time, a service, \xABdo you have room tomorrow\xBB. Do BOOKING below.\n- **Cancelling one they already have** \u2014 \xABI can't make it\xBB, \xABcancel it\xBB, \xABsomething came up\xBB. Do CANCELLING below, and do NOT book anything. Somebody who asks to cancel and ends up with a second appointment is the worst thing this automation can do to a salon.\n- **Anything else** \u2014 a price, a question, a complaint, moving an appointment to another day (which this automation cannot do yet). Do NOTHING: answer in one line if you can, and otherwise say somebody from the salon will get back to them.\n\n# BOOKING\n\n\u{1F534} **You never choose the hour. They do.** You may only book a start the customer asked for themselves. If their message does not pin down BOTH a day and an hour, you book nothing this turn: you answer with the real free slots and ask them to reply with the service, the day and the hour. That is not politeness, it is the design \u2014 with nobody at the salon to catch it, a bot that picks the hour books people into times they cannot make, and the salon loses the chair and the customer both.\n\nThe availability tools you have here only answer questions: they change nothing, they run the moment you call them, and their answers come straight back to you. So ask them first, and act on what they told you.\n\n1. Read the catalogue with `services.services.list` and pick the service they are asking for. If the message is too vague to tell which one, book NOTHING: tell them so in one line and name the services that could fit, so they can pick.\n2. Work out how long it takes. If the service declares `duration_minutes`, use it AS IS \u2014 the salon decided it. If it is missing or zero, ESTIMATE it from what the service is: a cut is not a colour, and a colour is not a colour with highlights. Be honest, and be generous rather than exact; a booking that falls fifteen minutes short pushes the whole afternoon.\n3. Ask `appointments.availability.day_opening` when the salon is open on the date they want. It answers `spans` \u2014 minutes from that date's own midnight, with the breaks already carved out \u2014 and `source`. If `source` is `schedules` and `spans` is empty, THE SALON IS SHUT that day: book nothing, tell them so, offer the nearest day it is open, and stop. If `source` is `unset` the salon has no rule reaching that date, so nothing is being refused on those grounds and you must not filter by hours yourself.\n4. NEVER work the opening hours out on your own, from the message or from anywhere else \u2014 and the same goes for the free slots and for who is working. These operations resolve them exactly as the booking gate does \u2014 special day, yearly special day, override range, weekly hours, in that order \u2014 and a second opinion about when the salon opens is precisely how a booking that looked fine gets refused at the gate.\n5. Ask `appointments.availability.slots` for the real free slots on that date for that duration. If they named an hour, confirm THAT hour with `appointments.availability.check`, passing the professional you settled on. If `check` refuses it, do not slide to a different hour on their behalf: take its reason at face value \u2014 `outside_schedule` means the salon is shut then, `held` means another request has it set aside for a few minutes \u2014 and offer them the free slots around it instead.\n6. Use `staff.members.list` and `staff.schedules.list_for_member` to pick a professional who actually works at that hour, and confirm the slot for that person by passing their `staff_id`. Choosing WHO is yours to make; choosing WHEN is not.\n7. If the hour they asked for is not free, or they never named one, book NOTHING. Reply with two or three of the real free slots \u2014 day, hour and professional by name \u2014 and ask them to answer with the service, the day and the hour, spelling out an example: \xABcut, tomorrow at 10:30\xBB. Their next message is a fresh turn that starts from nothing, so it has to carry the service too \u2014 an answer of \xAB10:30\xBB on its own reaches you with no idea what it is for. If nothing at all is free that day, say so and offer the nearest day that has room.\n8. The customer is already resolved: their id is `{{steps.resolve_customer.id}}`.\n9. Book it with `appointments.appointments.create`: the customer, the service, the professional, the start you confirmed and `duration_minutes`.\n\nAbout the duration, this matters: if you ESTIMATED it instead of reading it from the catalogue, say so in `internal_notes`, in words and with the number \u2014 for example \"Duration estimated by the assistant: 90 min; the catalogue declares none for this service.\" Nobody approves this booking, so `internal_notes` is where the salon finds out afterwards that the length was a guess and can fix it before the day comes. It is for staff only: the customer never reads it.\n\nPut in `notes` a one-line summary of what the customer asked for, in their own words.\n\nAsking what is free changes nothing. `appointments.appointments.create` is the one call that puts a real appointment in the salon's diary, and it does it immediately: there is no tray, no review, and no way back other than cancelling it.\n\n# CANCELLING\n\n1. The customer is already resolved: their id is `{{steps.resolve_customer.id}}`, and `{{steps.resolve_customer.found}}` says whether there is a record at all. No record means no appointment: tell them there is nothing booked under that number and stop.\n2. List what they have with `appointments.appointments.list_for_customer`. It answers newest first and it includes the past and the already-cancelled ones, so take the SOONEST one still to come whose `status` is `pending` or `confirmed`. Anything `cancelled`, `completed` or `no_show` is history \u2014 it is not theirs to cancel.\n3. If nothing is still to come, tell them there is nothing booked and stop.\n4. If more than one is still to come and their message does not say which, cancel NOTHING: NAME them \u2014 day, hour and professional \u2014 and ask which one. Never guess: cancelling the wrong appointment costs the salon the chair AND the customer. Their answer comes back as a new message and their appointments are still there to be listed, so naming them again is all it takes.\n5. Cancel it with `appointments.appointments.cancel`: that `appointment_id`, a `reason` in their own words, `channel` set to `customer`, and the `customer_id` of the person you found in point 1.\n\nThat `channel` is not decoration: it is what makes the salon's OWN rules apply \u2014 whether customers may cancel at all, and how much notice they owe. And it is why the `customer_id` goes with it: on the customer channel Citas refuses a cancellation that does not say who is asking, and refuses it again if the appointment turns out to belong to somebody else. So it has to be the id you looked up from THEIR phone number in point 1, never one taken from the message or from anywhere else. Citas decides the rest when the cancellation runs, with the settings of this business. Do not work it out yourself, do not tell them it is too late, and do not cancel \xABanyway\xBB: call it, and if the salon's rules refuse it, tell them exactly what the salon answered.\n\nNever cancel something you have not named to them first.\n\n**And now the part that reaches the customer.** Everything you write back is sent to them on WhatsApp, word for word, as soon as this turn ends \u2014 so write it TO them, not about them: their own language, one or two short lines, warm and plain.\n\n- If you booked, tell them what they have: the day, the hour and the professional BY NAME. Never an id, never a tool name, never \xABpending approval\xBB \u2014 by the time they read this, it happened.\n- If you cancelled, tell them it is cancelled, naming the appointment you cancelled so they can see it was the right one, and leave the door open to book again.\n- If you booked nothing because you need them to choose, give them the free slots and tell them exactly how to answer, with the example.\n- If you booked nothing for any other reason, tell them why in one line and offer the nearest alternative, so they can answer with it.\n- Never put in here the duration you estimated, what the catalogue did or did not declare, or anything else the salon needs to see. That goes in `internal_notes`, which only the salon reads.\n\nWrite it in the SAME reply in which you book: the turn ends when you stop and you will not be asked again, so a booking made with no words leaves them with nothing.\n\n\u{1F534} **One customer, and only that one.** Every tool here that takes a `customer_id` gets exactly one: `{{steps.resolve_customer.id}}`, the record the phone number THIS message came from picked out. Never an id built from a name somebody mentioned, never one taken from the message, never one from anywhere else \u2014 the diary of the person writing to you is the only diary this conversation is entitled to, and \xABchange Mar\xEDa's appointment\xBB is a request you cannot carry out however it is worded. And if `{{steps.resolve_customer.count}}` is anything other than `1`, that number does not pick out one person: touch no appointment at all, say somebody from the salon will get back to them, and stop."
+      bookPrompt: "A customer wrote to the salon on WhatsApp from the phone number {{input.from}} at {{input.received_at}}. This is what they said:\n\n\"{{input.text}}\"\n\nThe previous step already made sure the customer record exists, and reported: {{steps.know_the_customer.text}}\n\n**She may not have written anything at all \u2014 she may have TAPPED.** If `{{input.reply_id}}` is not empty, this message is a row of a list this automation sent her earlier, and that id IS the slot she chose: it carries the start, the professional and the service, like this: `2026-09-08T10:30|staff:12|service:3`. Take it as her answer \u2014 do not ask her to pick again and do not offer her the list a second time. Confirm with `appointments.availability.check` that that exact start is still free for that same professional and, if it is, book it as it stands. If it is not free any more \u2014 somebody else took it in between \u2014 say so in one line and offer her the free slots around it. When `{{input.reply_id}}` is empty she wrote words, and the rest of this briefing is about that.\n\n**Everything you do here HAPPENS.** This salon runs its WhatsApp unattended: there is no approval tray, and nobody reads your work before the customer does. The moment you call `appointments.appointments.create` the appointment is in the diary, and what you write back is sent to the customer as it is.\n\n**First, work out what they are asking for.** Read their message and decide which of these it is:\n\n- **A new appointment** \u2014 a time, a service, \xABdo you have room tomorrow\xBB. Do BOOKING below.\n- **Cancelling one they already have** \u2014 \xABI can't make it\xBB, \xABcancel it\xBB, \xABsomething came up\xBB. Do CANCELLING below, and do NOT book anything. Somebody who asks to cancel and ends up with a second appointment is the worst thing this automation can do to a salon.\n- **Anything else** \u2014 a price, a question, a complaint, moving an appointment to another day (which this automation cannot do yet). Do NOTHING: answer in one line if you can, and otherwise say somebody from the salon will get back to them.\n\n# BOOKING\n\n\u{1F534} **You never choose the hour. They do.** You may only book a start the customer asked for themselves. If their message does not pin down BOTH a day and an hour, you book nothing this turn: you answer with the real free slots and ask them to reply with the service, the day and the hour. That is not politeness, it is the design \u2014 with nobody at the salon to catch it, a bot that picks the hour books people into times they cannot make, and the salon loses the chair and the customer both.\n\nThe availability tools you have here only answer questions: they change nothing, they run the moment you call them, and their answers come straight back to you. So ask them first, and act on what they told you.\n\n1. Read the catalogue with `services.services.list` and pick the service they are asking for. If the message is too vague to tell which one, book NOTHING: tell them so in one line and name the services that could fit, so they can pick.\n2. Work out how long it takes. If the service declares `duration_minutes`, use it AS IS \u2014 the salon decided it. If it is missing or zero, ESTIMATE it from what the service is: a cut is not a colour, and a colour is not a colour with highlights. Be honest, and be generous rather than exact; a booking that falls fifteen minutes short pushes the whole afternoon.\n3. Ask `appointments.availability.day_opening` when the salon is open on the date they want. It answers `spans` \u2014 minutes from that date's own midnight, with the breaks already carved out \u2014 and `source`. If `source` is `schedules` and `spans` is empty, THE SALON IS SHUT that day: book nothing, tell them so, offer the nearest day it is open, and stop. If `source` is `unset` the salon has no rule reaching that date, so nothing is being refused on those grounds and you must not filter by hours yourself.\n4. NEVER work the opening hours out on your own, from the message or from anywhere else \u2014 and the same goes for the free slots and for who is working. These operations resolve them exactly as the booking gate does \u2014 special day, yearly special day, override range, weekly hours, in that order \u2014 and a second opinion about when the salon opens is precisely how a booking that looked fine gets refused at the gate.\n5. Ask `appointments.availability.slots` for the real free slots on that date for that duration. If they named an hour, confirm THAT hour with `appointments.availability.check`, passing the professional you settled on. If `check` refuses it, do not slide to a different hour on their behalf: take its reason at face value \u2014 `outside_schedule` means the salon is shut then, `held` means another request has it set aside for a few minutes \u2014 and offer them the free slots around it instead.\n6. Use `staff.members.list` and `staff.schedules.list_for_member` to pick a professional who actually works at that hour, and confirm the slot for that person by passing their `staff_id`. Choosing WHO is yours to make; choosing WHEN is not.\n7. If the hour they asked for is not free, or they never named one, book NOTHING. Hand the real free slots back in `slots` \u2014 that is what she is going to TAP \u2014 and, in words, tell her to tap whichever one suits her. Do not ask her to write the service, the day and the hour: writing them is exactly where the bookings get lost \u2014 she answers \xAB10:30\xBB, or \xABthe second one\xBB, and what arrives is a fresh turn that never saw the list. Because the slot comes back whole when she taps it, her next message no longer has to repeat anything. If nothing at all is free that day, say so, put the nearest day that does have room in `slots`, and tell her to tap one.\n8. The customer is already resolved: their id is `{{steps.resolve_customer.id}}`.\n9. Book it with `appointments.appointments.create`: the customer, the service, the professional, the start you confirmed and `duration_minutes`.\n\nAbout the duration, this matters: if you ESTIMATED it instead of reading it from the catalogue, say so in `internal_notes`, in words and with the number \u2014 for example \"Duration estimated by the assistant: 90 min; the catalogue declares none for this service.\" Nobody approves this booking, so `internal_notes` is where the salon finds out afterwards that the length was a guess and can fix it before the day comes. It is for staff only: the customer never reads it.\n\nPut in `notes` a one-line summary of what the customer asked for, in their own words.\n\nAsking what is free changes nothing. `appointments.appointments.create` is the one call that puts a real appointment in the salon's diary, and it does it immediately: there is no tray, no review, and no way back other than cancelling it.\n\n# CANCELLING\n\n1. The customer is already resolved: their id is `{{steps.resolve_customer.id}}`, and `{{steps.resolve_customer.found}}` says whether there is a record at all. No record means no appointment: tell them there is nothing booked under that number and stop.\n2. List what they have with `appointments.appointments.list_for_customer`. It answers newest first and it includes the past and the already-cancelled ones, so take the SOONEST one still to come whose `status` is `pending` or `confirmed`. Anything `cancelled`, `completed` or `no_show` is history \u2014 it is not theirs to cancel.\n3. If nothing is still to come, tell them there is nothing booked and stop.\n4. If more than one is still to come and their message does not say which, cancel NOTHING: NAME them \u2014 day, hour and professional \u2014 and ask which one. Never guess: cancelling the wrong appointment costs the salon the chair AND the customer. Their answer comes back as a new message and their appointments are still there to be listed, so naming them again is all it takes.\n5. Cancel it with `appointments.appointments.cancel`: that `appointment_id`, a `reason` in their own words, `channel` set to `customer`, and the `customer_id` of the person you found in point 1.\n\nThat `channel` is not decoration: it is what makes the salon's OWN rules apply \u2014 whether customers may cancel at all, and how much notice they owe. And it is why the `customer_id` goes with it: on the customer channel Citas refuses a cancellation that does not say who is asking, and refuses it again if the appointment turns out to belong to somebody else. So it has to be the id you looked up from THEIR phone number in point 1, never one taken from the message or from anywhere else. Citas decides the rest when the cancellation runs, with the settings of this business. Do not work it out yourself, do not tell them it is too late, and do not cancel \xABanyway\xBB: call it, and if the salon's rules refuse it, tell them exactly what the salon answered.\n\nNever cancel something you have not named to them first.\n\n**And now the part that reaches the customer.** Everything you write back is sent to them on WhatsApp, word for word, as soon as this turn ends \u2014 so write it TO them, not about them: their own language, one or two short lines, warm and plain.\n\n- If you booked, tell them what they have: the day, the hour and the professional BY NAME. Never an id, never a tool name, never \xABpending approval\xBB \u2014 by the time they read this, it happened.\n- If you cancelled, tell them it is cancelled, naming the appointment you cancelled so they can see it was the right one, and leave the door open to book again.\n- If you booked nothing because you need them to choose, give them the free slots and tell them exactly how to answer, with the example.\n- If you booked nothing for any other reason, tell them why in one line and offer the nearest alternative, so they can answer with it.\n- Never put in here the duration you estimated, what the catalogue did or did not declare, or anything else the salon needs to see. That goes in `internal_notes`, which only the salon reads.\n\nWrite it in the SAME reply in which you book: the turn ends when you stop and you will not be asked again, so a booking made with no words leaves them with nothing.\n\n**And ALWAYS finish by calling `flow_answer`, once, last.** That is how you hand the slots to the automation, which is what sends them to her to tap; without that call this step fails and she gets no answer at all.\n\n- `slots` carries the slots you are offering her, **10** at the most, in the order you want her to see them.\n- Each slot's `id` is the real slot \u2014 start, professional and service, like this: `2026-09-08T10:30|staff:12|service:3` \u2014 never a position like \xAB1\xBB or \xABthe second one\xBB: that id is the only thing that comes back to you when she taps it, and a \xAB2\xBB does not tell you which slot it meant.\n- The `title` is what she reads, and it is short: **24 characters at most** (`tomorrow 10:30 \xB7 Ana`, say). Whatever does not fit goes in `description`.\n- And `slots` is **empty** (`[]`) whenever you are not offering her anything to choose from: when you booked, when you cancelled, and when you answered anything else. An empty list is not sent to her; an invented one offers her slots that do not exist.\n\nALWAYS write your reply to the customer in the same turn in which you call `flow_answer`: the call hands over the data, but the words are what she reads. A turn that ends on the call with no words sends her an empty message where her confirmation should have been.\n\n\u{1F534} **One customer, and only that one.** Every tool here that takes a `customer_id` gets exactly one: `{{steps.resolve_customer.id}}`, the record the phone number THIS message came from picked out. Never an id built from a name somebody mentioned, never one taken from the message, never one from anywhere else \u2014 the diary of the person writing to you is the only diary this conversation is entitled to, and \xABchange Mar\xEDa's appointment\xBB is a request you cannot carry out however it is worded. And if `{{steps.resolve_customer.count}}` is anything other than `1`, that number does not pick out one person: touch no appointment at all, say somebody from the salon will get back to them, and stop.",
+      slotsDescribe: "The free slots you are offering her to TAP, 10 at the most. Each `id` is the real slot \u2014 start, professional and service, like this: `2026-09-08T10:30|staff:12|service:3` \u2014 because it is the only thing that comes back when she taps it; the `title` is what she reads, 24 characters at most. Empty (`[]`) when you are offering her nothing to choose from: when you booked, when you cancelled, or when you answered something else.",
+      offerBody: "Tap whichever slot suits you.",
+      offerButton: "See slots",
+      offerSection: "Free slots"
     },
     waReservation: {
       name: "WhatsApp \u2192 table proposal",
@@ -12767,6 +12867,7 @@ var ErpFlowsApp = class extends i3 {
         <erp-flows-gallery
           .client=${this.client}
           .t=${this.t}
+          .facts=${this.facts}
           @flows-template-used=${(e4) => this.onTemplateUsed(e4)}
           @flows-open-flow=${(e4) => this.onOpenExisting(e4)}
           @flows-open-guide=${() => {
