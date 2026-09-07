@@ -1519,7 +1519,12 @@ describe('every family whatsapp_inbox publishes has a card in this gallery (what
   it('marks in PRODUCTION the very family each pin mirrors', () => {
     for (const s of SOURCES) {
       const card = TEMPLATES.find((tpl) => tpl.id === s.template);
-      expect(card?.mirrors, `${s.template} is pinned to a published family but is not marked as a copy of it`)
+      // The PAIRING, and only the pairing: `mirrors` also carries the limits staged for the served
+      // twin (flows#103), which say nothing about which family is mirrored and have their own two
+      // guards. Anything else new in there would still have to pass the type — the field is a
+      // closed object literal — so nothing is let through by narrowing the comparison here.
+      const pairing = card?.mirrors && { module: card.mirrors.module, family: card.mirrors.family };
+      expect(pairing, `${s.template} is pinned to a published family but is not marked as a copy of it`)
         .toEqual({ module: s.module, family: s.files.en.replace('flows/', '').replace('.en.flow.json', '') });
     }
     // And nothing is marked as a copy of something no pin watches: a mirror nobody checks against
