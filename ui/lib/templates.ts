@@ -824,6 +824,122 @@ function triggerEventsOf(definition: Record<string, unknown>): string[] {
 }
 
 /**
+ * Is this a five-field cron line we actually run?
+ *
+ * Anything else — `@weekly`, a seconds field, a field with letters in it — is a schedule this
+ * gallery cannot read, and one it cannot read must never be guessed into a match.
+ */
+function readsAsCron(cron: unknown): boolean {
+  if (typeof cron !== 'string') return false;
+  const fields = cron.trim().split(/\s+/).filter(Boolean);
+  return fields.length === 5 && fields.every((field) => CRON_FIELD.test(field));
+}
+
+/** Does this flow come round on a schedule at all? */
+function hasSchedule(definition: Record<string, unknown>): boolean {
+  const triggers = definition?.triggers;
+  if (!Array.isArray(triggers)) return false;
+  return triggers.some((raw) => {
+    const trigger = raw as { kind?: unknown; cron?: unknown } | null;
+    return trigger?.kind === 'cron' && readsAsCron(trigger.cron);
+  });
+}
+
+/** Does this card come round on a schedule instead of waiting on an event? */
+function templateIsScheduled(template: FlowTemplate, t: Translator): boolean {
+  const trigger = template.build(t).triggers[0];
+  return trigger?.kind === 'cron' && readsAsCron(trigger.cron);
+}
+
+/** Equal as data — what a step carries is what the hub stored, not one of our objects. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const keys = Object.keys(a as object);
+  if (keys.length !== Object.keys(b as object).length) return false;
+  return keys.every(
+    (key) =>
+      Object.prototype.hasOwnProperty.call(b, key) &&
+      sameValue((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]),
+  );
+}
+
+/** The command steps a card seeds, with the values it fills them in with. */
+function seededSteps(
+  template: FlowTemplate,
+  t: Translator,
+): { command: string; params: Record<string, unknown> }[] {
+  return template
+    .build(t)
+    .steps.filter((step) => step.kind === 'command' && typeof step.command === 'string')
+    .map((step) => ({
+      command: step.command as string,
+      params: (step.params ?? {}) as Record<string, unknown>,
+    }));
+}
+
+/**
+ * **Does this stored document still carry what the card seeded into it?**
+ *
+ * Every command step the card creates has to be there, running the same command with the same
+ * values in the params the card filled in. Extra params, extra steps and a different order are all
+ * fine: they are the owner's, and none of them stop this being the automation the card makes.
+ */
+function carriesSeededSteps(
+  definition: Record<string, unknown>,
+  seeded: readonly { command: string; params: Record<string, unknown> }[],
+): boolean {
+  if (!seeded.length) return false;
+  const steps = definition?.steps;
+  if (!Array.isArray(steps)) return false;
+  return seeded.every((want) =>
+    steps.some((raw) => {
+      const step = raw as { kind?: unknown; command?: unknown; params?: unknown } | null;
+      if (step?.kind !== 'command' || step.command !== want.command) return false;
+      const params = (step.params ?? {}) as Record<string, unknown>;
+      return Object.entries(want.params).every(([key, value]) => sameValue(params[key], value));
+    }),
+  );
+}
+
+/**
+ * **Could this flow be the automation this card creates?**
+ *
+ * A card that starts on an EVENT is matched on the event: a fact the kernel maintains, that nothing
+ * in the editor can quietly rewrite.
+ *
+ * A card that comes round on a SCHEDULE cannot be matched that way, and — this is the part that bit
+ * — it cannot be matched on the schedule either. The editor's only control for a cron is an
+ * `<input type="time">`: `readDailyCron('0 18 * * 5')` is `null`, so the box is drawn EMPTY, and its
+ * `@change` writes `dailyCron(…)`, which is always `M H * * *`. One touch of the box the card's own
+ * blank invites her to touch — «The day and the time» — flattens the weekly review into a daily one.
+ * Identifying by the schedule therefore lost the badge for exactly that owner AND gave her flow to
+ * the morning card, which is daily and also creates a task.
+ *
+ * So the schedule is only the coarse filter — «does it come round on a clock we can read» — and what
+ * tells the two calendar cards apart is what the card SEEDED into them: the task each one writes and
+ * how urgent it is. Both differ between the two cards, neither is reachable from the blanks, and both
+ * survive the change of day and hour the cards ask for.
+ *
+ * The cost runs the other way and it is the cheaper one: an owner who rewrites the seeded task
+ * herself loses the badge and is offered the card again. That is the failure this feature already
+ * accepts everywhere — silence, and the invitation she had before — never a badge pointing at
+ * somebody else's automation.
+ */
+function isCandidateFor<T extends { definition: Record<string, unknown> }>(
+  template: FlowTemplate,
+  t: Translator,
+  flow: T,
+): boolean {
+  const definition = flow.definition ?? {};
+  const event = templateTriggerEvent(template, t);
+  if (event) return triggerEventsOf(definition).includes(event);
+  if (!templateIsScheduled(template, t)) return false;
+  return hasSchedule(definition) && carriesSeededSteps(definition, seededSteps(template, t));
+}
+
+/**
  * **The flows this hub already runs on the same event as `template`, by name** (whatsapp_inbox#58).
  *
  * Two automations on one event both fire. For most pairs that is fine and wanted — log every
@@ -867,6 +983,9 @@ export function templateCommands(template: FlowTemplate, t: Translator): string[
 /** How far this hub has got with one card. Same four words the WhatsApp settings card uses. */
 export type InstalledState = 'absent' | 'unfinished' | 'paused' | 'active';
 
+/** What a five-field cron may contain. Anything else is a line we do not run and must not read. */
+const CRON_FIELD = /^[*\d,\-/]+$/;
+
 /**
  * One of this hub's flows, as much of it as recognising a template needs.
  *
@@ -907,18 +1026,18 @@ export interface InstalledFlowFacts {
  * running when nothing is. And it is «holds no command grant at all», not «does not hold ours»: a
  * flow on this event with a command of its own is a different automation the business finished.
  *
- * A card that does not start on an event answers `absent` and gets no badge: two flows on «every
- * Friday at 18:00» are not the same automation, and a wrong badge is worse than none (flows#68).
+ * **A card that comes round on a schedule is recognised too** (flows#68), but NOT by its schedule:
+ * the editor flattens «every Friday at 18:00» into a daily line the first time the owner touches the
+ * time box. It is recognised by what the card seeded into it — see {@link isCandidateFor}. A trigger
+ * that is neither an event nor a schedule we can read still answers `absent`: a wrong badge is worse
+ * than none.
  */
 export function templateInstallation<T extends InstalledFlowFacts>(
   template: FlowTemplate,
   t: Translator,
   flows: readonly T[],
 ): { state: InstalledState; flow?: T } {
-  const event = templateTriggerEvent(template, t);
-  if (!event) return { state: 'absent' };
-
-  const listening = flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).includes(event));
+  const listening = flows.filter((flow) => isCandidateFor(template, t, flow));
   const commands = templateCommands(template, t);
   const mine = listening.filter((flow) => flow.commands?.some((held) => commands.includes(held)));
   if (mine.length) {
@@ -935,23 +1054,22 @@ export function templateInstallation<T extends InstalledFlowFacts>(
 }
 
 /**
- * The flows worth asking the hub anything else about: the ones already waiting on a card's event.
+ * The flows worth asking the hub anything else about: the ones that could be one of these cards.
  *
- * Recognising a card costs one question per candidate, so this is what keeps the badge from being
- * a round trip per card on every visit: a hub with nothing automated yet — the one that opens this
- * gallery most — asks nothing at all, and a busy one asks only about the handful of flows that
- * could possibly be one of these.
+ * Recognising a card costs one question per candidate, so this is what keeps the badge from being a
+ * round trip per card on every visit: a hub with nothing automated yet — the one that opens this
+ * gallery most — asks nothing at all, and a busy one asks only about the handful of flows that could
+ * possibly be one of these.
+ *
+ * Deliberately the SAME predicate the badge itself uses ({@link isCandidateFor}), so the two cannot
+ * drift into a screen that pays for answers it will not read, or one that badges nothing because it
+ * never asked.
  */
-export function flowsOnTemplateEvents<T extends { definition: Record<string, unknown> }>(
+export function flowsWorthAsking<T extends { definition: Record<string, unknown> }>(
   flows: readonly T[],
   t: Translator,
 ): T[] {
-  const events = new Set(
-    TEMPLATES.map((template) => templateTriggerEvent(template, t)).filter(
-      (event): event is string => event !== null,
-    ),
-  );
-  return flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).some((e) => events.has(e)));
+  return flows.filter((flow) => TEMPLATES.some((template) => isCandidateFor(template, t, flow)));
 }
 
 export function templateById(id: string): FlowTemplate | undefined {

@@ -25,6 +25,21 @@ const installedFlow = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/**
+ * The Friday review as the hub hands it back once the owner has moved it to Monday evening —
+ * the edit the card's own blank invites («The day and the time»).
+ */
+const weeklyFlow = (over: Record<string, unknown> = {}) => ({
+  id: 'f7',
+  name: 'A weekly look at the numbers',
+  enabled: true,
+  definition: {
+    ...(buildTemplate(templateById('friday-week-review')!, t) as unknown as Record<string, unknown>),
+    triggers: [{ kind: 'cron', cron: '30 20 * * 1' }],
+  },
+  ...over,
+});
+
 /** A hub that knows every event, lists the flows given and answers for their grants. */
 function hub(flows: Record<string, unknown>[] = [], over: Record<string, unknown> = {}) {
   return {
@@ -187,20 +202,53 @@ describe('what the badge costs, and what happens when the hub will not answer', 
     expect(client.flows.grants, 'a fresh hub paid a round trip per card').not.toHaveBeenCalled();
   });
 
-  it('asks only about the flows that listen on a card’s event', async () => {
-    const cron = {
+  it('asks only about the flows a card could possibly be', async () => {
+    const unrelated = {
       id: 'f9',
-      name: 'Friday review',
+      name: 'Tidy up the drafts',
       enabled: true,
-      definition: { schema_version: 1, triggers: [{ kind: 'cron', cron: '0 18 * * 5' }], steps: [] },
+      definition: { schema_version: 1, triggers: [{ kind: 'manual' }], steps: [] },
     };
-    const client = hub([cron, installedFlow()]);
+    const client = hub([unrelated, installedFlow()]);
     await mount(client);
     // The ids asked about, not how many times: the element loads once on connect and again when
     // the shell hands it a client, which is how `list` and `probe` have always behaved (flows#69).
     // What this pins is that the question is asked about the candidate and about nothing else.
     const asked = new Set(client.flows.grants.mock.calls.map((call) => call[0]));
     expect([...asked]).toEqual(['f1']);
+  });
+
+  it('asks about a flow that comes round on a card’s schedule too', async () => {
+    // Half of flows#68 lives here: recognising the calendar cards is worth nothing if the screen
+    // never asks what those flows are allowed to do, because a flow whose grants were never asked
+    // for stays «not asked yet» and badges nothing.
+    const client = hub([weeklyFlow()]);
+    await mount(client);
+    const asked = new Set(client.flows.grants.mock.calls.map((call) => call[0]));
+    expect([...asked], 'the calendar card never got its second half').toEqual(['f7']);
+  });
+
+  it('badges the calendar card the owner already set up, on the card itself', async () => {
+    // The whole complaint (flows#68): she set the Friday review up weeks ago, came back, saw the
+    // same invitation and got a second one landing every Friday.
+    const el = await mount(hub([weeklyFlow()]));
+    expect(card(el, 'friday-week-review')?.dataset.installed).toBe('active');
+    expect(
+      card(el, 'morning-agenda-check')?.dataset.installed,
+      'the other calendar card was badged by association',
+    ).toBeUndefined();
+  });
+
+  it('offers «View it» on a calendar card it already has, and hands over that flow', async () => {
+    const el = await mount(hub([weeklyFlow()]));
+    el.open('friday-week-review');
+    await settle(el);
+    const opened: { flow: { id: string }; needsGrants: boolean }[] = [];
+    el.addEventListener('flows-open-flow', (e) =>
+      opened.push((e as CustomEvent<{ flow: { id: string }; needsGrants: boolean }>).detail),
+    );
+    act(el, 'view')?.click();
+    expect(opened).toEqual([{ flow: expect.objectContaining({ id: 'f7' }), needsGrants: false }]);
   });
 
   it('keeps the badge when the hub mixes rows it cannot read into the grants', async () => {
