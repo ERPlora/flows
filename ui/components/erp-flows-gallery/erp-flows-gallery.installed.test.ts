@@ -428,6 +428,21 @@ describe('opening the gallery', () => {
     );
   });
 
+  it('starts asking the moment it goes on screen, not a render later', async () => {
+    // The complaint is that the screen takes too long to settle, so WHEN the asking starts is part
+    // of the fix and not an implementation detail: the load begins as the element is attached,
+    // with the client the shell already put on it, rather than waiting for the first render to
+    // notice that same client arrived.
+    const client = hub([installedFlow()]);
+    const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
+    el.client = client as never;
+    el.t = t;
+    document.body.appendChild(el);
+    expect(client.flows.list, 'nothing was asked until a render happened').toHaveBeenCalledTimes(1);
+    await settle(el);
+    expect(client.flows.list, 'and the render asked it all over again').toHaveBeenCalledTimes(1);
+  });
+
   it('still loads when the shell hands the client over after the element is on screen', async () => {
     // The other order, and the reason this cannot be fixed by deleting the reactive half: an
     // element mounted before its client has nothing to ask on connect, so the load has to happen
