@@ -88,7 +88,10 @@ describe('the template catalogue', () => {
     // event card it is also the same message answered twice. It stays the rule, with ONE exception
     // and only because it cannot fire twice: the unattended WhatsApp card wakes on words
     // (`text: neq ''`) and on a TAP (`text: eq ''` + `reply_id: neq ''`), and no message can
-    // satisfy both. Disjoint by construction, not by luck — asserted as such below.
+    // satisfy both. Disjoint by construction, not by luck — and the invariant is asserted where
+    // the document is AUTHORED, not here: `whatsapp_inbox/tests/flow_templates.test.py` judges the
+    // UNION of the triggers and refuses the overlap that reads as disjoint. Here it is the digest
+    // guard that holds the line: a mirror whose triggers overlap stops matching the source.
     const TWO_WAYS_IN = new Set(['whatsapp-appointment-unattended']);
     for (const template of TEMPLATES) {
       const doc = buildTemplate(template, t);

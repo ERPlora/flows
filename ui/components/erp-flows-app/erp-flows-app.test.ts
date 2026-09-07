@@ -127,6 +127,35 @@ describe('the list of automations', () => {
     expect(el.renderRoot.querySelector('ok-empty-state')).toBeNull();
   });
 
+  // flows#92: the gallery hides a card whose document THIS hub's kernel cannot parse, and it reads
+  // the kernel's capabilities from `this.facts` — which only this screen ever fetches. So the wire
+  // between the two is the whole floor: drop it and the gallery falls back to its own
+  // `schemaFacts(undefined)`, which is fail-closed, and the WhatsApp card vanishes from EVERY hub
+  // including a current one. Silently, and looking exactly like the bug flows#92 just fixed.
+  //
+  // Measured: with `.facts=${this.facts}` deleted from the template, the app AND gallery batteries
+  // stayed green — 183/183. Nothing else asserts this hand-off, because the gallery's own tests set
+  // `.facts` on the element themselves.
+  it('hands the gallery the kernel facts IT fetched, not the gallery\u2019s fail-closed default', async () => {
+    const client = fakeClient({
+      flows: {
+        list: vi.fn(async () => []),
+        schema: vi.fn(async () => ({
+          schema_version: 1,
+          core_version: '1.1.16',
+          schema: { $defs: { step: { properties: { interactive: {}, output: {} } } } },
+        })),
+      },
+    });
+    const el = await mount(client);
+    const gallery = el.renderRoot.querySelector('erp-flows-gallery') as
+      | (Element & { facts?: { interactiveNotify: boolean; aiOutput: boolean } })
+      | null;
+    expect(gallery, 'the gallery is on screen').toBeTruthy();
+    expect(gallery!.facts?.interactiveNotify, 'interactive reached the gallery').toBe(true);
+    expect(gallery!.facts?.aiOutput, 'output reached the gallery').toBe(true);
+  });
+
   it('pauses one WITHOUT touching what it does', async () => {
     // `PUT /flows/{id}` revalidates the document and re-seeds the triggers. Sending anything less
     // than the whole flow to flip a switch would rewrite the automation.
