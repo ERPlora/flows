@@ -114,7 +114,25 @@ export interface FlowTemplate {
    * for one automation, so {@link mergeTemplates} drops the copy in favour of the original — and
    * on the fleet that does not serve anything yet the copy is still the only way in.
    */
-  mirrors?: { readonly module: string; readonly family: string };
+  mirrors?: {
+    readonly module: string;
+    readonly family: string;
+    /**
+     * Limits this copy carries **for the served twin only**, keyed by command name (flows#103).
+     *
+     * The same shape and the same job as {@link grantPins}, and a separate field because it holds
+     * the opposite kind of entry: a command **this copy does not run**. A copy is a snapshot of the
+     * family as it was PUBLISHED, so it lags the recipe by one release — and a containment that
+     * lands one release late is a fleet running the wide permission in between. Named here, the
+     * limit is already waiting when the served card grows the operation, and until then
+     * {@link mergeTemplates} finds no grant to put it on and it does nothing.
+     *
+     * It cannot go in {@link grantPins}: that field is read by {@link templateGrants} against this
+     * card's OWN document, where a command the document never runs would read as a containment
+     * that contains nothing — which is exactly what the catalogue test refuses.
+     */
+    readonly pins?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  };
   /**
    * The permissions a SERVED card will ask for, as the module declared them in `<family>.grants.json`.
    *
@@ -761,7 +779,24 @@ export const TEMPLATES: readonly FlowTemplate[] = [
    */
   {
     id: 'whatsapp-appointment-unattended',
-    mirrors: { module: 'whatsapp_inbox', family: 'appointment-from-whatsapp-unattended' },
+    mirrors: {
+      module: 'whatsapp_inbox',
+      family: 'appointment-from-whatsapp-unattended',
+      // 🔴 flows#103 — waiting for the operation the recipe is about to grow (whatsapp_inbox#118).
+      //
+      // This copy CANNOT move an appointment: it mirrors the family as published, and moving was
+      // cut from it (see `book_appointment` below) precisely because `reschedule` carried nothing
+      // that said whose appointment it was. appointments#142 gave it `channel` + `customer_id` and
+      // the same `customer_identity_refusal` cancelling already had, so the operation can be opened
+      // — and the served card will ask for it WIDE, because while hub#1654 is open the `payload`
+      // the module fixes in `appointment-from-whatsapp-unattended.grants.json` never leaves the hub.
+      //
+      // Named here, the limit is already on the shelf when that card arrives; until then
+      // `withCopiedPins` finds no grant to put it on. The other order — recipe first, limit after —
+      // is a release of the fleet booking, cancelling AND moving unattended with `channel`
+      // defaulting to `staff`: no ownership check on the move at all.
+      pins: { 'appointments.appointments.reschedule': { channel: 'customer' } },
+    },
     sector: 'beauty',
     // The list she TAPS (`interactive`, hub#1633) and the slots the model hands over (`output`,
     // hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it is refused
@@ -1875,6 +1910,18 @@ export interface MergedCatalogue {
 }
 
 /**
+ * **Every limit a hand copy carries for the card that replaces it**, keyed by command name.
+ *
+ * Its own ({@link FlowTemplate.grantPins}) and the ones staged for the twin alone
+ * ({@link FlowTemplate.mirrors}`.pins`). One function so the guards in the tests read the same set
+ * {@link mergeTemplates} applies: a second opinion about which pins count is how one of them ends
+ * up unwatched.
+ */
+export function carriedPins(copy: FlowTemplate): Record<string, Readonly<Record<string, unknown>>> {
+  return { ...copy.grantPins, ...copy.mirrors?.pins };
+}
+
+/**
  * The served card asking with the limits the copy it replaces asked with (flows#98, hub#1654).
  *
  * 🔴 A pin is a **containment**, and this is the one place it can be lost without anybody noticing.
@@ -1892,11 +1939,16 @@ export interface MergedCatalogue {
  * - **Only onto a grant the served card actually asks for.** A pin naming a command the recipe no
  *   longer runs lands on nothing, exactly as it does in {@link templateGrants}.
  *
+ * The pins are the copy's own ({@link FlowTemplate.grantPins}) plus the ones it carries for this
+ * twin alone ({@link FlowTemplate.mirrors}`.pins`, flows#103) — a copy lags its source by a
+ * release, so a limit for an operation the recipe is about to grow has nowhere else to wait. Both
+ * arrive here by the same two rules; the second set simply has no grant of its own to land on.
+ *
  * A copy can go stale, and a stale pin here can only make the automation refuse a call
  * (`flow.grant_payload_denied`) — never allow one. Dropping the pin fails the other way.
  */
 function withCopiedPins(served: FlowTemplate, copy: FlowTemplate): FlowTemplate {
-  const pins = Object.entries(copy.grantPins ?? {});
+  const pins = Object.entries(carriedPins(copy));
   if (!pins.length || !served.grants) return served;
   let grants: Grant[] = served.grants.map((grant) => ({ ...grant }));
   for (const [command, pin] of pins) {
