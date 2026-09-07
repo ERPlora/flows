@@ -296,35 +296,44 @@ describe('the payload limits a served recipe asks with', () => {
     expect(templateGrants(card, t)).toEqual([{ kind: 'query', value: 'customers.list' }]);
   });
 
+  /** Every copy that carries a limit, not just today's one: the next pinned mirror is covered too. */
+  const pinnedMirrors = TEMPLATES.filter((tpl) => tpl.mirrors && tpl.grantPins);
+
+  it('has a copy carrying a limit in the first place — otherwise the test below proves nothing', () => {
+    expect(pinnedMirrors.length).toBeGreaterThan(0);
+  });
+
   it('asks with the retired copy’s limit while the door cannot carry it', () => {
-    const mirror = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment-unattended')!;
-    // The copy this test stands on really does contain the limit — otherwise it proves nothing.
-    expect(mirror.grantPins?.['appointments.appointments.cancel']).toEqual({ channel: 'customer' });
-    const served = moduleTemplates(
-      [
-        row({
-          ...mirror.mirrors,
-          // Exactly what the hub serves TODAY from that sidecar: the pin already stripped.
-          grants: [
-            { kind: 'command', value: 'appointments.appointments.cancel' },
-            { kind: 'command', value: 'appointments.appointments.create' },
-          ],
-        }),
-      ],
-      'en',
-    );
-    const merged = mergeTemplates(TEMPLATES, served);
-    const card = merged.cards.find((c) => c.id === served[0].id)!;
-    const cancel = templateGrants(card, t).find((g) => g.value === 'appointments.appointments.cancel');
-    expect(cancel?.payload).toEqual({ channel: 'customer' });
-    // And only that one: a pin is not spread over the rest of the list.
-    expect(
-      templateGrants(card, t).find((g) => g.value === 'appointments.appointments.create')?.payload,
-    ).toBeUndefined();
+    for (const mirror of pinnedMirrors) {
+      const pins = Object.entries(mirror.grantPins!);
+      const served = moduleTemplates(
+        [
+          row({
+            ...mirror.mirrors,
+            // Exactly what the hub serves TODAY from that sidecar: the pin already stripped, plus
+            // one command the copy does NOT pin, so a pin sprayed over the list would show here.
+            grants: [
+              ...pins.map(([command]) => ({ kind: 'command', value: command })),
+              { kind: 'command', value: 'customers.create' },
+            ],
+          }),
+        ],
+        'en',
+      );
+      const merged = mergeTemplates(TEMPLATES, served);
+      const card = merged.cards.find((c) => c.id === served[0].id)!;
+      const asked = templateGrants(card, t);
+      for (const [command, pin] of pins) {
+        expect(asked.find((g) => g.value === command)?.payload, `${mirror.id} → ${command}`).toEqual(pin);
+      }
+      expect(asked.find((g) => g.value === 'customers.create')?.payload).toBeUndefined();
+    }
   });
 
   it('lets the module’s own pin win over the copy’s', () => {
-    const mirror = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment-unattended')!;
+    const mirror = TEMPLATES.find(
+      (tpl) => tpl.grantPins?.['appointments.appointments.cancel'] && tpl.mirrors,
+    )!;
     const served = moduleTemplates(
       [
         row({
