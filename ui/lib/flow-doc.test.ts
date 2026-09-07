@@ -8,6 +8,8 @@ import {
   removeStep,
   moveStep,
   patchStep,
+  removeStepKeys,
+  STEP_KEYS,
   isPath,
   partsToValue,
   valueToParts,
@@ -90,6 +92,47 @@ describe('the document a flow is', () => {
     const doc = patchStep(addStep(addStep(emptyDoc(), 'command'), 'delay'), 1, { seconds: 3600 });
     expect(doc.steps[1].seconds).toBe(3600);
     expect(doc.steps[0].seconds).toBeUndefined();
+  });
+
+  // `patchStep` spreads, so `{vars: undefined}` leaves the key sitting there holding `undefined`,
+  // and whether it reaches the hub at all comes down to `JSON.stringify` dropping it on the way
+  // out. That is a save that works by accident. When a key has to GO — the copy of a message that
+  // just became a tappable one — it goes for real.
+  it('takes a key off a step instead of leaving it holding undefined', () => {
+    const doc = patchStep(addStep(emptyDoc(), 'notify'), 0, {
+      template: 'appointment-reminder',
+      vars: { text: 'hola' },
+      channel: 'whatsapp',
+    });
+    const after = removeStepKeys(doc, 0, ['template', 'vars']);
+    expect('template' in after.steps[0]).toBe(false);
+    expect('vars' in after.steps[0]).toBe(false);
+    expect(after.steps[0].channel).toBe('whatsapp');
+    expect(after.steps[0].id).toBe(doc.steps[0].id);
+  });
+
+  it('leaves the other steps and the document it was handed untouched', () => {
+    const doc = patchStep(addStep(addStep(emptyDoc(), 'notify'), 'notify'), 0, { template: 'a' });
+    const after = removeStepKeys(patchStep(doc, 1, { template: 'b' }), 1, ['template']);
+    expect(after.steps[0].template).toBe('a');
+    expect(doc.steps[0].template).toBe('a');
+    expect('template' in doc.steps[1]).toBe(false);
+  });
+
+  it('says nothing about a key the step never carried, and about an index that is not there', () => {
+    const doc = addStep(emptyDoc(), 'notify');
+    expect(removeStepKeys(doc, 0, ['interactive']).steps[0]).toEqual(doc.steps[0]);
+    expect(removeStepKeys(doc, 7, ['id']).steps).toEqual(doc.steps);
+  });
+});
+
+// `STEP_KEYS` DECLARES itself a mirror of the kernel's whitelist, which is strict: a key missing
+// from it is a key this editor believes the hub refuses. Drifting from `def.rs` is not a cosmetic
+// lag — it is the editor lying about the contract to every part of itself that asks.
+describe('the keys the kernel allows, per kind', () => {
+  it('lets a whatsapp notify carry the options the customer taps', () => {
+    // `def.rs:1452`: ["id","kind","channel","to","template","vars","interactive"].
+    expect(STEP_KEYS.notify).toContain('interactive');
   });
 });
 
