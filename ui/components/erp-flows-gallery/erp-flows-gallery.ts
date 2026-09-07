@@ -5,18 +5,26 @@ import '@erplora/outfitkit/ok-inline-feedback';
 import '@erplora/outfitkit/ok-status-pill';
 import {
   SECTORS,
+  TEMPLATES,
   availableTemplates,
   flowsOnSameTrigger,
   flowsWorthAsking,
   buildTemplate,
+  mergeTemplates,
   moduleName,
+  runnableHere,
   templateById,
   templateGrants,
   templateInstallation,
+  templateName,
+  templatePlain,
+  templateSummary,
   templatesOf,
   unavailableModules,
 } from '../../lib/templates';
-import type { FlowTemplate, InstalledState, Sector } from '../../lib/templates';
+import type { FlowTemplate, InstalledState, MergedCatalogue, Sector } from '../../lib/templates';
+import { moduleTemplates } from '../../lib/module-templates';
+import { describeStep } from '../../lib/plain-language';
 import { schemaFacts } from '../../lib/ai-draft';
 import type { SchemaFacts } from '../../lib/ai-draft';
 import { errorCode } from '../../lib/hub-flows';
@@ -348,6 +356,25 @@ export class ErpFlowsGallery extends LitElement {
    */
   @state() private existing: (Flow & { commands?: string[] })[] = [];
 
+  /**
+   * The recipes the installed modules bring, as this hub serves them (flows#98, hub#1611).
+   *
+   * Empty until the answer arrives, and empty for ever on a hub that has no such door — which is
+   * the whole fleet until the image carrying hub#1645 reaches it. Either way the gallery is the
+   * gallery it always was; these are added to it, they never replace it.
+   */
+  @state() private served: FlowTemplate[] = [];
+
+  /**
+   * Whether the hub could be asked at all, and what to say when it could not.
+   *
+   * `old-core` is not an error and must not read as one: the owner's hub simply predates the door,
+   * their next update brings it, and nothing on the screen is missing meanwhile. `unavailable` IS
+   * an error — the hub has the door and refused — and it is said out loud rather than swallowed,
+   * because a recipe the owner installed an app for would otherwise be missing with no explanation.
+   */
+  @state() private modules: 'ok' | 'old-core' | 'unavailable' = 'ok';
+
   @state() private busy = false;
 
   @state() private error = '';
@@ -412,6 +439,63 @@ export class ErpFlowsGallery extends LitElement {
     this.asked = client;
     void this.probe();
     void this.loadExisting();
+    void this.loadModuleTemplates();
+  }
+
+  /**
+   * Asks the hub what its installed modules bring (`GET /api/hub/flows/templates`, hub#1645).
+   *
+   * The hub has already applied each family's module floor, so everything it answers is something
+   * this business can run — the gallery does not judge that again. What it DOES keep judging is its
+   * own kernel floor, in {@link runnableHere}: a document naming a step key this core cannot parse
+   * is refused whole at save, so offering it would hand the owner an automation that dies on the
+   * button.
+   */
+  private async loadModuleTemplates(): Promise<void> {
+    const client = this.client;
+    const ask = client?.flows?.templates;
+    if (typeof ask !== 'function') {
+      // Not a failure: a hub older than the door. The written catalogue is the whole gallery there.
+      this.served = [];
+      this.modules = 'old-core';
+      return;
+    }
+    try {
+      const rows = await ask.call(client!.flows);
+      this.served = moduleTemplates(rows, client!.locale);
+      this.modules = 'ok';
+    } catch {
+      // A hub that HAS the door and refused. Said on screen, never swallowed: the owner installed
+      // an app for this, and a recipe missing without a word reads as an app that does nothing.
+      this.served = [];
+      this.modules = 'unavailable';
+    }
+  }
+
+  /**
+   * The catalogue actually on screen: what is written here, plus what the hub brought.
+   *
+   * Merged rather than concatenated because four cards in this catalogue are hand copies of
+   * WhatsApp recipes made before any hub could serve them — see {@link mergeTemplates}. Only the
+   * served cards this hub can RUN take part: retiring a copy in favour of something that is not
+   * going to be painted would leave the owner with neither.
+   */
+  private get catalogue(): MergedCatalogue {
+    return mergeTemplates(
+      TEMPLATES,
+      this.served.filter((tpl) => runnableHere(tpl, this.known, this.facts)),
+    );
+  }
+
+  /**
+   * The card an id ends up at, after a retired copy's shortcut has been forwarded.
+   *
+   * `?template=whatsapp-appointment` is published by `whatsapp_inbox`, not by us, so it goes on
+   * arriving long after the card it names has stepped aside for the module's own recipe.
+   */
+  private landsOn(id: string | null): string | null {
+    if (!id) return id;
+    return this.catalogue.aliases[id] ?? id;
   }
 
   disconnectedCallback(): void {
@@ -464,7 +548,7 @@ export class ErpFlowsGallery extends LitElement {
    */
   private reveal(): void {
     if (!this.linked || this.revealed === this.linked) return;
-    const card = this.renderRoot.querySelector(`[data-template="${this.linked}"]`);
+    const card = this.renderRoot.querySelector(`[data-template="${this.landsOn(this.linked)}"]`);
     if (!card) return;
     if (offScreen(card) && this.waitForTheScreen(card)) return;
     this.stopWaiting();
@@ -676,13 +760,14 @@ export class ErpFlowsGallery extends LitElement {
    * silently: the screen to land on is Permissions, not the step list.
    */
   async use(): Promise<void> {
-    const template = this.picked ? templateById(this.picked) : undefined;
+    const picked = this.landsOn(this.picked);
+    const template = picked ? templateById(picked, this.catalogue.cards) : undefined;
     if (!template || !this.client || this.busy) return;
     this.busy = true;
     this.error = '';
     try {
       const flow = await this.client.flows.create({
-        name: this.t(template.nameKey),
+        name: templateName(template, this.t),
         enabled: false,
         definition: buildTemplate(template, this.t) as unknown as Record<string, unknown>,
       });
@@ -711,7 +796,8 @@ export class ErpFlowsGallery extends LitElement {
   private renderPanel(template: FlowTemplate) {
     const grants = templateGrants(template, this.t);
     return html`<div class="panel" id=${`panel-${template.id}`}>
-      <p class="plain">${this.t(template.plainKey)}</p>
+      <p class="plain">${templatePlain(template, this.t)}</p>
+      ${template.source ? this.renderSteps(template) : nothing}
 
       <div class="block">
         <span class="head">${this.t('ui.tplBlanksTitle')}</span>
@@ -776,6 +862,25 @@ export class ErpFlowsGallery extends LitElement {
    * Warn and step aside, the same stance this panel already takes on a shared trigger
    * (whatsapp_inbox#58); refusing would be us deciding for them.
    */
+  /**
+   * What a SERVED recipe does, read out of the document the module published (flows#98).
+   *
+   * A card written here has a sentence in the catalogue describing it; one that arrived from a
+   * module has no sentence of ours and must not get an invented one. `describeStep` is the same
+   * reading the editor gives any other flow, so what the owner is shown before creating it is what
+   * they will be shown afterwards — the alternative was a card that says only where it came from.
+   */
+  private renderSteps(template: FlowTemplate) {
+    const steps = buildTemplate(template, this.t).steps;
+    if (!steps.length) return nothing;
+    return html`<div class="block" data-steps>
+      <span class="head">${this.t('ui.tplStepsTitle')}</span>
+      ${steps.map(
+        (step) => html`<div class="item"><span class="grow">${describeStep(step, this.t)}</span></div>`,
+      )}
+    </div>`;
+  }
+
   private renderActions(template: FlowTemplate) {
     const installed = this.installationOf(template);
     const use = html`<ion-button
@@ -842,7 +947,10 @@ export class ErpFlowsGallery extends LitElement {
   }
 
   private renderCard(template: FlowTemplate) {
-    const open = this.picked === template.id;
+    const open = this.landsOn(this.picked) === template.id;
+    // A card with nothing to say under its title leaves the line out rather than printing an empty
+    // one: an empty node still takes its margin and opens a gap the owner reads as a missing word.
+    const summary = templateSummary(template, this.t);
     const { state } = this.installationOf(template);
     return html`<div
       class="card"
@@ -858,8 +966,8 @@ export class ErpFlowsGallery extends LitElement {
       >
         <ion-icon name=${template.icon} aria-hidden="true"></ion-icon>
         <span class="grow">
-          <span class="name">${this.t(template.nameKey)}</span>
-          <span class="summary">${this.t(template.summaryKey)}</span>
+          <span class="name">${templateName(template, this.t)}</span>
+          ${summary ? html`<span class="summary">${summary}</span>` : nothing}
         </span>
         ${this.renderInstalledPill(state)}
       </button>
@@ -867,13 +975,46 @@ export class ErpFlowsGallery extends LitElement {
     </div>`;
   }
 
-  private renderSector(sector: Sector) {
-    const templates = availableTemplates(sector, this.known, this.facts);
+  private renderSector(sector: Sector, catalogue: readonly FlowTemplate[]) {
+    const templates = availableTemplates(sector, this.known, this.facts, catalogue);
     if (!templates.length) return nothing;
     return html`<section data-sector=${sector}>
       <h3>${this.t(`ui.sector_${sector}`)}</h3>
       <div class="cards">${templates.map((template) => this.renderCard(template))}</div>
     </section>`;
+  }
+
+  /**
+   * One heading per app that brought recipes, under the trades and above the shopping list.
+   *
+   * Grouped by APP and not folded into a sector on purpose: the owner installed WhatsApp, and what
+   * they are looking for is «what came with WhatsApp». A restaurant and a salon both install it,
+   * so filing its recipes under one trade would hide them from the other.
+   */
+  private renderModuleSections(catalogue: readonly FlowTemplate[]) {
+    const served = catalogue.filter((tpl) => tpl.source);
+    const modules = [...new Set(served.map((tpl) => tpl.source!.module))];
+    return modules.map((id) => {
+      const cards = served.filter((tpl) => tpl.source!.module === id);
+      return html`<section data-module=${id}>
+        <h3>${this.t('ui.tplFromAppSection', { app: moduleName(id, this.t) })}</h3>
+        <div class="cards">${cards.map((template) => this.renderCard(template))}</div>
+      </section>`;
+    });
+  }
+
+  /**
+   * Why the apps' own recipes are not on this screen, when they are not.
+   *
+   * Two different sentences because they are two different situations for the owner: an older core
+   * is «not yet, and nothing to do», a refusal is «something went wrong, try again». One sentence
+   * covering both would be wrong for whoever is reading it.
+   */
+  private renderModulesState() {
+    if (this.modules === 'ok') return nothing;
+    return html`<p class="missing" data-modules-state=${this.modules}>${this.t(
+      this.modules === 'old-core' ? 'ui.tplModulesOldCore' : 'ui.tplModulesUnavailable',
+    )}</p>`;
   }
 
   /**
@@ -896,6 +1037,7 @@ export class ErpFlowsGallery extends LitElement {
   }
 
   render() {
+    const { cards } = this.catalogue;
     return html`<div class="wrap">
       <div class="lede">
         <p>${this.t('ui.tplLede')}</p>
@@ -911,7 +1053,8 @@ export class ErpFlowsGallery extends LitElement {
           ${this.t('ui.guideOpen')}
         </button>
       </div>
-      ${SECTORS.map((sector) => this.renderSector(sector))} ${this.renderMissing()}
+      ${SECTORS.map((sector) => this.renderSector(sector, cards))}
+      ${this.renderModuleSections(cards)} ${this.renderMissing()} ${this.renderModulesState()}
     </div>`;
   }
 }

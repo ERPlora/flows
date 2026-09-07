@@ -150,6 +150,35 @@ export interface FlowsApi {
   approvals?(status?: string): Promise<Approval[]>;
   approve?(id: string, body?: Record<string, unknown>): Promise<unknown>;
   reject?(id: string, body?: Record<string, unknown>): Promise<unknown>;
+  /**
+   * The automations the INSTALLED MODULES bring (`GET /api/hub/flows/templates`, hub#1645).
+   *
+   * **Optional**, like every method added after the §9 list was frozen: this module is installed
+   * from the marketplace and updated on its own clock, so it runs on hubs older than the door it
+   * wants. On one of those the runtime hands over a client without the method and `typeof
+   * flows.templates === 'function'` is false — which is the answer, not a crash.
+   */
+  templates?(): Promise<HubFlowTemplate[]>;
+}
+
+/**
+ * One row of `GET /api/hub/flows/templates`: a family an installed module publishes (hub#1611).
+ *
+ * The hub has already applied each family's own module floor before serving it, so a row being
+ * here means this business can run it. `documents` is one document per language the module ships,
+ * English always among them (ADR-0055/0199), and `grants` is what the recipe will ASK the owner
+ * for — never something already allowed.
+ *
+ * Everything is optional and `unknown` on purpose: this is the far side of a call to a hub that
+ * may be NEWER than this module, and the reader ({@link moduleTemplates}) checks every field
+ * rather than trusting the shape.
+ */
+export interface HubFlowTemplate {
+  module?: string;
+  family?: string;
+  documents?: Record<string, unknown>;
+  grants?: unknown;
+  requires?: Record<string, string>;
 }
 
 /**
