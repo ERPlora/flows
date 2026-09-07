@@ -294,6 +294,58 @@ describe('a template this hub already runs', () => {
     expect(templateInstallation(tpl('morning-agenda-check'), t, flows).flow?.id).toBe('f6');
   });
 
+  it('does not take a step that carries the card’s values into a different command', () => {
+    // The values are what tells two cards apart; the command is what says this is the same KIND of
+    // automation at all. A flow that writes the review's words through some other command is not
+    // the review, however much of its text it happens to repeat.
+    const flow = scheduledFlow('0 18 * * 5', ['tasks.tasks.create']);
+    (flow.definition.steps as { command: string }[])[0].command = 'notes.notes.create';
+    expect(templateInstallation(tpl('friday-week-review'), t, [flow])).toEqual({ state: 'absent' });
+  });
+
+  it('recognises nothing at all from a scheduled card that seeds no command', () => {
+    // «Every seeded step is there» is vacuously true of a card that seeds none, which would badge
+    // every scheduled flow in the hub off a card that does nothing. No card is like this today;
+    // this is the guard that stops one being added by accident.
+    const template = {
+      ...tpl('friday-week-review'),
+      build: (tr: (k: string) => string) => ({
+        ...buildTemplate(tpl('friday-week-review'), tr),
+        steps: [],
+      }),
+    };
+    const flow = scheduledFlow('0 18 * * 5', ['tasks.tasks.create']);
+    expect(templateInstallation(template, t, [flow])).toEqual({ state: 'absent' });
+  });
+
+  it('compares a seeded value that is not a plain string by what it holds', () => {
+    // Today every card seeds strings, so identity would compare them fine. The day one seeds a
+    // structure — recipients, variables — comparing the objects themselves would never match and
+    // that card could never be recognised.
+    const withObject = (params: Record<string, unknown>) => ({
+      ...tpl('friday-week-review'),
+      build: (tr: (k: string) => string) => ({
+        ...buildTemplate(tpl('friday-week-review'), tr),
+        steps: [{ id: 's1', kind: 'command' as const, command: 'tasks.tasks.create', params }],
+      }),
+    });
+    const template = withObject({ vars: { who: 'owner', when: ['fri'] } });
+    const flow = {
+      id: 'f8',
+      name: 'Weekly',
+      enabled: true,
+      definition: buildTemplate(withObject({ vars: { who: 'owner', when: ['fri'] } }), t) as unknown as Record<string, unknown>,
+      commands: ['tasks.tasks.create'],
+    };
+    expect(templateInstallation(template, t, [flow])).toEqual({ state: 'active', flow });
+
+    const other = {
+      ...flow,
+      definition: buildTemplate(withObject({ vars: { who: 'owner', when: ['mon'] } }), t) as unknown as Record<string, unknown>,
+    };
+    expect(templateInstallation(template, t, [other])).toEqual({ state: 'absent' });
+  });
+
   it('does not answer for a card whose trigger is neither an event nor a schedule', () => {
     // `manual` and `at` are trigger kinds the kernel runs and this catalogue does not use. Nothing
     // recognises them, and `absent` stays the honest answer until something does.
