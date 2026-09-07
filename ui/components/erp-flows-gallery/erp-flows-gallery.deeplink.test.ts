@@ -216,6 +216,49 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
     await settle(el);
     expect(openPanels(el), 'the card re-opened by itself on the next render').toBe(0);
   });
+
+  /**
+   * And it stays closed while the address bar still names it. A shortcut is served ONCE: a
+   * `popstate` the shell fires for its own reasons — a back, a forward, a tab restored — must not
+   * put back the card the owner just shut, because from the seat that is a card that will not
+   * close.
+   */
+  it('does not re-open it when the shell navigates to the same address again', async () => {
+    landOn(`?template=${LINKED}`);
+    const el = await mount();
+    el.open(LINKED);
+    await settle(el);
+    expect(openPanels(el)).toBe(0);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await settle(el);
+    expect(openPanels(el), 'the same shortcut was served twice').toBe(0);
+  });
+
+  /**
+   * A failed «Use this» leaves its reason on the panel. Following the next shortcut has to clear
+   * it: an error about the card the owner left behind, printed on the card they just asked for,
+   * blames the wrong automation.
+   */
+  it('does not carry an old failure over to the card the next shortcut opens', async () => {
+    landOn(`?template=${LINKED}`);
+    const broken = hub();
+    broken.flows.create = vi.fn(async () => {
+      throw new Error('command no encontrado: appointments.appointments.create');
+    });
+    const el = await mount(broken);
+    await el.use();
+    await settle(el);
+    expect(el.renderRoot.querySelector('ok-inline-feedback[tone="danger"]')).toBeTruthy();
+
+    landOn('?template=welcome-new-customer');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    await settle(el);
+    expect(panel(el, 'welcome-new-customer')).toBeTruthy();
+    expect(
+      el.renderRoot.querySelector('ok-inline-feedback[tone="danger"]'),
+      'the new card opened wearing the previous card’s error',
+    ).toBeNull();
+  });
 });
 
 /**

@@ -334,7 +334,7 @@ export class ErpFlowsGallery extends LitElement {
    * the plain gallery is the answer.
    */
   private reveal(): void {
-    if (!this.linked || this.revealed === this.linked || this.picked !== this.linked) return;
+    if (!this.linked || this.revealed === this.linked) return;
     const card = this.renderRoot.querySelector(`[data-template="${this.linked}"]`);
     if (!card) return;
     this.revealed = this.linked;
