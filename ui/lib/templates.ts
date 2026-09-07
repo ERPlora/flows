@@ -28,7 +28,7 @@
  * honest place for them.
  */
 import type { FlowDoc, Grant, Step } from './flow-doc';
-import { requiredGrants } from './flow-doc';
+import { requiredGrants, setGrantPin } from './flow-doc';
 import type { Translator } from './plain-language';
 
 /** The families a gallery groups by. `any` is «any business», and it goes first. */
@@ -71,6 +71,20 @@ export interface FlowTemplate {
   witnesses: readonly TemplateWitness[];
   /** Why each command is needed, keyed by command name. Shown BEFORE the flow exists. */
   grantReasons: Readonly<Record<string, string>>;
+  /**
+   * The payload fields a command's permission FIXES, keyed by command name (hub#1623, flows#80).
+   *
+   * A card's permissions are *derived* from its document, and a limit does not live in the
+   * document — it lives in the permission. So without a place to say it here, a recipe written to
+   * act only within some boundary would install with the boundary missing: the gallery would
+   * promise the contained automation and hand over the wide one.
+   *
+   * `command` only, and only fields the command's own schema declares. Every key named here has to
+   * arrive with exactly this value or the hub refuses the call — **omitting it is refused just the
+   * same**, which is what makes a pin hold against a schema that defaults the field to the wide
+   * value.
+   */
+  grantPins?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /** Always `false`, and typed as `false` so a template cannot be born running. */
   enabledOnCreate?: false;
   /** The document, in the owner's language. */
@@ -715,8 +729,25 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       'appointments.availability.check': 'tpl.grant.availabilityCheck',
       'appointments.appointments.create': 'tpl.grant.appointmentsCreate',
       'appointments.appointments.list_for_customer': 'tpl.grant.appointmentsListForCustomer',
-      'appointments.appointments.cancel': 'tpl.grant.appointmentsCancel',
+      // Its OWN sentence, not the twin's: the shared one ends «it waits in the tray until you
+      // approve it», and this family has no tray — it books and cancels unattended. Read on this
+      // card that line promised a human in the loop who is not there.
+      'appointments.appointments.cancel': 'tpl.grant.appointmentsCancelAsCustomer',
     },
+    // 🔴 The one permission on this card that is NOT allowed to be as wide as its name (flows#80).
+    //
+    // `book_appointment` runs `policy: "auto"` — no tray, nobody looking — and the payload it hands
+    // this command is written by a model reading a stranger's WhatsApp. `appointment_cancel.json`
+    // takes `channel: "staff" | "customer"` and **defaults it to `staff`**, so the wide grant lets
+    // that model cancel anybody's hour on the salon's behalf: no ownership check, no notice
+    // period, no `allow_customer_cancellation`. Until hub#1623 the only thing standing in the way
+    // was a paragraph of prompt, which is exactly what hub#1623 says is NOT a control.
+    //
+    // Pinned to `customer`, the handler compares the appointment's `customer_id` with the one the
+    // flow resolved from the phone the message came from (`find_customer`), and the salon's
+    // cancellation policy applies. The recipe keeps doing the thing it was installed for and loses
+    // the thing nobody asked for. Its source half is whatsapp_inbox#100.
+    grantPins: { 'appointments.appointments.cancel': { channel: 'customer' } },
     build: (t) => ({
       schema_version: SCHEMA_VERSION,
       triggers: [
@@ -1484,7 +1515,16 @@ export function buildTemplate(template: FlowTemplate, t: Translator): FlowDoc {
  * screen right up until the automation silently does nothing.
  */
 export function templateGrants(template: FlowTemplate, t: Translator): Grant[] {
-  return requiredGrants(buildTemplate(template, t));
+  const derived = requiredGrants(buildTemplate(template, t));
+  // flows#80 — the limits the card declares, laid onto the permissions it derived. `setGrantPin`
+  // and not a hand-rolled merge on purpose: it is the same function the Permissions screen writes
+  // pins with, so a limit shown here and a limit typed there cannot drift into different shapes.
+  // A pin naming a command this card does not run lands on nothing; the catalogue test above
+  // refuses that at build time rather than letting it read as a containment that fixes nothing.
+  return Object.entries(template.grantPins ?? {}).reduce(
+    (grants, [command, pin]) => setGrantPin(grants, { kind: 'command', value: command }, pin),
+    derived,
+  );
 }
 
 /**

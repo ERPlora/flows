@@ -18,6 +18,8 @@ import {
 } from '../../lib/templates';
 import type { FlowTemplate, InstalledState, Sector } from '../../lib/templates';
 import { errorCode } from '../../lib/hub-flows';
+import { grantPin } from '../../lib/flow-doc';
+import type { Grant } from '../../lib/flow-doc';
 import type { Flow, ModuleClient } from '../../lib/hub-flows';
 import type { Translator } from '../../lib/plain-language';
 
@@ -529,6 +531,57 @@ export class ErpFlowsGallery extends LitElement {
   }
 
   /**
+   * Grants the permissions this card LIMITS, as limited as it declared them (flows#80).
+   *
+   * Only the limited ones. A card's other permissions stay a decision the owner makes on the
+   * Permissions screen — installing a recipe is not a reason to hand it the rest unasked. But a
+   * LIMIT cannot wait for that screen: the screen derives what it grants from the DOCUMENT, and
+   * the limit does not live in the document. Left for later it is simply lost, and the salon ends
+   * up holding the wide permission it was shown the narrow version of.
+   *
+   * Writing it here survives that screen: `missingGrants` matches on kind and value, so the row
+   * is already held and never re-offered, and `mergeGrants` carries its pin through untouched.
+   *
+   * 🔴 **Written and then read back**, because a hub older than hub#1623 has no `payload` on a
+   * grant and `serde` drops the unknown key without a word. Unchecked, this method would be the
+   * bug it exists to fix, one step worse: the salon would HOLD «may cancel appointments», wide,
+   * granted by a screen it never pressed a button on — and the Permissions screen would not even
+   * list it as missing. So when the limit did not survive, the grant goes back out and the flow is
+   * left exactly as it was before: nothing granted, and the owner told why.
+   */
+  private async applyDeclaredLimits(flow: Flow, template: FlowTemplate): Promise<boolean> {
+    const limited = templateGrants(template, this.t).filter(
+      (g) => Object.keys(grantPin(g)).length > 0,
+    );
+    if (!limited.length) return true;
+
+    const write = this.client?.flows?.replaceGrants;
+    if (typeof write !== 'function') {
+      // A core whose flows surface predates grants cannot be told about the limit at all.
+      this.error = this.t('ui.errLimitNotApplied');
+      return false;
+    }
+    const pinOf = (g: Grant): string => JSON.stringify(Object.entries(grantPin(g)).sort());
+    try {
+      const stored = await write.call(this.client!.flows, flow.id, limited);
+      const kept = Array.isArray(stored) ? (stored as Grant[]) : [];
+      const survived = limited.every((want) =>
+        kept.some((g) => g.kind === want.kind && g.value === want.value && pinOf(g) === pinOf(want)),
+      );
+      if (survived) return true;
+      // The flow was created moments ago holding nothing, so an empty replace is exactly its
+      // previous state — not an approximation of it.
+      await write.call(this.client!.flows, flow.id, []);
+    } catch {
+      // Whatever the hub did with the write, what must not remain is a wide grant nobody asked
+      // for. This second attempt is allowed to fail too; the message below is sent either way.
+      await write.call(this.client!.flows, flow.id, []).catch(() => undefined);
+    }
+    this.error = this.t('ui.errLimitNotApplied');
+    return false;
+  }
+
+  /**
    * Creates the picked template as a **paused** flow and hands it over.
    *
    * `needsGrants` travels with it because a flow with no grants does nothing at all, and does it
@@ -545,6 +598,11 @@ export class ErpFlowsGallery extends LitElement {
         enabled: false,
         definition: buildTemplate(template, this.t) as unknown as Record<string, unknown>,
       });
+      // An install that could not put the limit on is NOT the install this card promised, so it
+      // does not get to move the owner along as though it were: the panel stays where it is, with
+      // the sentence that says what to do. The flow itself is kept — it exists, paused, in the
+      // list — because throwing away what the hub already accepted would lose work as well.
+      if (!(await this.applyDeclaredLimits(flow, template))) return;
       this.dispatchEvent(
         new CustomEvent<{ flow: Flow; needsGrants: boolean }>('flows-template-used', {
           detail: { flow, needsGrants: templateGrants(template, this.t).length > 0 },
@@ -584,14 +642,26 @@ export class ErpFlowsGallery extends LitElement {
       <div class="block">
         <span class="head">${this.t('ui.tplGrantsTitle')}</span>
         <span class="muted">${this.t('ui.tplGrantsIntro')}</span>
-        ${grants.map(
-          (grant) => html`<div class="item" data-grant=${grant.value}>
+        ${grants.map((grant) => {
+          // flows#80 — a permission this card LIMITS says so here, before it is installed. The
+          // limit is read off the grant itself rather than written a second time in prose: a
+          // sentence and a pin that could disagree is how a screen ends up promising containment
+          // the hub is not applying, which is the whole complaint this came from.
+          const pin = Object.entries(grantPin(grant));
+          return html`<div class="item" data-grant=${grant.value}>
             <span class="grow">
               <span class="label">${this.t(template.grantReasons[grant.value] ?? grant.value)}</span>
+              ${pin.length
+                ? html`<span class="hint" data-limit=${grant.value}
+                    >${this.t('ui.tplGrantLimited', {
+                      fields: pin.map(([field, value]) => `${field} = ${String(value)}`).join(', '),
+                    })}</span
+                  >`
+                : nothing}
               <span class="hint">${grant.value}</span>
             </span>
-          </div>`,
-        )}
+          </div>`;
+        })}
       </div>
 
       ${this.renderSameTrigger(template)}

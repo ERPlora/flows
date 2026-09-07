@@ -11,12 +11,13 @@ import {
   missingModules,
   moduleName,
   templateGrants,
+  templateById,
   unavailableModules,
   flowsOnSameTrigger,
 } from './templates';
 import { conditionResult } from './simulate';
 import type { FlowDoc } from './flow-doc';
-import { MAX_ITERS_CAP, isSpineKind, readDoc } from './flow-doc';
+import { MAX_ITERS_CAP, grantAllowsCall, grantPin, isSpineKind, readDoc } from './flow-doc';
 import en from '../../locales/en.json';
 import es from '../../locales/es.json';
 
@@ -1542,5 +1543,73 @@ describe('the gallery can see that a card would double up on a trigger (whatsapp
       { name: 'empty', definition: {} },
     ];
     expect(flowsOnSameTrigger(unattended, t, junk)).toEqual([]);
+  });
+});
+
+// ── The limit travels with the card (flows#80) ────────────────────────────────────────────────
+
+describe('a card installs the permission it PROMISED, not the wide one next to it', () => {
+  const grantFor = (id: string, command: string) => {
+    const template = templateById(id);
+    return templateGrants(template!, t).find((g) => g.kind === 'command' && g.value === command);
+  };
+
+  it('carries a card’s declared limit onto the permission it derives', () => {
+    const grant = grantFor('whatsapp-appointment-unattended', 'appointments.appointments.cancel');
+    expect(grant, 'the card asks to cancel appointments').toBeTruthy();
+    expect(grantPin(grant!)).toEqual({ channel: 'customer' });
+  });
+
+  // 🔴 THE assertion this issue exists for, and it is about the call the recipe must NOT be able
+  // to make. Asserting only that its own call gets through would pass just as well with no limit
+  // at all — which is the state flows#80 reported.
+  it('refuses a cancellation asked for on the salon’s behalf', () => {
+    const grant = grantFor('whatsapp-appointment-unattended', 'appointments.appointments.cancel')!;
+    // What the recipe is for: the customer who wrote in, cancelling her own hour.
+    expect(grantAllowsCall(grant, { appointment_id: 'a1', channel: 'customer' })).toBe(true);
+    // What a stranger's message must never talk the model into.
+    expect(grantAllowsCall(grant, { appointment_id: 'a1', channel: 'staff' })).toBe(false);
+    // And the same refusal by omission — `channel` defaults to `staff` in the command's schema.
+    expect(grantAllowsCall(grant, { appointment_id: 'a1' })).toBe(false);
+  });
+
+  // The other side of the same coin: nothing else on the card silently narrows. A pin that spread
+  // would break the recipe rather than contain it.
+  it('leaves every other permission of that card exactly as wide as it was', () => {
+    const pinned = templateGrants(templateById('whatsapp-appointment-unattended')!, t).filter(
+      (g) => Object.keys(grantPin(g)).length > 0,
+    );
+    expect(pinned.map((g) => `${g.kind} ${g.value}`)).toEqual([
+      'command appointments.appointments.cancel',
+    ]);
+  });
+
+  // A universal rule for the catalogue, not a check on one card: a pin naming a command the card
+  // never runs would sit in the source reading like a containment and fix NOTHING, because there
+  // is no grant for it to land on.
+  it('never declares a limit for a command its own document does not run', () => {
+    for (const template of TEMPLATES) {
+      const derived = new Set(
+        templateGrants(template, t)
+          .filter((g) => g.kind === 'command')
+          .map((g) => g.value),
+      );
+      for (const command of Object.keys(template.grantPins ?? {})) {
+        expect(derived, `${template.id} pins \`${command}\`, which it never runs`).toContain(
+          command,
+        );
+      }
+    }
+  });
+
+  // The hub refuses a pin on any kind but `command` (`flow.invalid_grant_payload`), and `PUT
+  // …/grants` is all-or-nothing: one bad row does not fail that row, it loses the whole screen's
+  // worth of permissions.
+  it('never declares a limit the hub would refuse the whole screen for', () => {
+    for (const template of TEMPLATES) {
+      for (const grant of templateGrants(template, t)) {
+        if (Object.keys(grantPin(grant)).length) expect(grant.kind).toBe('command');
+      }
+    }
   });
 });
