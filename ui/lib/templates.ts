@@ -572,6 +572,35 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       'appointments.appointments.cancel': 'tpl.grant.appointmentsCancel',
       'appointments.appointments.reschedule': 'tpl.grant.appointmentsReschedule',
     },
+    // 🔴 The two permissions on this card that are NOT allowed to be as wide as their names
+    // (flows#99, whatsapp_inbox#107). Its source half is already pinned: `whatsapp_inbox` fixes
+    // `channel: "customer"` on cancelling since whatsapp_inbox#117.
+    //
+    // **The tray is not a permission boundary.** It is a workflow control, and the two answer
+    // different questions: the tray asks «should we do this», the grant asks «may we». What waits
+    // there is a draft written FOR THE CUSTOMER — «I have cancelled your Thursday» — not the call
+    // underneath it, so the person approving reads a sentence and authorises an operation they were
+    // never shown. `propose_appointment` runs `manual`, but the payload it proposes is still
+    // written by a model reading a stranger's WhatsApp.
+    //
+    // Both commands default `channel` to `staff`, and on that channel neither checks whose
+    // appointment it is: cancelling also skips the notice period and `allow_customer_cancellation`.
+    // Pinned to `customer`, `customer_identity_refusal` compares the appointment's own
+    // `customer_id` with the one the flow resolved from the phone the message came from
+    // (`find_customer`), and the salon's own rules apply — which is what the sentence on the card
+    // has been promising all along.
+    //
+    // Pinned HERE and not only in the module because while hub#1654 is open the sidecar's `payload`
+    // never leaves the hub: `FlowTemplateGrant` is `{kind, value}` and serde drops the rest. This
+    // copy is what the gallery installs — as the card itself on a hub that serves nothing, and
+    // through `withCopiedPins` onto the served twin on a hub that does.
+    grantPins: {
+      'appointments.appointments.cancel': { channel: 'customer' },
+      // Not covered by the module's own sidecar even after hub#1654: `appointment-from-whatsapp.grants.json`
+      // pins cancelling and leaves the move WIDE (whatsapp_inbox#118 is what pins it there). So for
+      // this operation the copy is the only carrier on every hub, new image or old.
+      'appointments.appointments.reschedule': { channel: 'customer' },
+    },
     build: (t) => ({
       schema_version: SCHEMA_VERSION,
       triggers: [
