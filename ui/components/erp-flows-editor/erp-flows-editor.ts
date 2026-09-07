@@ -25,6 +25,10 @@ import {
   emptyDoc,
   missingGrants,
   mergeGrants,
+  canPinPayload,
+  pinRows,
+  readPinRows,
+  setGrantPin,
   moveStep,
   partsToTemplate,
   partsToValue,
@@ -129,6 +133,15 @@ function guardRows(when: Condition | undefined): GuardRow[] {
  * and a module may not fetch the hub's REST on its own; a role a module declares is still typed.
  */
 const BASE_ROLES = ['admin', 'manager', 'employee'] as const;
+
+/**
+ * A grant as ONE string, for the DOM and for the maps that remember which limits are open.
+ *
+ * The same `"<kind> <value>"` shape {@link grantsForStep} speaks, and the same identity the hub
+ * uses (`ux_flow_grant_live` is `(hub, flow, kind, value)`): the pin is NOT part of it, so a
+ * command has at most one live grant and one sentence to read on this screen.
+ */
+const grantKey = (g: Grant): string => `${g.kind} ${g.value}`;
 
 function clamp(value: number, min: number, max: number, fallback: number): number {
   if (!Number.isFinite(value)) return fallback;
@@ -614,6 +627,34 @@ export class ErpFlowsEditor extends LitElement {
       min-width: 0;
       overflow-wrap: anywhere;
     }
+    /* One permission and its limits, as a single block: the fold has to read as belonging to the
+       row above it and not as another permission of its own. */
+    .grant-block {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .grant .pinned {
+      font-style: normal;
+      color: var(--ok-text-muted, #6b675c);
+      overflow-wrap: anywhere;
+    }
+    .limits {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      /* Indented under its own permission on a desktop; flush on a phone, where 1.25rem of the
+         390px it has left is a column of text that wraps every other word. */
+      padding: 0 0 0.2rem 0;
+      border-left: 2px solid var(--ok-border, #d7d5cc);
+      margin-left: 0.4rem;
+      padding-left: 0.6rem;
+    }
+    @media (min-width: 560px) {
+      .limits {
+        margin-left: 1.25rem;
+      }
+    }
     .run {
       border: 1px solid var(--ok-border, #d7d5cc);
       border-radius: var(--ok-radius-sm, 10px);
@@ -740,6 +781,17 @@ export class ErpFlowsEditor extends LitElement {
   @state() private openStep: string | null = null;
 
   @state() private grants: Grant[] = [];
+  /**
+   * hub#1623 — which granted actions have their «limits» open, and what the owner has typed there
+   * but not saved yet, keyed by `"<kind> <value>"`.
+   *
+   * The draft is separate from {@link grants} on purpose: changing a limit is, in the hub, a
+   * revocation and a fresh grant, so what is on screen before the save is a PROPOSAL. Painting it
+   * as if it were live would show a containment that is not containing anything yet.
+   */
+  @state() private limitsOpen: string[] = [];
+  @state() private pinDrafts: Record<string, [string, string][]> = {};
+  @state() private savingLimits = '';
 
   @state() private runs: RunRow[] = [];
 
@@ -1035,6 +1087,61 @@ export class ErpFlowsEditor extends LitElement {
     } catch (e) {
       this.error = (e as Error)?.message || this.t('ui.errGeneric');
     }
+  }
+
+  /**
+   * **Writes the limits of ONE granted action** (hub#1623, flows#66).
+   *
+   * `PUT …/grants` is a complete replace, so this sends every grant this flow holds and not just
+   * the one that changed — {@link setGrantPin} is what keeps the other pins on their way through.
+   * What comes back is what the hub really stored, and that is what the screen shows from then on:
+   * changing a limit is a revocation plus a fresh grant on the other side, so the row the owner
+   * was looking at does not survive it and nothing here may pretend it did.
+   */
+  private async saveLimits(grant: Grant): Promise<void> {
+    if (!this.client || !this.flow?.id) return;
+    const k = grantKey(grant);
+    this.error = '';
+    this.notice = '';
+    this.savingLimits = k;
+    try {
+      const next = await this.client.flows.replaceGrants(
+        this.flow.id,
+        setGrantPin(this.grants, grant, readPinRows(this.limitRows(grant))),
+      );
+      this.grants = Array.isArray(next) ? next : [];
+      // The draft goes. Keeping it would leave the boxes showing what was TYPED over a list that
+      // now says what was STORED, and a refusal further down would be invisible between the two.
+      const rest = { ...this.pinDrafts };
+      delete rest[k];
+      this.pinDrafts = rest;
+      this.notice = this.t('ui.grantsSaved');
+    } catch (e) {
+      // The hub's refusals name the field (`flow.invalid_grant_payload`). Replacing that with
+      // «error» would leave a screen that looks saved and a permission that is still wide open.
+      this.error = (e as Error)?.message || this.t('ui.errGeneric');
+    } finally {
+      this.savingLimits = '';
+    }
+  }
+
+  /** The rows the owner is editing, or the stored limit, or one empty pair to start from. */
+  private limitRows(grant: Grant): [string, string][] {
+    const draft = this.pinDrafts[grantKey(grant)];
+    if (draft) return draft;
+    const stored = pinRows(grant);
+    return stored.length ? stored : [['', '']];
+  }
+
+  private setLimitRows(grant: Grant, rows: [string, string][]): void {
+    this.pinDrafts = { ...this.pinDrafts, [grantKey(grant)]: rows };
+  }
+
+  private toggleLimits(grant: Grant): void {
+    const k = grantKey(grant);
+    this.limitsOpen = this.limitsOpen.includes(k)
+      ? this.limitsOpen.filter((x) => x !== k)
+      : [...this.limitsOpen, k];
   }
 
   // ── Editing ─────────────────────────────────────────────────────────────────────────────────
@@ -2335,15 +2442,7 @@ export class ErpFlowsEditor extends LitElement {
           <span class="grow">${g.value}</span>
         </div>`,
       )}
-      ${this.grants.map(
-        (g) => html`<div class="grant">
-          <ok-status-pill tone="success" label=${this.t('ui.grantsGranted')}></ok-status-pill>
-          <span class="grow">${g.kind === 'command' ? g.value : this.t('ui.grantOther', g)}</span>
-          <button type="button" class="icon-btn" @click=${() => void this.revoke(g)}>
-            ${this.t('ui.revoke')}
-          </button>
-        </div>`,
-      )}
+      ${this.grants.map((g) => this.renderGrant(g))}
       ${!missing.length && !this.grants.length
         ? html`<span class="muted">${this.t('ui.grantsNone')}</span>`
         : nothing}
@@ -2352,6 +2451,123 @@ export class ErpFlowsEditor extends LitElement {
             <button type="button" @click=${() => void this.grantAll()}>${this.t('ui.grantAll')}</button>
           </div>`
         : nothing}
+    </div>`;
+  }
+
+  /**
+   * One permission this flow HOLDS, and what it is limited to.
+   *
+   * The limit reads on the row itself, not only inside the fold: an owner who granted «may cancel
+   * appointments AS THE CUSTOMER» has to be able to read that back without opening anything, or
+   * the screen describes a wider permission than the one that was given (hub#1623, flows#66).
+   */
+  private renderGrant(g: Grant) {
+    const k = grantKey(g);
+    const limits = pinRows(g)
+      .map(([field, value]) => `${field} = ${value}`)
+      .join(', ');
+    const open = this.limitsOpen.includes(k);
+    return html`<div class="grant-block" data-grant=${k}>
+      <div class="grant">
+        <ok-status-pill tone="success" label=${this.t('ui.grantsGranted')}></ok-status-pill>
+        <span class="grow"
+          >${g.kind === 'command' ? g.value : this.t('ui.grantOther', g)}${limits
+            ? html` <em class="pinned">${this.t('ui.grantPinned', { limits })}</em>`
+            : nothing}</span
+        >
+        <!-- Only a command grant carries a payload. Offered on any other kind the hub answers
+             flow.invalid_grant_payload — and this endpoint replaces the WHOLE list, so it would
+             not lose that row, it would lose every permission on the screen. -->
+        ${canPinPayload(g.kind)
+          ? html`<button
+              type="button"
+              class="icon-btn"
+              data-act="limits"
+              aria-expanded=${open ? 'true' : 'false'}
+              @click=${() => this.toggleLimits(g)}
+            >
+              ${this.t('ui.grantLimits')}
+            </button>`
+          : nothing}
+        <button type="button" class="icon-btn" data-act="revoke" @click=${() => void this.revoke(g)}>
+          ${this.t('ui.revoke')}
+        </button>
+      </div>
+      ${open ? this.renderLimits(g) : nothing}
+    </div>`;
+  }
+
+  /** The `field = value` pairs a granted action is pinned to — folded away until it is asked for. */
+  private renderLimits(g: Grant) {
+    const k = grantKey(g);
+    const id = k.replace(/[^A-Za-z0-9]+/g, '-');
+    const rows = this.limitRows(g);
+    const saving = this.savingLimits === k;
+    return html`<div class="limits">
+      <span class="hint">${this.t('ui.grantLimitsIntro')}</span>
+      ${rows.length
+        ? nothing
+        : html`<span class="muted">${this.t('ui.grantLimitsNone')}</span>`}
+      ${rows.map(
+        ([field, value], i) => html`<div class="param-row">
+          <div class="field">
+            <label for="pf-${id}-${i}">${this.t('ui.grantLimitField')}</label>
+            <input
+              id="pf-${id}-${i}"
+              data-field="pin-name"
+              type="text"
+              .value=${field}
+              @change=${(e: Event) =>
+                this.setLimitRows(
+                  g,
+                  rows.map((r, j) =>
+                    j === i ? [(e.target as HTMLInputElement).value.trim(), r[1]] : r,
+                  ),
+                )}
+            />
+          </div>
+          <div class="field">
+            <label for="pv-${id}-${i}">${this.t('ui.grantLimitValue')}</label>
+            <input
+              id="pv-${id}-${i}"
+              data-field="pin-value"
+              type="text"
+              .value=${value}
+              @change=${(e: Event) =>
+                this.setLimitRows(
+                  g,
+                  rows.map((r, j) => (j === i ? [r[0], (e.target as HTMLInputElement).value] : r)),
+                )}
+            />
+          </div>
+          <button
+            type="button"
+            class="icon-btn"
+            data-act="remove-limit"
+            aria-label=${this.t('ui.grantLimitRemove', { field: field || this.t('ui.grantLimitField') })}
+            @click=${() => this.setLimitRows(g, rows.filter((_, j) => j !== i))}
+          >
+            ×
+          </button>
+        </div>`,
+      )}
+      <div class="adders" style="margin-left:0">
+        <button
+          type="button"
+          data-act="add-limit"
+          @click=${() => this.setLimitRows(g, [...rows, ['', '']])}
+        >
+          ${this.t('ui.grantLimitAdd')}
+        </button>
+        <button
+          type="button"
+          data-act="save-limits"
+          ?disabled=${saving}
+          @click=${() => void this.saveLimits(g)}
+        >
+          ${saving ? this.t('ui.saving') : this.t('ui.grantLimitsSave')}
+        </button>
+      </div>
     </div>`;
   }
 

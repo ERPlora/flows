@@ -208,6 +208,16 @@ export interface Grant {
   id?: string;
   kind: string;
   value: string;
+  /**
+   * hub#1623 — the payload fields this grant FIXES; absent or `{}` fixes none.
+   *
+   * It is part of what the grant SAYS, not decoration: «may cancel appointments» and «may cancel
+   * appointments as the customer» are different permissions, and only the second one is safe to
+   * hand an automation whose payload a model writes from a stranger's message. Every key named
+   * here is pinned — the call brings that field with that exact value or the hub refuses it with
+   * `flow.grant_payload_denied`, and **omitting it is refused just the same** as contradicting it.
+   */
+  payload?: Record<string, unknown>;
 }
 
 /** One piece of a composed value: typed text, or a field the owner picked. */
@@ -561,9 +571,108 @@ export function mergeGrants(live: Grant[], add: Grant[], revoke: Grant[]): Grant
     const k = key(g);
     if (revoked.has(k) || seen.has(k)) continue;
     seen.add(k);
-    out.push({ kind: g.kind, value: g.value });
+    out.push(withPin(g, grantPin(g)));
   }
   return out;
+}
+
+// ── The values a `command` grant FIXES (hub#1623, flows#66) ───────────────────────────────────
+
+/**
+ * Can a grant of this kind fix payload values?
+ *
+ * `command` and nothing else, because `check_command_grant` is the only gate the hub ever hands a
+ * payload to. A pin anywhere else is refused with `flow.invalid_grant_payload` — and `PUT …/grants`
+ * is all-or-nothing, so one offered on the wrong row would not fail that row: it would lose the
+ * whole screen's worth of permissions.
+ */
+export function canPinPayload(kind: string): boolean {
+  return kind === 'command';
+}
+
+/** The fields this grant fixes, as one shape for every reader: `{}` when it fixes none. */
+export function grantPin(grant: Grant): Record<string, unknown> {
+  const raw = grant.payload;
+  if (!canPinPayload(grant.kind) || !raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return { ...raw };
+}
+
+/** A grant carrying `pin`, with the key OMITTED when it fixes nothing — the pre-hub#1623 shape. */
+function withPin(grant: Grant, pin: Record<string, unknown>): Grant {
+  const kept = canPinPayload(grant.kind) ? pin : {};
+  return Object.keys(kept).length
+    ? { kind: grant.kind, value: grant.value, payload: kept }
+    : { kind: grant.kind, value: grant.value };
+}
+
+/**
+ * The complete list for `PUT …/grants` with ONE grant's pin set to `pin` — every other grant, and
+ * every other pin, exactly as it was.
+ *
+ * `setGrantPin(live, g, {})` removes the limit. Changing a pin is, in the hub, a revocation and a
+ * fresh grant (`replace` does not consider a grant whose pin changed «still wanted»), so the `id`
+ * of the row does not survive this and nothing here may promise that it does.
+ */
+export function setGrantPin(
+  live: Grant[],
+  target: Pick<Grant, 'kind' | 'value'>,
+  pin: Record<string, unknown>,
+): Grant[] {
+  const wanted = key(target as Grant);
+  return live.map((g) => withPin(g, key(g) === wanted ? pin : grantPin(g)));
+}
+
+/**
+ * The typed rows of the screen as the object the hub stores.
+ *
+ * A row with no field name asks for NOTHING — the same rule {@link requiredGrants} applies to a
+ * half-typed step, and for the same reason: a nameless entry would pin nothing at all while
+ * reading on screen as a limit that was given.
+ */
+export function readPinRows(rows: readonly (readonly [string, string])[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [rawField, rawValue] of rows) {
+    const field = rawField.trim();
+    if (!field) continue;
+    out[field] = pinValue(rawValue);
+  }
+  return out;
+}
+
+/** The pin as the rows that produced it, so reopening the screen shows what was written. */
+export function pinRows(grant: Grant): [string, string][] {
+  return Object.entries(grantPin(grant)).map(([field, value]) => [field, pinText(value)]);
+}
+
+/**
+ * One typed value, read with **the same literal rule as a step parameter** ({@link partsToValue}):
+ * `007` is a postcode, `7` is the number a command's schema asks for. Same rule on purpose — the
+ * box looks the same to the owner, so it had better behave the same.
+ *
+ * The one addition is JSON, and only for a value that opens as an object or an array. A pin set
+ * through the API can hold either, and reading it back as the STRING `[object Object]` would not
+ * merely lose it: the grant would go on saying it fixes that field, matching nothing, so an owner
+ * who edited an unrelated row would silently break their own containment.
+ */
+function pinValue(text: string): unknown {
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch {
+      // Not JSON after all — a literal that happens to start with a brace. Falls through to the
+      // same rule every other value gets rather than refusing what the owner typed.
+    }
+  }
+  return scalar(text);
+}
+
+/** The inverse of {@link pinValue}: what to put in the box for a stored value. */
+function pinText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') return JSON.stringify(value);
+  return String(value);
 }
 
 /**
