@@ -4,6 +4,8 @@ import { ErpFlowsGallery } from './erp-flows-gallery';
 import { schemaFacts } from '../../lib/ai-draft';
 import { TEMPLATES } from '../../lib/templates';
 import { moduleTemplateId } from '../../lib/module-templates';
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import en from '../../../locales/en.json';
 
 /**
@@ -225,5 +227,122 @@ describe('a hub that cannot serve them still has a gallery (flows#98)', () => {
     expect(text(el)).not.toContain(t('ui.tplModulesOldCore'));
     expect(text(el)).not.toContain(t('ui.tplModulesUnavailable'));
     expect(el.renderRoot.querySelector('[data-module]')).toBeFalsy();
+  });
+});
+
+/**
+ * **The real recipe `whatsapp_inbox` publishes, all the way to the screen** (flows#98).
+ *
+ * Everything above builds its own rows, so all it proves is that the gallery reads the SHAPE this
+ * module expects. This reads the four families the neighbouring module actually publishes on its
+ * `origin/main`, assembles them exactly as `list_templates` serves them
+ * (`crates/server/src/flows_api.rs`: `module`, `family`, `documents`, `grants`, `requires`) and
+ * puts them through the real component — which is the only way to find out that a document written
+ * by somebody else survives `readDoc`, has a name in both languages and paints a card.
+ *
+ * **Reads a REF, never a working tree**: the fleet keeps a dozen `whatsapp_inbox-*` worktrees
+ * beside this module and any of them may be mid-edit. Where there is no canonical checkout at all
+ * — CI, until module-toolkit#211 brings the source repo to the runner — this skips, and says so.
+ */
+const SOURCE_MODULE = 'whatsapp_inbox';
+
+function publishedRows(): Record<string, unknown>[] | null {
+  const canonical = resolve(__dirname, '../../../..', SOURCE_MODULE);
+  const run = (...args: string[]): string | null => {
+    try {
+      return execFileSync('git', ['-C', canonical, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch {
+      return null;
+    }
+  };
+  const listing = run('ls-tree', '--name-only', 'refs/remotes/origin/main', 'flows/');
+  if (!listing) return null;
+  const families = listing
+    .split('\n')
+    .filter((f) => f.endsWith('.en.flow.json'))
+    .map((f) => f.replace('flows/', '').replace('.en.flow.json', ''));
+  if (!families.length) return null;
+  const read = (path: string): unknown => {
+    const raw = run('show', `refs/remotes/origin/main:${path}`);
+    return raw ? JSON.parse(raw) : undefined;
+  };
+  return families.map((family) => {
+    const documents: Record<string, unknown> = {};
+    for (const lang of ['en', 'es']) {
+      const doc = read(`flows/${family}.${lang}.flow.json`);
+      if (doc) documents[lang] = doc;
+    }
+    const grants = read(`flows/${family}.grants.json`) as { grants?: unknown } | undefined;
+    return {
+      module: SOURCE_MODULE,
+      family,
+      documents,
+      grants: grants?.grants ?? [],
+      requires: (read(`flows/${family}.requires.json`) as { modules?: unknown })?.modules ?? {},
+    };
+  });
+}
+
+const PUBLISHED = publishedRows();
+
+describe('the recipes whatsapp_inbox really publishes reach the gallery (flows#98)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+    window.history.replaceState({}, '', '/');
+  });
+
+  it.skipIf(!PUBLISHED)(
+    'paints every family the module publishes, with its own name and its own steps',
+    async () => {
+      const rows = PUBLISHED!;
+      const el = await mount(hub({ rows }));
+      expect(rows.length, 'the neighbour publishes nothing — this test proved nothing').toBeGreaterThan(0);
+      for (const r of rows) {
+        const id = moduleTemplateId(SOURCE_MODULE, r.family as string);
+        const painted = card(el, id);
+        expect(painted, `${r.family} is published by the module and is not on the screen`).toBeTruthy();
+        // Its own title, written by the module — never an i18n key of ours, never blank.
+        const name = (r.documents as Record<string, { name?: string }>).en?.name ?? '';
+        expect(name, `${r.family} has no name in English`).toBeTruthy();
+        expect(painted?.textContent).toContain(name);
+      }
+      // All of them under the app they came with, in one section.
+      const section = el.renderRoot.querySelector('[data-module="whatsapp_inbox"]');
+      expect(section?.querySelectorAll('.card').length).toBe(rows.length);
+    },
+  );
+
+  it.skipIf(!PUBLISHED)('retires every hand copy the module now serves itself', async () => {
+    const el = await mount(hub({ rows: PUBLISHED! }));
+    const copies = TEMPLATES.filter((tpl) => tpl.mirrors);
+    expect(copies.length, 'no hand copies to retire — the premise of flows#98 is gone').toBeGreaterThan(0);
+    for (const copy of copies) {
+      expect(card(el, copy.id), `${copy.id} is still on screen beside the recipe it copies`).toBeFalsy();
+    }
+  });
+
+  it.skipIf(!PUBLISHED)('installs the module’s real document, in Spanish for a Spanish hub', async () => {
+    const family = 'appointment-from-whatsapp';
+    const row = PUBLISHED!.find((r) => r.family === family);
+    expect(row, `${family} is not published any more`).toBeTruthy();
+    const client = hub({ rows: [row!] });
+    (client as { locale?: string }).locale = 'es';
+    const el = await mount(client);
+    const id = moduleTemplateId(SOURCE_MODULE, family);
+    el.open(id);
+    await el.updateComplete;
+    await el.use();
+    const created = (client.flows.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+      name: string;
+      enabled: boolean;
+      definition: Record<string, unknown>;
+    };
+    const published = (row!.documents as Record<string, { name: string }>).es;
+    expect(created.name).toBe(published.name);
+    expect(created.enabled).toBe(false);
+    expect(created.definition).toEqual(published);
   });
 });
