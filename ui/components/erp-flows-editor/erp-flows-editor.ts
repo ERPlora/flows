@@ -906,12 +906,33 @@ export class ErpFlowsEditor extends LitElement {
 
   private pickerFor: ErpFlowsValue | null = null;
 
+  /**
+   * **What each step's message looked like before it was switched to plain text** (flows#95).
+   *
+   * Not state that paints anything, and not part of the document either: the hub refuses a step
+   * carrying the copy AND the options, and its parser refuses a step key it does not know, so
+   * there is nowhere in the flow to park it. It lives here for as long as the owner has this
+   * editor open — which is exactly as long as «me lo pienso y lo devuelvo» lasts. Cleared with the
+   * flow, because `n` is the id every one-step automation gets and a memory that outlived the flow
+   * would hand one automation's message to the next.
+   */
+  private tapMemory = new Map<string, Record<string, unknown>>();
+
+  /** Keeps this step's message before an edit that has to take it off the document. */
+  private rememberTaps(step: Step): void {
+    const had = step.interactive;
+    if (had && typeof had === 'object' && !Array.isArray(had)) {
+      this.tapMemory.set(step.id, had as Record<string, unknown>);
+    }
+  }
+
   /** `event` inside the trigger's own filter, `input` everywhere downstream. */
   @state() private pickerRoot: 'input' | 'event' = 'input';
 
   willUpdate(changed: Map<string, unknown>): void {
     if (changed.has('flow')) {
       this.document = this.flow ? readDoc(this.flow.definition) : emptyDoc();
+      this.tapMemory.clear();
       this.name = this.flow?.name ?? '';
       // `?? false` is the whole of flows#39: a flow that does not exist yet is born OFF, and the
       // switch is the owner's explicit yes rather than a state the new automation inherited.
@@ -2100,7 +2121,9 @@ export class ErpFlowsEditor extends LitElement {
             // An email has nothing to tap, and the options left behind would be invisible on the
             // email panel — right up to the save that refuses the whole document. Through
             // setTapMode, so the message she wrote lands in the copy box instead of vanishing
-            // into a panel that shows an empty one (flows#90).
+            // into a panel that shows an empty one (flows#90) — and remembering it first, because
+            // this door loses the options exactly like the mode one does (flows#95).
+            if (channel !== 'whatsapp') this.rememberTaps(step);
             this.setDoc(channel === 'whatsapp' ? next : setTapMode(next, index, false));
           }}
         >
@@ -2156,7 +2179,8 @@ export class ErpFlowsEditor extends LitElement {
                 // messages and one send, and the hub answers conflicting_message_type for a step
                 // that carries both. The swap has to be one edit — and it carries the sentence
                 // across, because there is no undo on this screen (flows#90).
-                this.setDoc(setTapMode(this.document, index, wants));
+                if (!wants) this.rememberTaps(step);
+                this.setDoc(setTapMode(this.document, index, wants, this.tapMemory.get(step.id)));
               }}
             >
               ${option('text', this.t('ui.notifyModeText'), taps ? 'options' : 'text')}

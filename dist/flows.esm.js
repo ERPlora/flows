@@ -2985,19 +2985,22 @@ function setTapOptions(doc, index, options) {
   const interactive = toInteractive(options, obj(doc.steps[index]?.interactive));
   return removeStepKeys(patchStep(doc, index, { interactive }), index, ["template", "vars"]);
 }
-function setTapMode(doc, index, wants) {
+function setTapMode(doc, index, wants, remembered) {
   const step = doc.steps[index];
   if (!step) return doc;
-  if (wants) {
-    return setTapOptions(doc, index, {
-      ...blankTapOptions("button"),
-      body: copy(obj(step.vars)?.text)
-    });
+  if (!wants) {
+    const off = setTapOptions(doc, index, null);
+    const body = readTapOptions(step)?.body;
+    if (!textOf(body)) return off;
+    return patchStep(off, index, { vars: { ...obj(step.vars) ?? {}, text: body } });
   }
-  const off = setTapOptions(doc, index, null);
-  const body = readTapOptions(step)?.body;
-  if (!textOf(body)) return off;
-  return patchStep(off, index, { vars: { ...obj(step.vars) ?? {}, text: body } });
+  const back = obj(remembered);
+  const restored = back ? patchStep(doc, index, { interactive: back }) : doc;
+  const had = readTapOptions(restored.steps[index]);
+  return setTapOptions(restored, index, {
+    ...had ?? blankTapOptions("button"),
+    body: copy(obj(step.vars)?.text)
+  });
 }
 
 // ui/lib/trigger-catalog.ts
@@ -3859,6 +3862,17 @@ var ErpFlowsEditor = class extends i3 {
     this.saving = false;
     this.pickerOpen = false;
     this.pickerFor = null;
+    /**
+     * **What each step's message looked like before it was switched to plain text** (flows#95).
+     *
+     * Not state that paints anything, and not part of the document either: the hub refuses a step
+     * carrying the copy AND the options, and its parser refuses a step key it does not know, so
+     * there is nowhere in the flow to park it. It lives here for as long as the owner has this
+     * editor open — which is exactly as long as «me lo pienso y lo devuelvo» lasts. Cleared with the
+     * flow, because `n` is the id every one-step automation gets and a memory that outlived the flow
+     * would hand one automation's message to the next.
+     */
+    this.tapMemory = /* @__PURE__ */ new Map();
     this.pickerRoot = "input";
     /** The words a pill shows: `input.customer.name` → «Customer › Name». */
     this.fieldLabel = (path) => fieldPhrase(path.replace(/^(input|event|steps)\./, ""), this.t);
@@ -4401,9 +4415,17 @@ var ErpFlowsEditor = class extends i3 {
     }
   `;
   }
+  /** Keeps this step's message before an edit that has to take it off the document. */
+  rememberTaps(step) {
+    const had = step.interactive;
+    if (had && typeof had === "object" && !Array.isArray(had)) {
+      this.tapMemory.set(step.id, had);
+    }
+  }
   willUpdate(changed) {
     if (changed.has("flow")) {
       this.document = this.flow ? readDoc(this.flow.definition) : emptyDoc();
+      this.tapMemory.clear();
       this.name = this.flow?.name ?? "";
       this.enabled = this.flow?.enabled ?? false;
       this.error = "";
@@ -5431,6 +5453,7 @@ var ErpFlowsEditor = class extends i3 {
           @change=${(e4) => {
       const channel = e4.target.value;
       const next = patchStep(this.document, index, { channel });
+      if (channel !== "whatsapp") this.rememberTaps(step);
       this.setDoc(channel === "whatsapp" ? next : setTapMode(next, index, false));
     }}
         >
@@ -5479,7 +5502,8 @@ var ErpFlowsEditor = class extends i3 {
               .value=${taps ? "options" : "text"}
               @change=${(e4) => {
       const wants = e4.target.value === "options";
-      this.setDoc(setTapMode(this.document, index, wants));
+      if (!wants) this.rememberTaps(step);
+      this.setDoc(setTapMode(this.document, index, wants, this.tapMemory.get(step.id)));
     }}
             >
               ${option("text", this.t("ui.notifyModeText"), taps ? "options" : "text")}
