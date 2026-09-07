@@ -245,6 +245,38 @@ describe('what the badge costs, and what happens when the hub will not answer', 
     expect(cardEl?.getAttribute('data-installed'), 'a read permission is not the automation').toBe('unfinished');
   });
 
+  it('reads a command it cannot use as «Unfinished», not as an automation that is not there', async () => {
+    // The whole answer is one command row whose `value` is not a name, so the flow holds nothing it
+    // can actually run. «Unfinished» is the honest word — it listens and does nothing — and the
+    // difference matters: «absent» would put «Use this one» back on the card and buy the owner the
+    // second automation this issue exists to prevent.
+    const client = hub([installedFlow()], {
+      flows: {
+        list: vi.fn(async () => [installedFlow()]),
+        grants: vi.fn(async () => [{ kind: 'command', value: 42 }]),
+      },
+    });
+    const el = await mount(client);
+    const cardEl = card(el, 'no-show-followup');
+    expect(cardEl?.querySelector('ok-status-pill')?.getAttribute('label')).toBe(t('ui.tplUnfinished'));
+    expect(cardEl?.getAttribute('data-installed')).toBe('unfinished');
+  });
+
+  it('leaves the card alone when the hub answers grants with something that is not a list', async () => {
+    // «Not asked» is the fallback, never a claim. A card badged «Unfinished» off an unreadable
+    // answer would tell the owner they left something half-built that they never started.
+    const client = hub([installedFlow()], {
+      flows: {
+        list: vi.fn(async () => [installedFlow()]),
+        grants: vi.fn(async () => null),
+      },
+    });
+    const el = await mount(client);
+    const cardEl = card(el, 'no-show-followup');
+    expect(cardEl?.querySelector('ok-status-pill')).toBeNull();
+    expect(cardEl?.getAttribute('data-installed')).toBeNull();
+  });
+
   it('shows the gallery unbadged when the hub refuses to hand over grants', async () => {
     const client = hub([installedFlow()], {
       flows: {
