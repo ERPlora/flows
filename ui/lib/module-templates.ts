@@ -21,7 +21,7 @@
  * - **Grant anything.** `grants` is what the recipe **will ask for**, shown to the owner so they
  *   allow it. Like every card here, it is created paused and holding nothing (§9.3).
  */
-import { readDoc } from './flow-doc';
+import { grantPin, readDoc } from './flow-doc';
 import type { FlowDoc, Grant, Step } from './flow-doc';
 import type { FlowTemplate, TemplateNeed } from './templates';
 
@@ -75,6 +75,15 @@ function documentFor(documents: Record<string, unknown>, locale: string): unknow
  * A row that is not `{kind, value}` costs itself and nothing else: an unreadable permission must
  * not take the card down with it, and it must not be shown as a permission either — a blank row on
  * the «what it will ask you to allow» list is the one thing that list cannot afford.
+ *
+ * **`payload` is read when the hub sends it** (hub#1623/#1654). A `<family>.grants.json` may FIX
+ * payload fields on a `command` — `whatsapp_inbox` fixes `channel: "customer"` on
+ * `appointments.appointments.cancel` so a recipe that books unattended cannot cancel a stranger's
+ * hour on the salon's behalf. Today `FlowTemplateGrant` is `{kind, value}` and the limit never
+ * leaves the hub, so this reads nothing and {@link mergeTemplates} carries the retired copy's pin
+ * instead; reading it here is what makes the pin arrive on its own the day hub#1654 lands, with no
+ * second release of this module. A pin on a kind the hub never hands a payload to fixes nothing
+ * ({@link canPinPayload}) and is dropped rather than shown as a limit that holds.
  */
 function declaredGrants(raw: unknown): Grant[] {
   if (!Array.isArray(raw)) return [];
@@ -83,7 +92,9 @@ function declaredGrants(raw: unknown): Grant[] {
     if (!row || typeof row !== 'object') continue;
     const kind = text((row as Grant).kind);
     const value = text((row as Grant).value);
-    if (kind && value) out.push({ kind, value });
+    if (!kind || !value) continue;
+    const pin = grantPin({ kind, value, payload: (row as Grant).payload });
+    out.push(Object.keys(pin).length ? { kind, value, payload: pin } : { kind, value });
   }
   return out;
 }

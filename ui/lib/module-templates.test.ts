@@ -259,3 +259,91 @@ describe('the gallery catalogue, once the hub brings the modules’ own recipes'
     expect(facts.interactiveNotify).toBe(false);
   });
 });
+
+/**
+ * **The limit a recipe carries has to survive the trip through the hub** (flows#98, hub#1654).
+ *
+ * A `<family>.grants.json` may fix payload fields on a `command` grant — `whatsapp_inbox` fixes
+ * `channel: "customer"` on `appointments.appointments.cancel` so an automation that books without
+ * anybody looking cannot cancel a stranger's hour *on the salon's behalf*. Today that limit does
+ * NOT come out of the door: `FlowTemplateGrant` is `{kind, value}` and serde drops the rest, so a
+ * served card asks for the WIDE permission while the hand copy it replaces asked for the narrow
+ * one. Retiring the copy without carrying its pin would hand the owner a permission nobody
+ * widened on purpose, with every test in this file green.
+ */
+describe('the payload limits a served recipe asks with', () => {
+  it('keeps the pin the hub serves on a command grant — the day hub#1654 lands', () => {
+    const [card] = moduleTemplates(
+      [
+        row({
+          grants: [
+            { kind: 'command', value: 'appointments.appointments.cancel', payload: { channel: 'customer' } },
+          ],
+        }),
+      ],
+      'en',
+    );
+    expect(templateGrants(card, t)).toEqual([
+      { kind: 'command', value: 'appointments.appointments.cancel', payload: { channel: 'customer' } },
+    ]);
+  });
+
+  it('drops a pin offered on a kind the hub never hands a payload to', () => {
+    const [card] = moduleTemplates(
+      [row({ grants: [{ kind: 'query', value: 'customers.list', payload: { channel: 'customer' } }] })],
+      'en',
+    );
+    expect(templateGrants(card, t)).toEqual([{ kind: 'query', value: 'customers.list' }]);
+  });
+
+  it('asks with the retired copy’s limit while the door cannot carry it', () => {
+    const mirror = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment-unattended')!;
+    // The copy this test stands on really does contain the limit — otherwise it proves nothing.
+    expect(mirror.grantPins?.['appointments.appointments.cancel']).toEqual({ channel: 'customer' });
+    const served = moduleTemplates(
+      [
+        row({
+          ...mirror.mirrors,
+          // Exactly what the hub serves TODAY from that sidecar: the pin already stripped.
+          grants: [
+            { kind: 'command', value: 'appointments.appointments.cancel' },
+            { kind: 'command', value: 'appointments.appointments.create' },
+          ],
+        }),
+      ],
+      'en',
+    );
+    const merged = mergeTemplates(TEMPLATES, served);
+    const card = merged.cards.find((c) => c.id === served[0].id)!;
+    const cancel = templateGrants(card, t).find((g) => g.value === 'appointments.appointments.cancel');
+    expect(cancel?.payload).toEqual({ channel: 'customer' });
+    // And only that one: a pin is not spread over the rest of the list.
+    expect(
+      templateGrants(card, t).find((g) => g.value === 'appointments.appointments.create')?.payload,
+    ).toBeUndefined();
+  });
+
+  it('lets the module’s own pin win over the copy’s', () => {
+    const mirror = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment-unattended')!;
+    const served = moduleTemplates(
+      [
+        row({
+          ...mirror.mirrors,
+          grants: [
+            { kind: 'command', value: 'appointments.appointments.cancel', payload: { channel: 'staff' } },
+          ],
+        }),
+      ],
+      'en',
+    );
+    const merged = mergeTemplates(TEMPLATES, served);
+    const card = merged.cards.find((c) => c.id === served[0].id)!;
+    expect(templateGrants(card, t)[0]?.payload).toEqual({ channel: 'staff' });
+  });
+
+  it('leaves a served card with no copy behind it exactly as the hub served it', () => {
+    const served = moduleTemplates([row({ grants: [{ kind: 'command', value: 'customers.create' }] })], 'en');
+    const card = mergeTemplates(TEMPLATES, served).cards.find((c) => c.id === served[0].id)!;
+    expect(templateGrants(card, t)).toEqual([{ kind: 'command', value: 'customers.create' }]);
+  });
+});

@@ -28,7 +28,7 @@
  * honest place for them.
  */
 import type { FlowDoc, Grant, Step } from './flow-doc';
-import { requiredGrants, setGrantPin } from './flow-doc';
+import { grantPin, requiredGrants, setGrantPin } from './flow-doc';
 import type { Translator } from './plain-language';
 import type { SchemaFacts } from './ai-draft';
 import { schemaFacts } from './ai-draft';
@@ -1874,12 +1874,46 @@ export interface MergedCatalogue {
   aliases: Record<string, string>;
 }
 
+/**
+ * The served card asking with the limits the copy it replaces asked with (flows#98, hub#1654).
+ *
+ * 🔴 A pin is a **containment**, and this is the one place it can be lost without anybody noticing.
+ * `whatsapp_inbox` fixes `channel: "customer"` on `appointments.appointments.cancel` in its
+ * `<family>.grants.json`, but the hub's `FlowTemplateGrant` is `{kind, value}`: serde drops the
+ * `payload` and `GET /api/hub/flows/templates` serves the permission WIDE. Retiring the hand copy
+ * for the served card therefore swaps a recipe that may cancel *as the customer* for one that may
+ * cancel *as the salon* — no ownership check, no notice period — and every test stays green,
+ * because nothing here was ever wrong about the document.
+ *
+ * So the copy's pins are carried over. Two rules, both narrow on purpose:
+ *
+ * - **Only where the served grant fixes nothing itself.** The module is the owner of its own
+ *   limits; the day hub#1654 lets them through, the module's pin wins and this becomes a no-op.
+ * - **Only onto a grant the served card actually asks for.** A pin naming a command the recipe no
+ *   longer runs lands on nothing, exactly as it does in {@link templateGrants}.
+ *
+ * A copy can go stale, and a stale pin here can only make the automation refuse a call
+ * (`flow.grant_payload_denied`) — never allow one. Dropping the pin fails the other way.
+ */
+function withCopiedPins(served: FlowTemplate, copy: FlowTemplate): FlowTemplate {
+  const pins = Object.entries(copy.grantPins ?? {});
+  if (!pins.length || !served.grants) return served;
+  let grants: Grant[] = served.grants.map((grant) => ({ ...grant }));
+  for (const [command, pin] of pins) {
+    const current = grants.find((grant) => grant.kind === 'command' && grant.value === command);
+    if (!current || Object.keys(grantPin(current)).length) continue;
+    grants = setGrantPin(grants, { kind: 'command', value: command }, pin);
+  }
+  return { ...served, grants };
+}
+
 export function mergeTemplates(
   local: readonly FlowTemplate[],
   fromModules: readonly FlowTemplate[],
 ): MergedCatalogue {
   const aliases: Record<string, string> = {};
   const retired = new Set<string>();
+  const inherited = new Map<string, FlowTemplate>();
   for (const served of fromModules) {
     if (!served.source) continue;
     for (const tpl of local) {
@@ -1887,7 +1921,14 @@ export function mergeTemplates(
       if (tpl.mirrors.family !== served.source.family) continue;
       retired.add(tpl.id);
       aliases[tpl.id] = served.id;
+      inherited.set(served.id, withCopiedPins(inherited.get(served.id) ?? served, tpl));
     }
   }
-  return { cards: [...local.filter((tpl) => !retired.has(tpl.id)), ...fromModules], aliases };
+  return {
+    cards: [
+      ...local.filter((tpl) => !retired.has(tpl.id)),
+      ...fromModules.map((served) => inherited.get(served.id) ?? served),
+    ],
+    aliases,
+  };
 }
