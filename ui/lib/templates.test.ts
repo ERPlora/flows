@@ -439,15 +439,21 @@ const SOURCES: readonly MirrorSource[] = [
     // and the two digests below did not move — the documents are the same, only the commit that
     // carries them is new. The source could only merge once hub#1622 was in `develop`: an `ai`
     // step carrying `on_reject` is refused whole (`flow.invalid_definition`) by any hub without it.
-    commit: '5936a9b0d7d790358b1bc905f8cb1514ac0809c6',
+    //
+    // Moved again by whatsapp_inbox#90 (squashed as `c4b5368`), and this time the digests DID
+    // move: the trigger grew two clauses so the automation stops answering the owner's own echo
+    // and the 180 days of backlog Meta hands over on connection. This is the other half of the
+    // drill — the neighbour test above went red on the digests, not the pin, because the source
+    // documents changed rather than merely moving commit.
+    commit: 'c4b536808ce74171ba6c39b3f52d89b663c310e6',
     files: {
       en: 'flows/appointment-from-whatsapp.en.flow.json',
       es: 'flows/appointment-from-whatsapp.es.flow.json',
       grants: 'flows/appointment-from-whatsapp.grants.json',
     },
     digest: {
-      en: 'ce57190392703d67a5b077b488a0c18715fe5597288adfd29a445af54afdc508',
-      es: '54b3ffd771bfd0da8a0d8ee86f046ecc51b8e5364aa901f8b11e0b24df1bde24',
+      en: '48c6b243aa25f1f87728ed69de0a126167d382e98cacdfd99805f461a9188902',
+      es: '7c153ee52ae96fff2da5d1ad7390dbbf335218c8b7a00ef7c1b62b67a89e6ab4',
     },
   },
   {
@@ -462,15 +468,19 @@ const SOURCES: readonly MirrorSource[] = [
     // Re-pinned from the branch head to the squash the day wi#77 landed, which is the drill the
     // last test of this file enforces: it went red naming this very sha, and the two digests below
     // did not move — the documents are the same, only the commit that carries them is new.
-    commit: 'a44a3f18923d6654a59feaec7b856f63b64a742b',
+    //
+    // Moved again by whatsapp_inbox#90 (`c4b5368`), with the digests: this family books without
+    // asking anybody, so the echo and the backlog it used to answer went straight into the diary
+    // as appointments. Its trigger now carries the same two clauses as the twin's.
+    commit: 'c4b536808ce74171ba6c39b3f52d89b663c310e6',
     files: {
       en: 'flows/appointment-from-whatsapp-unattended.en.flow.json',
       es: 'flows/appointment-from-whatsapp-unattended.es.flow.json',
       grants: 'flows/appointment-from-whatsapp-unattended.grants.json',
     },
     digest: {
-      en: '260623dea8602894db61df1124b28bf30f9c8ecafbfb2c07d1269a7980c9cf04',
-      es: '06b9deb64378e9dfed91588a29351b8a3d07bed0173e562d789379675ce3c76e',
+      en: '49dd54fd210f82c07beca738bc027691e5ba0c0292dd09a62a9f9d7fdff02ed5',
+      es: '3364e4c5724589993e5518a6f6fde4e4be4d112856bba08996c0f8514f900806',
     },
   },
 ] as const;
@@ -546,15 +556,32 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
     expect(template, 'no `whatsapp-appointment` template in the catalogue').toBeTruthy();
   });
 
-  it('starts on the message the CORE delivers, and ignores a message with no text', () => {
+  it('starts on what a customer wrote just now — not the owner’s echo, not the backlog', () => {
     const trigger = buildTemplate(template!, t).triggers[0];
     // `hub.whatsapp.message_received` is the runtime's own event (`crates/server/src/inbound_poll.rs`),
     // which is what the module's published template waits for. An empty body is a sticker or an
     // image: there is nothing for a model to read, and answering it costs money.
+    //
+    // The other two clauses are whatsapp_inbox#90. The poller asks for `?direction=all&source=all`,
+    // so the same event also carries what the OWNER writes from her own WhatsApp Business app
+    // (echoed back, it had the salon confirming an appointment to itself) and the 180 days of
+    // history Meta delivers when the number is first connected (everyone who wrote in March got
+    // confirmed today). Pinned whole and not clause by clause on purpose: this is the shape the
+    // module publishes, and the digests further down hash the same document — a clause dropped
+    // here is a clause the gallery would install without it.
+    //
+    // `neq` rather than `eq`/`in`: `direction` and `source` only exist on the event from hub#1621,
+    // which no published hub tag carries, and in the kernel an absent path is `null`, so the
+    // affirmative form matches nothing at all on a hub at the module's declared floor — silently.
+    // whatsapp_inbox#95 flips both the day that floor rises.
     expect(trigger).toEqual({
       kind: 'event',
       event: 'hub.whatsapp.message_received',
-      filter: { 'event.text': { neq: '' } },
+      filter: {
+        'event.text': { neq: '' },
+        'event.direction': { neq: 'outbound' },
+        'event.source': { neq: 'history' },
+      },
       input: {
         from: 'event.from',
         text: 'event.text',
