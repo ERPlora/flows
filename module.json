@@ -49,6 +49,14 @@
     "flows.drafts.list": {
       "permission": "flows.view_flow",
       "sql": "queries/drafts_list.sql"
+    },
+    "flows.automations.status": {
+      "permission": "flows.view_flow",
+      "sql": "queries/automations_status.sql",
+      "schema": "schemas/automations_status.json",
+      "ai": {
+        "description": "Counts this hub's automations that listen to a given event AND are allowed to run a given command: `total` set up, `enabled` of those switched on, and `unfinished` that listen but were never granted the command. Read-only, three integers, no names or documents — it answers «is this already set up here?» for a module offering a shortcut into Automations."
+      }
     }
   },
   "commands": {
