@@ -1331,12 +1331,14 @@ function carriesSeededSteps(
  * in the editor can quietly rewrite.
  *
  * A card that comes round on a SCHEDULE cannot be matched that way, and — this is the part that bit
- * — it cannot be matched on the schedule either. The editor's only control for a cron is an
- * `<input type="time">`: `readDailyCron('0 18 * * 5')` is `null`, so the box is drawn EMPTY, and its
- * `@change` writes `dailyCron(…)`, which is always `M H * * *`. One touch of the box the card's own
- * blank invites her to touch — «The day and the time» — flattens the weekly review into a daily one.
+ * — it cannot be matched on the schedule either. The schedule is the one thing the card openly
+ * invites her to change: its own blank reads «The day and the time», so an owner who moves the
+ * weekly review to Thursday at 17:00 is using the card as intended, not editing around it.
  * Identifying by the schedule therefore lost the badge for exactly that owner AND gave her flow to
- * the morning card, which is daily and also creates a task.
+ * the morning card, which is daily and also creates a task. Until flows#77 the editor made it
+ * worse — one touch of the time box rewrote «every Friday at 18:00» as a daily line — and that is
+ * fixed (the box keeps the day now), but the hubs that already ran the old editor still hold the
+ * flattened flows it wrote.
  *
  * So the schedule is only the coarse filter — «does it come round on a clock we can read» — and what
  * tells the two calendar cards apart is what the card SEEDED into them: the task each one writes and
@@ -1448,8 +1450,8 @@ export interface InstalledFlowFacts {
  * flow on this event with a command of its own is a different automation the business finished.
  *
  * **A card that comes round on a schedule is recognised too** (flows#68), but NOT by its schedule:
- * the editor flattens «every Friday at 18:00» into a daily line the first time the owner touches the
- * time box. It is recognised by what the card seeded into it — see {@link isCandidateFor}. A trigger
+ * the day and the hour are precisely what the card asks the owner to set. It is recognised by what
+ * the card seeded into it — see {@link isCandidateFor}. A trigger
  * that is neither an event nor a schedule we can read still answers `absent`: a wrong badge is worse
  * than none.
  */
