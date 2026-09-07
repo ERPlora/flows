@@ -7182,6 +7182,35 @@ var TEMPLATES = [
       "appointments.appointments.cancel": "tpl.grant.appointmentsCancel",
       "appointments.appointments.reschedule": "tpl.grant.appointmentsReschedule"
     },
+    // 🔴 The two permissions on this card that are NOT allowed to be as wide as their names
+    // (flows#99, whatsapp_inbox#107). Its source half is already pinned: `whatsapp_inbox` fixes
+    // `channel: "customer"` on cancelling since whatsapp_inbox#117.
+    //
+    // **The tray is not a permission boundary.** It is a workflow control, and the two answer
+    // different questions: the tray asks «should we do this», the grant asks «may we». What waits
+    // there is a draft written FOR THE CUSTOMER — «I have cancelled your Thursday» — not the call
+    // underneath it, so the person approving reads a sentence and authorises an operation they were
+    // never shown. `propose_appointment` runs `manual`, but the payload it proposes is still
+    // written by a model reading a stranger's WhatsApp.
+    //
+    // Both commands default `channel` to `staff`, and on that channel neither checks whose
+    // appointment it is: cancelling also skips the notice period and `allow_customer_cancellation`.
+    // Pinned to `customer`, `customer_identity_refusal` compares the appointment's own
+    // `customer_id` with the one the flow resolved from the phone the message came from
+    // (`find_customer`), and the salon's own rules apply — which is what the sentence on the card
+    // has been promising all along.
+    //
+    // Pinned HERE and not only in the module because while hub#1654 is open the sidecar's `payload`
+    // never leaves the hub: `FlowTemplateGrant` is `{kind, value}` and serde drops the rest. This
+    // copy is what the gallery installs — as the card itself on a hub that serves nothing, and
+    // through `withCopiedPins` onto the served twin on a hub that does.
+    grantPins: {
+      "appointments.appointments.cancel": { channel: "customer" },
+      // Not covered by the module's own sidecar even after hub#1654: `appointment-from-whatsapp.grants.json`
+      // pins cancelling and leaves the move WIDE (whatsapp_inbox#118 is what pins it there). So for
+      // this operation the copy is the only carrier on every hub, new image or old.
+      "appointments.appointments.reschedule": { channel: "customer" }
+    },
     build: (t3) => ({
       schema_version: SCHEMA_VERSION2,
       triggers: [
@@ -10992,8 +11021,8 @@ var es_default = {
       availabilityCheck: "Comprobar que el hueco sigue libre antes de proponerlo.",
       appointmentsCreate: "Reservar la cita. Espera en la bandeja hasta que t\xFA la apruebes.",
       appointmentsListForCustomer: "Leer las citas que ya tiene una clienta, para anular o mover la correcta y no adivinar nunca.",
-      appointmentsCancel: "Anular una cita cuando la clienta lo pide. Espera en la bandeja hasta que la apruebes, y tus propias reglas de anulaci\xF3n siguen mandando.",
-      appointmentsReschedule: "Cambiar una cita de hora cuando la clienta lo pide. Espera en la bandeja hasta que la apruebes, y tus propias reglas de antelaci\xF3n siguen mandando.",
+      appointmentsCancel: "Anular una cita cuando la clienta lo pide, y siempre como esa clienta: la cita tiene que ser suya. Espera en la bandeja hasta que la apruebes, y tus propias reglas de anulaci\xF3n siguen mandando.",
+      appointmentsReschedule: "Cambiar una cita de hora cuando la clienta lo pide, y siempre como esa clienta: la cita tiene que ser suya. Espera en la bandeja hasta que la apruebes, y tus propias reglas de antelaci\xF3n siguen mandando.",
       reservationsSettings: "Para poder contarle qu\xE9 acepta este restaurante \u2014 los grupos, la antelaci\xF3n que pide y si necesita tel\xE9fono o correo. Solo los lee.",
       reservationsTimeslots: "Para saber qu\xE9 turnos abres ese d\xEDa de la semana y no ofrecer nunca una hora en la que no das servicio.",
       reservationsSlotsCount: "Para ver cu\xE1ntas mesas quedan de verdad en cada turno de ese d\xEDa, contadas como las cuenta la puerta de reserva.",
@@ -11897,8 +11926,8 @@ var en_default = {
       availabilityCheck: "Check the slot is still free before proposing it.",
       appointmentsCreate: "Book the appointment. It waits in the tray until you approve it.",
       appointmentsListForCustomer: "Read the appointments a customer already has, so it cancels or moves the right one and never guesses.",
-      appointmentsCancel: "Cancel an appointment when the customer asks. It waits in the tray until you approve it, and your own cancellation rules still apply.",
-      appointmentsReschedule: "Move an appointment to another time when the customer asks. It waits in the tray until you approve it, and your own notice rules still apply.",
+      appointmentsCancel: "Cancel an appointment when the customer asks, and only ever as that customer: the appointment has to be hers. It waits in the tray until you approve it, and your own cancellation rules still apply.",
+      appointmentsReschedule: "Move an appointment to another time when the customer asks, and only ever as that customer: the appointment has to be hers. It waits in the tray until you approve it, and your own notice rules still apply.",
       reservationsSettings: "To tell them what this restaurant takes \u2014 the party sizes, the notice it wants and whether it needs a phone or an email. It only reads them.",
       reservationsTimeslots: "To know which service windows you open on that day of the week, so it never offers a time you do not serve.",
       reservationsSlotsCount: "To see how many tables are really left in each window of that day, counted the way the booking gate counts them.",
