@@ -508,7 +508,7 @@ var WindowShim = class Window extends NodeShim {
     });
   }
 };
-var ElementShim = class Element extends NodeShim {
+var ElementShim = class Element2 extends NodeShim {
   constructor() {
     super(...arguments);
     this.__shadowRootMode = null;
@@ -581,7 +581,7 @@ var ElementShim = class Element extends NodeShim {
 var HTMLElementShim = class HTMLElement extends ElementShim {
 };
 var HTMLElementShimWithRealType = HTMLElementShim;
-var ShadowRootShim = class ShadowRoot extends NodeShim {
+var ShadowRootShim = class ShadowRoot2 extends NodeShim {
   get host() {
     return this.__host;
   }
@@ -7433,6 +7433,18 @@ function templateFromSearch(search) {
   const id = new URLSearchParams(search).get("template") ?? "";
   return templateById(id) ? id : "";
 }
+function namesTemplate(search) {
+  return (new URLSearchParams(search).get("template") ?? "") !== "";
+}
+function offScreen(el) {
+  let node = el;
+  while (node) {
+    if (node instanceof Element && getComputedStyle(node).display === "none") return true;
+    const parent = node.parentNode;
+    node = parent instanceof ShadowRoot ? parent.host : parent;
+  }
+  return false;
+}
 var isCommandGrant = (row) => typeof row === "object" && row !== null && row.kind === "command" && typeof row.value === "string";
 var ErpFlowsGallery = class extends i3 {
   constructor() {
@@ -7459,6 +7471,13 @@ var ErpFlowsGallery = class extends i3 {
     this.linked = "";
     /** The linked card, once it has been brought on screen. Reset each time a shortcut is served. */
     this.revealed = "";
+    /**
+     * Set while the linked card is waiting for its page to come back on screen (flows#58).
+     *
+     * One at a time, and never left behind: a second observer per render would pile up for as long
+     * as the page stays hidden, and each of them would scroll.
+     */
+    this.waiting = null;
     /**
      * The client this screen has already asked, so it is not asked the same thing twice (flows#69).
      *
@@ -7672,6 +7691,7 @@ var ErpFlowsGallery = class extends i3 {
   }
   disconnectedCallback() {
     window.removeEventListener("popstate", this.onPopState);
+    this.stopWaiting();
     super.disconnectedCallback();
   }
   updated(changed) {
@@ -7694,6 +7714,7 @@ var ErpFlowsGallery = class extends i3 {
       return;
     }
     if (!id) return;
+    this.stopWaiting();
     this.linked = id;
     this.revealed = "";
     this.picked = id;
@@ -7714,8 +7735,32 @@ var ErpFlowsGallery = class extends i3 {
     if (!this.linked || this.revealed === this.linked) return;
     const card = this.renderRoot.querySelector(`[data-template="${this.linked}"]`);
     if (!card) return;
+    if (offScreen(card) && this.waitForTheScreen(card)) return;
+    this.stopWaiting();
     this.revealed = this.linked;
     card.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }
+  /**
+   * Holds the reveal until the card has a box again, and says whether it could.
+   *
+   * The card getting a size IS the page coming back — there is no event for it that reaches in
+   * here: the shell's `ionViewDidEnter` fires on the Ionic page and does not cross into this
+   * element. Where there is no `ResizeObserver` to hold it with, the answer is `false` and the
+   * caller scrolls anyway: an attempt that may land on nothing costs nothing, and «never» is the
+   * complaint this whole thing is about.
+   */
+  waitForTheScreen(card) {
+    const Observer = globalThis.ResizeObserver;
+    if (typeof Observer !== "function") return false;
+    if (!this.waiting) {
+      this.waiting = new Observer(() => this.reveal());
+      this.waiting.observe(card);
+    }
+    return true;
+  }
+  stopWaiting() {
+    this.waiting?.disconnect();
+    this.waiting = null;
   }
   /**
    * The hub's own flows, read once, only to warn about a trigger that is already taken.
@@ -11250,6 +11295,41 @@ var ErpFlowsApp = class extends i3 {
     /** The contract THIS hub serves, read from `GET /api/hub/flows/schema` — never bundled. */
     this.facts = schemaFacts(void 0);
     this.onLocaleChange = () => this.requestUpdate();
+    /**
+     * **A shortcut that names a card gets this screen out of its way** (flows#58).
+     *
+     * From Settings → WhatsApp, «Configurar» pushes `/m/flows/automations?template=<id>` and fires
+     * `popstate` (`whatsapp_inbox/ui/lib/whatsapp-uses.ts`). The gallery already answers that on its
+     * own (flows#56/#57) — but only while it is on screen, and it is not: with the editor or the
+     * guide up, `render()` never puts it in the document, so the one element that listens is not
+     * there to listen. Nothing else saves it either, because the shell keeps this page alive when
+     * the owner leaves the module and re-creates the element only when `route.fullPath` changes
+     * (`ModuleView.vue`, hub#1099) — and the same shortcut, tapped again, is the same address.
+     *
+     * So the second tap on «Configurar» lands the owner in the editor of whatever they made the
+     * first time. Stepping aside is this screen's job, and it does it for an unknown id too: the
+     * gallery decides WHICH card, and its answer to an id it does not have is still the gallery.
+     *
+     * A navigation that names NO card is left alone on purpose — the Back button, a jump to another
+     * module, the shell tidying the address. Closing the editor on any of those would throw away
+     * what the owner was writing, which is a worse bug than the one this fixes.
+     */
+    this.onShortcut = () => {
+      let named = false;
+      try {
+        named = namesTemplate(window.location.search);
+      } catch {
+        return;
+      }
+      if (!named || !this.editing && !this.isNew && !this.guideOpen) return;
+      this.editing = null;
+      this.isNew = false;
+      this.editorTab = "editor";
+      this.reviewing = null;
+      this.draftReview = null;
+      this.guideOpen = false;
+      void this.reload();
+    };
     /** The module catalogue, resolved against the shell's active language (ADR-0055). */
     this.t = (key2, params) => {
       const client = this.client;
@@ -11526,11 +11606,13 @@ var ErpFlowsApp = class extends i3 {
   async connectedCallback() {
     super.connectedCallback();
     window.addEventListener("erplora:locale-changed", this.onLocaleChange);
+    window.addEventListener("popstate", this.onShortcut);
     await this.open();
   }
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener("erplora:locale-changed", this.onLocaleChange);
+    window.removeEventListener("popstate", this.onShortcut);
   }
   /** Resolves the door, checks the contract, loads the list. Every failure has its own screen. */
   async open() {
