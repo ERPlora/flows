@@ -7,6 +7,7 @@ import {
   templateCommands,
   templateGrants,
 } from './templates';
+import { dailyCron } from './plain-language';
 import en from '../../locales/en.json';
 
 /** The translator, reduced to the lookup a document needs. */
@@ -69,6 +70,40 @@ const scheduledFlow = (
     triggers: [{ kind: 'cron', cron }],
   },
   commands,
+});
+
+/**
+ * The Friday review **as the editor leaves it after one touch of the time box**.
+ *
+ * The card's blank invites «The day and the time», and the only control the editor has for a cron
+ * is an `<input type="time">`: `readDailyCron('0 18 * * 5')` is `null`, so the box is drawn EMPTY,
+ * and its `@change` writes `dailyCron(value)`, which is always `M H * * *`. The weekly schedule is
+ * flattened to a daily one the first time she touches it — silently, and whether or not this
+ * gallery exists.
+ *
+ * Written with the editor's own `dailyCron` on purpose: this stays a faithful fixture even if the
+ * time box is one day taught to keep the weekday.
+ */
+const flattenedWeekReview = (over: Record<string, unknown> = {}) => ({
+  id: 'f5',
+  name: 'Friday evening, look at the week',
+  enabled: true,
+  definition: {
+    ...(buildTemplate(tpl('friday-week-review'), t) as unknown as Record<string, unknown>),
+    triggers: [{ kind: 'cron', cron: dailyCron('18:00') }],
+  },
+  commands: ['tasks.tasks.create'],
+  ...over,
+});
+
+/** The morning diary check, exactly as its own card builds it. */
+const morningCheck = (over: Record<string, unknown> = {}) => ({
+  id: 'f6',
+  name: 'Every morning, go through tomorrow’s diary',
+  enabled: true,
+  definition: buildTemplate(tpl('morning-agenda-check'), t) as unknown as Record<string, unknown>,
+  commands: ['tasks.tasks.create'],
+  ...over,
 });
 
 /** A document the kernel runs on demand — no event, no schedule. */
@@ -172,20 +207,6 @@ describe('a template this hub already runs', () => {
     expect(templateInstallation(template, t, [flow])).toEqual({ state: 'active', flow });
   });
 
-  it('does not let one calendar card answer for the other', () => {
-    // Both create a task, so what is done cannot tell them apart: the weekly review comes round
-    // every Friday and the diary check every morning. Badging the morning card because the hub
-    // runs the Friday one is the wrong badge this issue is not allowed to buy.
-    const weekly = scheduledFlow('0 18 * * 5', ['tasks.tasks.create']);
-    expect(templateInstallation(tpl('morning-agenda-check'), t, [weekly])).toEqual({
-      state: 'absent',
-    });
-    const daily = scheduledFlow('0 9 * * *', ['tasks.tasks.create'], 'f2');
-    expect(templateInstallation(tpl('friday-week-review'), t, [daily])).toEqual({
-      state: 'absent',
-    });
-  });
-
   it('is «unfinished» when the scheduled flow was left with no permission at all', () => {
     // Same third state as an event card: the gallery creates every template paused and with no
     // grants, so somebody who stops on the way to Permissions has a flow that comes round on time
@@ -217,21 +238,60 @@ describe('a template this hub already runs', () => {
     }
   });
 
-  it('does not read a schedule that comes round less often than the card', () => {
-    // `0 18 15 * *` is the 15th of the month and `0 18 * 6 5` the Fridays of June. Neither comes
-    // round every week, so neither is the weekly review nor the morning check — reading only the
-    // clock fields would flatten all three into one and badge a card off an automation that runs
-    // eleven times a year.
-    const monthly = scheduledFlow('0 18 15 * *', ['tasks.tasks.create']);
-    const yearly = scheduledFlow('0 18 * 6 5', ['tasks.tasks.create'], 'f2');
-    for (const id of ['friday-week-review', 'morning-agenda-check']) {
-      expect(templateInstallation(tpl(id), t, [monthly]), `${id} vs monthly`).toEqual({
-        state: 'absent',
+  it('knows its card whatever the schedule has become, as long as the task is still the card’s', () => {
+    // The positive side of the same decision: the schedule is the coarse filter, not the identity,
+    // so moving the review to the 15th of the month is still the review. It is the seeded task that
+    // says which card this is — and it goes on saying it after any edit the time box can make.
+    for (const cron of ['0 18 15 * *', '0 18 * 6 5', '30 20 * * 1', '0 9 * * *']) {
+      const flow = scheduledFlow(cron, ['tasks.tasks.create']);
+      expect(templateInstallation(tpl('friday-week-review'), t, [flow]), cron).toEqual({
+        state: 'active',
+        flow,
       });
-      expect(templateInstallation(tpl(id), t, [yearly]), `${id} vs yearly`).toEqual({
-        state: 'absent',
-      });
+      expect(templateInstallation(tpl('morning-agenda-check'), t, [flow]), `${cron} → morning`)
+        .toEqual({ state: 'absent' });
     }
+  });
+
+  it('lets go of a card whose seeded task the owner rewrote herself', () => {
+    // The cost of keying on what the card seeded, stated as a test so nobody is surprised by it:
+    // an owner who rewrites the task loses the badge and is offered the card again. Silence and the
+    // invitation she had before — never a badge pointing at somebody else's automation.
+    const flow = scheduledFlow('0 18 * * 5', ['tasks.tasks.create']);
+    (flow.definition.steps as { params: Record<string, unknown> }[])[0].params.title = 'My own thing';
+    expect(templateInstallation(tpl('friday-week-review'), t, [flow])).toEqual({ state: 'absent' });
+  });
+
+  it('still knows its own card after the editor flattens the schedule to daily', () => {
+    // 🔴 REGRESIÓN. The first version of this recognised a calendar card by its CADENCE, and the
+    // editor destroys exactly that: one touch of the time box turns «every Friday at 18:00» into
+    // «every day at 18:00». The card went back to `absent` and the gallery re-offered «Use this
+    // one» — the duplicate flows#68 exists to prevent, handed back to the one owner who made the
+    // card her own.
+    const flow = flattenedWeekReview();
+    expect(templateInstallation(tpl('friday-week-review'), t, [flow])).toEqual({
+      state: 'active',
+      flow,
+    });
+  });
+
+  it('does not let a flattened week review answer for the morning diary card', () => {
+    // 🔴 REGRESIÓN, the other half of the same defect: once flattened, the Friday review comes
+    // round daily and creates a task, which is everything the morning card used to be recognised
+    // by. It badged the morning card «Active» and «View it» opened somebody else's automation.
+    expect(templateInstallation(tpl('morning-agenda-check'), t, [flattenedWeekReview()])).toEqual({
+      state: 'absent',
+    });
+    // …and not the other way round either.
+    expect(templateInstallation(tpl('friday-week-review'), t, [morningCheck()])).toEqual({
+      state: 'absent',
+    });
+  });
+
+  it('tells the two calendar cards apart when the hub runs both', () => {
+    const flows = [flattenedWeekReview(), morningCheck()];
+    expect(templateInstallation(tpl('friday-week-review'), t, flows).flow?.id).toBe('f5');
+    expect(templateInstallation(tpl('morning-agenda-check'), t, flows).flow?.id).toBe('f6');
   });
 
   it('does not answer for a card whose trigger is neither an event nor a schedule', () => {

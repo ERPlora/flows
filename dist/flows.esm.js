@@ -6519,36 +6519,58 @@ function triggerEventsOf(definition) {
   if (!Array.isArray(triggers)) return [];
   return triggers.map((trigger) => trigger?.event).filter((event) => typeof event === "string");
 }
-function cronCadence(cron) {
-  if (typeof cron !== "string") return null;
+function readsAsCron(cron) {
+  if (typeof cron !== "string") return false;
   const fields = cron.trim().split(/\s+/).filter(Boolean);
-  if (fields.length !== 5 || !fields.every((field) => CRON_FIELD.test(field))) return null;
-  const [, , dayOfMonth, month, dayOfWeek] = fields;
-  if (month !== "*") return "yearly";
-  if (dayOfMonth !== "*") return "monthly";
-  if (dayOfWeek !== "*") return "weekly";
-  return "daily";
+  return fields.length === 5 && fields.every((field) => CRON_FIELD.test(field));
 }
-function triggerCadencesOf(definition) {
+function hasSchedule(definition) {
   const triggers = definition?.triggers;
-  if (!Array.isArray(triggers)) return [];
-  return triggers.map((trigger) => {
-    const t3 = trigger;
-    return t3?.kind === "cron" ? cronCadence(t3.cron) : null;
-  }).filter((cadence) => cadence !== null);
+  if (!Array.isArray(triggers)) return false;
+  return triggers.some((raw) => {
+    const trigger = raw;
+    return trigger?.kind === "cron" && readsAsCron(trigger.cron);
+  });
 }
-function templateCadence(template, t3) {
+function templateIsScheduled(template, t3) {
   const trigger = template.build(t3).triggers[0];
-  return trigger?.kind === "cron" ? cronCadence(trigger.cron) : null;
+  return trigger?.kind === "cron" && readsAsCron(trigger.cron);
 }
-function candidateFlows(template, t3, flows) {
+function sameValue(a3, b3) {
+  if (a3 === b3) return true;
+  if (a3 === null || b3 === null || typeof a3 !== "object" || typeof b3 !== "object") return false;
+  if (Array.isArray(a3) !== Array.isArray(b3)) return false;
+  const keys = Object.keys(a3);
+  if (keys.length !== Object.keys(b3).length) return false;
+  return keys.every(
+    (key2) => Object.prototype.hasOwnProperty.call(b3, key2) && sameValue(a3[key2], b3[key2])
+  );
+}
+function seededSteps(template, t3) {
+  return template.build(t3).steps.filter((step) => step.kind === "command" && typeof step.command === "string").map((step) => ({
+    command: step.command,
+    params: step.params ?? {}
+  }));
+}
+function carriesSeededSteps(definition, seeded) {
+  if (!seeded.length) return false;
+  const steps = definition?.steps;
+  if (!Array.isArray(steps)) return false;
+  return seeded.every(
+    (want) => steps.some((raw) => {
+      const step = raw;
+      if (step?.kind !== "command" || step.command !== want.command) return false;
+      const params = step.params ?? {};
+      return Object.entries(want.params).every(([key2, value]) => sameValue(params[key2], value));
+    })
+  );
+}
+function isCandidateFor(template, t3, flow) {
+  const definition = flow.definition ?? {};
   const event = templateTriggerEvent(template, t3);
-  if (event) {
-    return flows.filter((flow) => triggerEventsOf(flow.definition ?? {}).includes(event));
-  }
-  const cadence = templateCadence(template, t3);
-  if (!cadence) return [];
-  return flows.filter((flow) => triggerCadencesOf(flow.definition ?? {}).includes(cadence));
+  if (event) return triggerEventsOf(definition).includes(event);
+  if (!templateIsScheduled(template, t3)) return false;
+  return hasSchedule(definition) && carriesSeededSteps(definition, seededSteps(template, t3));
 }
 function flowsOnSameTrigger(template, t3, flows) {
   const event = templateTriggerEvent(template, t3);
@@ -6560,7 +6582,7 @@ function templateCommands(template, t3) {
 }
 var CRON_FIELD = /^[*\d,\-/]+$/;
 function templateInstallation(template, t3, flows) {
-  const listening = candidateFlows(template, t3, flows);
+  const listening = flows.filter((flow) => isCandidateFor(template, t3, flow));
   const commands = templateCommands(template, t3);
   const mine = listening.filter((flow) => flow.commands?.some((held) => commands.includes(held)));
   if (mine.length) {
@@ -6571,20 +6593,7 @@ function templateInstallation(template, t3, flows) {
   return halfBuilt ? { state: "unfinished", flow: halfBuilt } : { state: "absent" };
 }
 function flowsWorthAsking(flows, t3) {
-  const events = new Set(
-    TEMPLATES.map((template) => templateTriggerEvent(template, t3)).filter(
-      (event) => event !== null
-    )
-  );
-  const cadences = new Set(
-    TEMPLATES.map((template) => templateCadence(template, t3)).filter(
-      (cadence) => cadence !== null
-    )
-  );
-  return flows.filter((flow) => {
-    const definition = flow.definition ?? {};
-    return triggerEventsOf(definition).some((event) => events.has(event)) || triggerCadencesOf(definition).some((cadence) => cadences.has(cadence));
-  });
+  return flows.filter((flow) => TEMPLATES.some((template) => isCandidateFor(template, t3, flow)));
 }
 function templateById(id) {
   return TEMPLATES.find((tpl) => tpl.id === id);
