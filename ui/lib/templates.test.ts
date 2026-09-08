@@ -18,10 +18,17 @@ import {
   templatesOf,
 } from './templates';
 import { conditionResult } from './simulate';
-import { schemaFacts } from './ai-draft';
+import { QUERY_GRANT_PIN_CORE, schemaFacts } from './ai-draft';
 import type { SchemaFacts } from './ai-draft';
 import type { Condition, FlowDoc } from './flow-doc';
-import { MAX_ITERS_CAP, grantAllowsCall, grantPin, isSpineKind, readDoc } from './flow-doc';
+import {
+  MAX_ITERS_CAP,
+  canPinPayload,
+  grantAllowsCall,
+  grantPin,
+  isSpineKind,
+  readDoc,
+} from './flow-doc';
 import en from '../../locales/en.json';
 import es from '../../locales/es.json';
 
@@ -35,10 +42,19 @@ const lookup = (catalogue: unknown, key: string): string | undefined => {
 };
 
 /** A translator that returns the ENGLISH string, so a document can be inspected as it is stored. */
-/** A hub on a current core, for the tests that are not about the kernel floor (flows#92). */
-const CURRENT_CORE = schemaFacts({
-  $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
-});
+/**
+ * A hub on a current core, for the tests that are not about the kernel floor (flows#92).
+ *
+ * It carries a VERSION as well as the step keys since flows#111: one card capability is answered
+ * by the release and not by the schema's shape, and a hub that declared every key while reporting
+ * no version would hide the two WhatsApp appointment cards from every test in this file.
+ */
+const CURRENT_CORE = schemaFacts(
+  {
+    $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+  },
+  QUERY_GRANT_PIN_CORE,
+);
 
 const t = (key: string): string => lookup(en, key) ?? key;
 
@@ -299,8 +315,48 @@ describe('what a template needs from this hub', () => {
       const written = GATED_STEP_KEYS.filter((key) =>
         doc.steps.some((step) => Object.prototype.hasOwnProperty.call(step, key)),
       );
-      expect([...(template.needs ?? [])].sort(), template.id).toEqual([...written].sort());
+      // Only the step-key half of `needs`: since flows#111 the list also carries a need that no
+      // step writes (`queryPin`), and it has its own two-way anchor below.
+      const declared = (template.needs ?? []).filter((need) =>
+        (GATED_STEP_KEYS as readonly string[]).includes(need),
+      );
+      expect([...declared].sort(), template.id).toEqual([...written].sort());
     }
+  });
+
+  /**
+   * **The need that is not a step key, anchored the same way** (flows#111).
+   *
+   * `queryPin` says «this hub can store the limit a READ carries» (hub#1662). It cannot be derived
+   * from the document, because a pin does not live in the document — it lives in the permission.
+   * So it is derived here from the permissions the card installs, and anchored in BOTH directions
+   * for the same reason the step keys are:
+   *
+   * - A card that pins a read without declaring it is offered to a hub that refuses the pin, and
+   *   `PUT …/grants` is all-or-nothing: the recipe installs with NO permissions and dies at step
+   *   one. That is worse than the wide permission it was trying to avoid.
+   * - A card that declares it without pinning anything is hidden from hubs that run it perfectly
+   *   well, for a containment it does not actually carry.
+   */
+  it('declares the read limit exactly when it carries one', () => {
+    for (const template of TEMPLATES) {
+      const pinsARead = templateGrants(template, t).some(
+        (grant) => grant.kind === 'query' && Object.keys(grantPin(grant)).length > 0,
+      );
+      expect((template.needs ?? []).includes('queryPin'), template.id).toBe(pinsARead);
+    }
+  });
+
+  it('has a card that pins a read at all, so the rule above is not vacuous', () => {
+    const pinners = TEMPLATES.filter((tpl) =>
+      templateGrants(tpl, t).some(
+        (grant) => grant.kind === 'query' && Object.keys(grantPin(grant)).length > 0,
+      ),
+    );
+    expect(pinners.map((tpl) => tpl.id)).toEqual([
+      'whatsapp-appointment',
+      'whatsapp-appointment-unattended',
+    ]);
   });
 
   // The control above only means something if a gated key is actually reachable from this
@@ -1883,30 +1939,113 @@ describe('a card installs the permission it PROMISED, not the wide one next to i
     expect(grantAllowsCall(grant, call)).toBe(false);
   });
 
+  /**
+   * **The READ is a containment too, and it was the one left wide** (flows#111, hub#1662).
+   *
+   * The two commands above are what the recipe WRITES, and they were pinned first because a write
+   * is what a stranger's message could turn into somebody else's cancelled appointment. The read
+   * is the same problem one step earlier: `list_for_customer` with nothing fixed answers about
+   * whoever the payload names, and that payload is written by a model reading a WhatsApp from a
+   * stranger. «Tell me about Ana's Thursday» is then a question the automation can answer.
+   *
+   * The pin references what the RUN resolved (`steps.resolve_customer.id`) rather than a literal,
+   * because the customer changes with every conversation and a permission is stored once. It is
+   * the third step's resolver and not the first's on purpose (whatsapp_inbox#119): the first read
+   * runs before the customer exists, so pinning it would resolve to `null` on the very run that
+   * creates her and deny the read outright.
+   */
+  const READ = 'appointments.appointments.list_for_customer';
+  const READ_PIN = { customer_id: 'steps.resolve_customer.id' };
+
+  const readGrantFor = (id: string) =>
+    templateGrants(templateById(id)!, t).find((g) => g.kind === 'query' && g.value === READ);
+
+  it.each(PINNED_CARDS)('%s reads the diary of the customer who wrote, and no one else', (card) => {
+    const grant = readGrantFor(card);
+    expect(grant, `${card} asks to read the diary`).toBeTruthy();
+    expect(grantPin(grant!)).toEqual(READ_PIN);
+  });
+
+  // The half that proves it is a containment: a pin asserted only by its shape passes just as well
+  // when nothing enforces it. Omission matters most — «no `customer_id`» is what a model sends
+  // when nothing in the message named one, and it is precisely the call that reads everybody.
+  it.each(PINNED_CARDS)('%s refuses a read that names anybody else, or nobody', (card) => {
+    const grant = readGrantFor(card)!;
+    expect(grantAllowsCall(grant, { ...READ_PIN })).toBe(true);
+    expect(grantAllowsCall(grant, { customer_id: 'another-customer' })).toBe(false);
+    expect(grantAllowsCall(grant, {})).toBe(false);
+  });
+
   // The other side of the same coin, and the anchor that stops the table above from shrinking in
   // silence: nothing ELSE on either card narrows, and nothing in the table stops being pinned. A
   // pin that spread would break the recipe rather than contain it; a row deleted from `PINNED`
   // would leave the operation wide with every remaining assertion still green.
-  it.each(PINNED_CARDS)('narrows those two on %s, and nothing else', (card) => {
+  it.each(PINNED_CARDS)('narrows those three on %s, and nothing else', (card) => {
     const pinned = templateGrants(templateById(card)!, t)
       .filter((g) => Object.keys(grantPin(g)).length > 0)
       .map((g) => `${g.kind} ${g.value}`);
-    expect(pinned).toEqual(PINNED.map(([command]) => `command ${command}`));
+    // The reads come before the writes in the document, so the read's grant is derived first.
+    expect(pinned.sort()).toEqual(
+      [`query ${READ}`, ...PINNED.map(([command]) => `command ${command}`)].sort(),
+    );
+  });
+
+  /**
+   * **A pin that REFERENCES a step has to name a step the card runs** (flows#111).
+   *
+   * The sibling of the rule below, on the other half of the pin: that one checks what the limit
+   * lands ON, this one checks what it POINTS AT. Until flows#111 every pin in this catalogue was a
+   * literal (`channel: "customer"`) and there was nothing to point at; a reference is new, and it
+   * fails in a way a literal cannot.
+   *
+   * The hub resolves `steps.<id>.<field>` against the run and, finding no such step, refuses the
+   * call with `flow.grant_payload_denied` — fail-closed, so the automation is not dangerous. It is
+   * DEAD: it installs, it is switched on, and it refuses every single call from the first message
+   * onwards, with nothing on the card to say why. A rename of a step is all it takes, and
+   * `erplora validate` does not catch it either — the toolkit judges the pin's ROOT, not whether
+   * the step exists (module-toolkit#235).
+   */
+  it('never points a limit at a step its own document does not run', () => {
+    for (const template of TEMPLATES) {
+      if (template.grants) continue; // a SERVED card's document is the module's, not ours
+      const ids = new Set(buildTemplate(template, t).steps.map((step) => step.id));
+      for (const [operation, pin] of Object.entries(carriedPins(template))) {
+        for (const [field, value] of Object.entries(pin)) {
+          if (typeof value !== 'string' || !value.startsWith('steps.')) continue;
+          const step = value.split('.')[1];
+          expect(
+            ids,
+            `${template.id} pins ${operation}.${field} to \`${value}\`, and it runs no step \`${step}\``,
+          ).toContain(step);
+        }
+      }
+    }
+  });
+
+  // The control that stops the rule above from being green on an empty set: with no reference
+  // anywhere in the catalogue it would never look at anything, for ever.
+  it('has a card whose limit points at a step at all, so the rule above is not vacuous', () => {
+    const pointing = TEMPLATES.filter((tpl) =>
+      Object.values(carriedPins(tpl)).some((pin) =>
+        Object.values(pin).some((v) => typeof v === 'string' && v.startsWith('steps.')),
+      ),
+    ).map((tpl) => tpl.id);
+    expect(pointing).toEqual(['whatsapp-appointment', 'whatsapp-appointment-unattended']);
   });
 
   // A universal rule for the catalogue, not a check on one card: a pin naming a command the card
   // never runs would sit in the source reading like a containment and fix NOTHING, because there
   // is no grant for it to land on.
-  it('never declares a limit for a command its own document does not run', () => {
+  it('never declares a limit for an operation its own document does not use', () => {
     for (const template of TEMPLATES) {
       const derived = new Set(
         templateGrants(template, t)
-          .filter((g) => g.kind === 'command')
+          .filter((g) => canPinPayload(g.kind))
           .map((g) => g.value),
       );
-      for (const command of Object.keys(template.grantPins ?? {})) {
-        expect(derived, `${template.id} pins \`${command}\`, which it never runs`).toContain(
-          command,
+      for (const operation of Object.keys(template.grantPins ?? {})) {
+        expect(derived, `${template.id} pins \`${operation}\`, which it never uses`).toContain(
+          operation,
         );
       }
     }
@@ -1920,7 +2059,7 @@ describe('a card installs the permission it PROMISED, not the wide one next to i
     for (const template of TEMPLATES) {
       const derived = new Set(
         templateGrants(template, t)
-          .filter((g) => g.kind === 'command')
+          .filter((g) => canPinPayload(g.kind))
           .map((g) => g.value),
       );
       for (const command of Object.keys(template.mirrors?.pins ?? {})) {
@@ -1946,13 +2085,16 @@ describe('a card installs the permission it PROMISED, not the wide one next to i
     }
   });
 
-  // The hub refuses a pin on any kind but `command` (`flow.invalid_grant_payload`), and `PUT
-  // …/grants` is all-or-nothing: one bad row does not fail that row, it loses the whole screen's
-  // worth of permissions.
+  // The hub is handed values to judge on exactly two kinds — a `command`'s payload (hub#1623) and
+  // a `query`'s parameters (hub#1662) — and refuses a pin on any other with
+  // `flow.invalid_grant_payload`. `PUT …/grants` is all-or-nothing: one bad row does not fail that
+  // row, it loses the whole screen's worth of permissions.
   it('never declares a limit the hub would refuse the whole screen for', () => {
     for (const template of TEMPLATES) {
       for (const grant of templateGrants(template, t)) {
-        if (Object.keys(grantPin(grant)).length) expect(grant.kind).toBe('command');
+        if (Object.keys(grantPin(grant)).length) {
+          expect(canPinPayload(grant.kind), `${template.id} pins a ${grant.kind}`).toBe(true);
+        }
       }
     }
   });
@@ -1980,29 +2122,66 @@ describe('the floor of a card is the card’s, not the module’s (flows#92)', (
     TEMPLATES.flatMap((tpl) => tpl.witnesses.map((w) => [w.module, true])),
   );
 
-  /** A hub whose flow schema declares exactly these step keys. */
-  const hubDeclaring = (...keys: string[]) =>
-    schemaFacts({
-      $defs: { step: { properties: Object.fromEntries(keys.map((k) => [k, { type: 'object' }])) } },
-    });
+  /** A hub whose flow schema declares exactly these step keys, on the release it says it is. */
+  const hubDeclaring = (keys: string[], coreVersion?: string) =>
+    schemaFacts(
+      {
+        $defs: {
+          step: { properties: Object.fromEntries(keys.map((k) => [k, { type: 'object' }])) },
+        },
+      },
+      coreVersion,
+    );
+
+  /** Everything the two appointment cards need: both step keys AND a core that stores their pin. */
+  const currentHub = () => hubDeclaring(['interactive', 'output'], QUERY_GRANT_PIN_CORE);
 
   const beautyOn = (facts?: SchemaFacts): string[] =>
     availableTemplates('beauty', everything, facts).map((tpl) => tpl.id);
 
-  it('offers it on a hub that declares both keys', () => {
-    expect(beautyOn(hubDeclaring('interactive', 'output'))).toContain(
-      'whatsapp-appointment-unattended',
-    );
+  it('offers it on a hub that declares both keys and can store its limits', () => {
+    expect(beautyOn(currentHub())).toContain('whatsapp-appointment-unattended');
   });
 
   it('hides it on a hub that declares neither, which is every hub on v1.1.15', () => {
-    expect(beautyOn(hubDeclaring())).not.toContain('whatsapp-appointment-unattended');
+    expect(beautyOn(hubDeclaring([]))).not.toContain('whatsapp-appointment-unattended');
   });
 
   it('hides it on a hub that declares only half of what the document carries', () => {
     // A build between the two kernel merges. Fail-closed means BOTH or nothing.
-    expect(beautyOn(hubDeclaring('interactive'))).not.toContain('whatsapp-appointment-unattended');
-    expect(beautyOn(hubDeclaring('output'))).not.toContain('whatsapp-appointment-unattended');
+    expect(beautyOn(hubDeclaring(['interactive'], QUERY_GRANT_PIN_CORE))).not.toContain(
+      'whatsapp-appointment-unattended',
+    );
+    expect(beautyOn(hubDeclaring(['output'], QUERY_GRANT_PIN_CORE))).not.toContain(
+      'whatsapp-appointment-unattended',
+    );
+  });
+
+  /**
+   * **A hub that parses the document but cannot hold its limit is still the wrong hub** (flows#111).
+   *
+   * `v1.1.16` is exactly that hub: it declares `interactive` and `output`, so the document saves —
+   * and it has no `GrantKind::can_pin(Query)`, so `check_grants` refuses the read's pin. `PUT
+   * …/grants` is all-or-nothing, so the owner would not get the wide permission they were warned
+   * about: they would get NO permissions, and an automation that stops at its first step with the
+   * card still saying it was installed.
+   */
+  it('hides both appointment cards on a v1.1.16 hub, which parses them but cannot hold the limit', () => {
+    const shown = beautyOn(hubDeclaring(['interactive', 'output'], '1.1.16'));
+    expect(shown).not.toContain('whatsapp-appointment');
+    expect(shown).not.toContain('whatsapp-appointment-unattended');
+  });
+
+  it('hides them while the hub has not said which release it is', () => {
+    // Same fail-closed rule as the step keys, and the reason the version is read from the same
+    // response: «not answered yet» must not read as «current».
+    const shown = beautyOn(hubDeclaring(['interactive', 'output']));
+    expect(shown).not.toContain('whatsapp-appointment');
+    expect(shown).not.toContain('whatsapp-appointment-unattended');
+  });
+
+  it('offers them again on the release that can hold the limit', () => {
+    expect(beautyOn(currentHub())).toContain('whatsapp-appointment');
   });
 
   it('hides it while the hub has not answered yet: this probe is fail-closed', () => {
@@ -2016,7 +2195,7 @@ describe('the floor of a card is the card’s, not the module’s (flows#92)', (
   // (flows#100), and an id list here would have gone on claiming the other three were offered on a
   // `v1.1.15` hub — where they are refused whole at save.
   it('keeps offering every OTHER card of the sector on that same old hub', () => {
-    const shown = beautyOn(hubDeclaring());
+    const shown = beautyOn(hubDeclaring([]));
     const gated = templatesOf('beauty').filter((tpl) => (tpl.needs ?? []).length > 0);
     const others = templatesOf('beauty')
       .filter((tpl) => (tpl.needs ?? []).length === 0)

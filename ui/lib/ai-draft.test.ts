@@ -144,6 +144,50 @@ describe('the contract is read off the LIVE schema, not remembered', () => {
     expect(schemaFacts(undefined).stepKinds).toContain('notify');
   });
 
+  /**
+   * **The one fact no schema can answer** (flows#111, hub#1662).
+   *
+   * Every other fact here is read off the shape the hub served, because a capability the hub
+   * declares is the only witness that cannot go stale. A `query` grant that FIXES its parameters
+   * declares nothing: the pin is stored in `_flow_grants`, never in the document, so the served
+   * schema has no `grant`, no `pin` and no `payload` anywhere in it — and `schema_version` is
+   * `const 1` on `v1.1.15`, `v1.1.16` and `develop` alike, so it did not move either.
+   *
+   * What is left is the number the SAME response carries (`core_version`), and the floor is the
+   * release that first carries `GrantKind::can_pin(Query)`. Fail-closed like its two neighbours,
+   * and for a harder reason: below the floor `check_grants` refuses the pin and `PUT …/grants` is
+   * all-or-nothing, so the recipe does not install wide — it installs with NO permission at all
+   * and dies at its first step.
+   */
+  it('lets a read fix who it is about only from the release that can store that', () => {
+    expect(schemaFacts(liveSchema, '1.1.17').queryGrantPin).toBe(true);
+    expect(schemaFacts(liveSchema, '1.2.0').queryGrantPin).toBe(true);
+  });
+
+  it('refuses it on the releases that would lose the whole permission screen over it', () => {
+    expect(schemaFacts(liveSchema, '1.1.16').queryGrantPin).toBe(false);
+    expect(schemaFacts(liveSchema, '1.1.15').queryGrantPin).toBe(false);
+    // A `:dev` build floors at its base version, the same way the runtime floors a module's.
+    expect(schemaFacts(liveSchema, '1.1.16-dev.305+gabc1234').queryGrantPin).toBe(false);
+  });
+
+  it('refuses it when nobody said which version this hub is', () => {
+    expect(schemaFacts(liveSchema).queryGrantPin).toBe(false);
+    expect(schemaFacts(undefined).queryGrantPin).toBe(false);
+    expect(schemaFacts(liveSchema, '').queryGrantPin).toBe(false);
+    expect(schemaFacts(liveSchema, 'unreadable').queryGrantPin).toBe(false);
+  });
+
+  // The fact is about the RELEASE and nothing else: a hub that declares every step key in the
+  // world is still a hub that cannot store the pin, and a hub that declares none can.
+  it('does not read the answer off the schema, which cannot know it', () => {
+    const declaring = JSON.parse(JSON.stringify(liveSchema));
+    declaring.$defs.step.properties.interactive = { type: 'object' };
+    declaring.$defs.step.properties.output = { type: 'object' };
+    expect(schemaFacts(declaring, '1.1.16').queryGrantPin).toBe(false);
+    expect(schemaFacts(undefined, '1.1.17').queryGrantPin).toBe(true);
+  });
+
   it('obeys a hub that froze a NARROWER vocabulary than this editor mirrors', () => {
     const narrower = JSON.parse(JSON.stringify(liveSchema));
     narrower.$defs.step.properties.kind.enum = ['command', 'condition'];

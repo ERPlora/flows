@@ -486,3 +486,72 @@ describe('the unattended WhatsApp card moves an appointment only as the customer
     expect(grantAllowsCall(grant!, move)).toBe(false);
   });
 });
+/**
+ * **The limit on the READ has to survive the same crossing** (flows#111, hub#1662).
+ *
+ * `withCopiedPins` is what puts the hand copy's containments onto the card the hub serves, and
+ * until flows#111 it only ever looked for a `command`. A read is now pinned too —
+ * `list_for_customer` fixed to the customer the run resolved — and a copier that matches on kind
+ * would find no row for it: the served twin would install the read WIDE, answering about every
+ * customer in the salon, with every other assertion in this file still green.
+ *
+ * This is not hypothetical while whatsapp_inbox#120 waits for the `v1.1.17` tag: the module's own
+ * sidecar does not carry this pin yet, so the served family arrives WIDE and this copy is the only
+ * thing that narrows it.
+ */
+describe('the served twin reads the diary of one customer, not the salon’s (flows#111)', () => {
+  const READ = 'appointments.appointments.list_for_customer';
+  const CANCEL = 'appointments.appointments.cancel';
+  const attended = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment')!;
+
+  /** The family as the hub serves it today: the read among the permissions, and WIDE. */
+  const servedGrants = () => {
+    const served = moduleTemplates(
+      [
+        row({
+          ...attended.mirrors,
+          grants: [
+            { kind: 'query', value: READ },
+            { kind: 'query', value: 'customers.list' },
+            { kind: 'command', value: CANCEL },
+          ],
+        }),
+      ],
+      'en',
+    );
+    const card = mergeTemplates(TEMPLATES, served).cards.find((c) => c.id === served[0].id)!;
+    return templateGrants(card, t);
+  };
+
+  // The control that proves this harness sees the positive: the cancellation crosses over today,
+  // by the same path, so a red on the read below is about the read and not about the plumbing.
+  it('still carries the limit onto the cancellation', () => {
+    expect(servedGrants().find((g) => g.value === CANCEL)?.payload).toEqual({ channel: 'customer' });
+  });
+
+  it('carries the limit onto the read as well', () => {
+    const grant = servedGrants().find((g) => g.value === READ);
+    expect(grant, 'the served card asks to read the diary').toBeTruthy();
+    expect(grant!.payload).toEqual({ customer_id: 'steps.resolve_customer.id' });
+  });
+
+  // 🔴 The half that makes it a containment: asserting the shape of the pin passes just as well
+  // when nothing enforces it, and omission is the shape a model sends when the message named
+  // nobody — which is precisely the call that reads everybody.
+  it('refuses a read that names anybody else, or nobody', () => {
+    const grant = servedGrants().find((g) => g.value === READ)!;
+    expect(grantAllowsCall(grant, { customer_id: 'steps.resolve_customer.id' })).toBe(true);
+    expect(grantAllowsCall(grant, { customer_id: 'another-customer' })).toBe(false);
+    expect(grantAllowsCall(grant, {})).toBe(false);
+  });
+
+  // And nothing ELSE widened or narrowed on the way across: a copier that stopped matching on kind
+  // could just as easily land a pin on the wrong row.
+  it('leaves every other permission the hub served exactly as wide as it was', () => {
+    const pinned = servedGrants()
+      .filter((g) => Object.keys(grantPin(g)).length > 0)
+      .map((g) => `${g.kind} ${g.value}`)
+      .sort();
+    expect(pinned).toEqual([`command ${CANCEL}`, `query ${READ}`].sort());
+  });
+});

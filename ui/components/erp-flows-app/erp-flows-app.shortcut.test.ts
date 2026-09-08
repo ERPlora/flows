@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import './erp-flows-app';
 import type { ErpFlowsApp } from './erp-flows-app';
+import { QUERY_GRANT_PIN_CORE } from '../../lib/ai-draft';
 
 /**
  * **A shortcut that names a card wins over whatever this screen was doing** (flows#58).
@@ -78,12 +79,13 @@ function fakeClient() {
       run: vi.fn(async () => ({})),
       get: vi.fn(async (id: string) => rows.find((r) => r.id === id)),
       // A hub on a CURRENT core, declaring the two step keys `whatsapp-appointment` writes
-      // (`interactive`, hub#1633; `output`, hub#1639). With an empty schema the gallery correctly
-      // refuses to offer the card — the floor of flows#92 is fail-closed — and every test below
+      // (`interactive`, hub#1633; `output`, hub#1639) and reporting a release that can store the
+      // limit its read carries (flows#111). With an empty schema, or an older release, the gallery
+      // correctly refuses to offer the card — both floors are fail-closed — and every test below
       // would go red about a card that never appears, which is not what any of them is asking.
       schema: vi.fn(async () => ({
         schema_version: 1,
-        core_version: '1.1.16',
+        core_version: QUERY_GRANT_PIN_CORE,
         schema: {
           $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
         },

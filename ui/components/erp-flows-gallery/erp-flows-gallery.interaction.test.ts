@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
-import { schemaFacts } from '../../lib/ai-draft';
+import { QUERY_GRANT_PIN_CORE, schemaFacts } from '../../lib/ai-draft';
 import type { ErpFlowsGallery } from './erp-flows-gallery';
 import { TEMPLATES } from '../../lib/templates';
 
@@ -12,9 +12,15 @@ import { TEMPLATES } from '../../lib/templates';
  * absent from it. Every test here that is about something ELSE says «a normal hub» once, right
  * here, so the floor is asserted where it belongs and nowhere else.
  */
-const CURRENT_CORE = schemaFacts({
-  $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
-});
+const CURRENT_CORE = schemaFacts(
+  {
+    $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+  },
+  // The release goes in too since flows#111: one need is answered by `core_version` and not by the
+  // schema, so a hub described by its schema alone is a hub that cannot store a read's limit —
+  // and the two appointment cards would be absent from every test in this file.
+  QUERY_GRANT_PIN_CORE,
+);
 
 
 /**

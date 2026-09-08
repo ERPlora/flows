@@ -30,6 +30,7 @@
  * against the module catalogue (ADR-0055) — same discipline as `plain-language.ts`.
  */
 import { OPERATORS, PATH_ROOTS, SCHEMA_VERSION, readDoc } from './flow-doc';
+import { coreAtLeast } from './core-version';
 import type { FlowDoc, Step, Trigger } from './flow-doc';
 
 /** The name of the module table the assistant writes into. Used by the queries, not by the kernel. */
@@ -154,7 +155,31 @@ export interface SchemaFacts {
    * the other.
    */
   aiOutput: boolean;
+  /**
+   * Whether this hub can store a `query` grant that FIXES its parameters (hub#1662).
+   *
+   * The third fail-closed fact, and the only one in here that is **not** read off the schema —
+   * because no schema can answer it. A pin lives in `_flow_grants`, never in the document, so
+   * `GET /api/hub/flows/schema` carries no `grant`, no `pin` and no `payload` anywhere in it, and
+   * its `schema_version` is `const 1` on `v1.1.15`, `v1.1.16` and `develop` alike. What is left is
+   * the `core_version` the SAME response carries, against {@link QUERY_GRANT_PIN_CORE}.
+   *
+   * Being wrong about it costs more than the other two. Below the floor `check_grants` refuses the
+   * pin and `PUT …/grants` is all-or-nothing, so the recipe does not install with the wide
+   * permission — it installs with NONE and stops at its first step.
+   */
+  queryGrantPin: boolean;
 }
+
+/**
+ * The release that first stores the limit a `query` grant carries — `GrantKind::can_pin(Query)`.
+ *
+ * Measured, not assumed: `crates/runtime/src/flows/grants.rs` has no `can_pin` at all in `v1.1.15`
+ * or `v1.1.16`, and has it in `develop` — so the first release that can hold this pin is the next
+ * one. `whatsapp_inbox` declares the same number as its own `compatibility.min_erplora_version`
+ * for the same recipe (whatsapp_inbox#119), and the two must not drift.
+ */
+export const QUERY_GRANT_PIN_CORE = '1.1.17';
 
 function at(root: unknown, path: string[]): unknown {
   let cur = root;
@@ -183,8 +208,13 @@ function enumAt(root: unknown, path: string[]): string[] | undefined {
  *
  * The fallback is not a guess: it is `flow-doc.ts`, which mirrors `def.rs` and is what the rest of
  * the editor already applies while the owner types.
+ *
+ * `coreVersion` is the `core_version` of that same response, and it answers the one fact no schema
+ * can ({@link SchemaFacts.queryGrantPin}). It is optional so that every existing
+ * `schemaFacts(undefined)` stays what it was — a hub that has told us nothing — rather than
+ * becoming a hub that is assumed to be current.
  */
-export function schemaFacts(schema: unknown): SchemaFacts {
+export function schemaFacts(schema: unknown, coreVersion?: unknown): SchemaFacts {
   const operators =
     Object.keys(
       (at(schema, ['$defs', 'condition', 'additionalProperties', 'properties']) as
@@ -225,6 +255,11 @@ export function schemaFacts(schema: unknown): SchemaFacts {
     // definition down with it too. Measured on the published schemas: `v1.1.15` declares neither
     // of the two and `v1.1.16` declares both.
     aiOutput: !!at(schema, ['$defs', 'step', 'properties', 'output']),
+    // Not `at(schema, …)` like every line above it, because there is nothing in the schema to
+    // read: this one is answered by the version the same response carries, and by nothing else.
+    // A caller that does not hand it over gets `false`, which is the same fail-closed default the
+    // two facts above take when the schema could not be read.
+    queryGrantPin: coreAtLeast(coreVersion, QUERY_GRANT_PIN_CORE),
   };
 }
 

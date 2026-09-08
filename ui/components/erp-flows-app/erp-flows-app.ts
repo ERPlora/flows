@@ -479,7 +479,10 @@ export class ErpFlowsApp extends LitElement {
     try {
       const schema = await client.flows.schema();
       this.coreVersion = schema?.core_version ?? '';
-      this.facts = schemaFacts(schema?.schema);
+      // The version goes in TOO (flows#111): one capability a card can need — «this hub stores the
+      // limit a read carries», hub#1662 — is nowhere in the schema's shape, and this response is
+      // the only place the editor is ever told which release it is talking to.
+      this.facts = schemaFacts(schema?.schema, schema?.core_version);
       if (schema && schema.schema_version !== SCHEMA_VERSION) {
         // Ahead of its hub, this editor would offer a step the hub refuses to save; behind it, it
         // would hide one that works. Saying which of the two is happening beats a save error.
