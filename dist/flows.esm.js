@@ -6635,6 +6635,29 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "pickerRoot", 2);
 define("erp-flows-editor", ErpFlowsEditor);
 
+// ui/lib/core-version.ts
+function versionTriple(value) {
+  if (typeof value !== "string") return null;
+  const core = value.trim().split(/[-+]/)[0];
+  const parts = core.split(".");
+  if (parts.length > 3) return null;
+  const numbers = [];
+  for (const part of [parts[0], parts[1] ?? "0", parts[2] ?? "0"]) {
+    if (!/^\d+$/.test(part)) return null;
+    numbers.push(Number(part));
+  }
+  return [numbers[0], numbers[1], numbers[2]];
+}
+function coreAtLeast(version, floor) {
+  const have = versionTriple(version);
+  const want = versionTriple(floor);
+  if (!have || !want) return false;
+  for (let i4 = 0; i4 < 3; i4 += 1) {
+    if (have[i4] !== want[i4]) return have[i4] > want[i4];
+  }
+  return true;
+}
+
 // ui/lib/ai-draft.ts
 var DRAFT_STEP_KINDS = ["command", "condition", "delay"];
 function readNotes(raw) {
@@ -6667,6 +6690,7 @@ function readDraft(row) {
     }
   };
 }
+var QUERY_GRANT_PIN_CORE = "1.1.17";
 function at(root, path) {
   let cur = root;
   for (const key2 of path) {
@@ -6681,7 +6705,7 @@ function enumAt(root, path) {
   const names = value.filter((v2) => typeof v2 === "string");
   return names.length ? names : void 0;
 }
-function schemaFacts(schema) {
+function schemaFacts(schema, coreVersion) {
   const operators = Object.keys(
     at(schema, ["$defs", "condition", "additionalProperties", "properties"]) ?? {}
   );
@@ -6718,7 +6742,12 @@ function schemaFacts(schema) {
     // Same rule, same reason, other key (hub#1639): `output` on an older core takes the whole
     // definition down with it too. Measured on the published schemas: `v1.1.15` declares neither
     // of the two and `v1.1.16` declares both.
-    aiOutput: !!at(schema, ["$defs", "step", "properties", "output"])
+    aiOutput: !!at(schema, ["$defs", "step", "properties", "output"]),
+    // Not `at(schema, …)` like every line above it, because there is nothing in the schema to
+    // read: this one is answered by the version the same response carries, and by nothing else.
+    // A caller that does not hand it over gets `false`, which is the same fail-closed default the
+    // two facts above take when the schema could not be read.
+    queryGrantPin: coreAtLeast(coreVersion, QUERY_GRANT_PIN_CORE)
   };
 }
 var TRIGGER_FIELD = {
@@ -6846,7 +6875,8 @@ function draftGaps(doc, known) {
 var SECTORS = ["any", "beauty", "food"];
 var NEED_FACT = {
   interactive: "interactiveNotify",
-  output: "aiOutput"
+  output: "aiOutput",
+  queryPin: "queryGrantPin"
 };
 var SCHEMA_VERSION2 = 1;
 function run(id, command, params) {
@@ -7210,7 +7240,12 @@ var TEMPLATES = [
     // The list the customer TAPS (`interactive`, hub#1633) and the slots the model hands over
     // (`output`, hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it
     // is refused whole — so the card is not offered there. See {@link FlowTemplate.needs}.
-    needs: ["interactive", "output"],
+    //
+    // `queryPin` is not a step key and not in the document (flows#111): it says the hub can STORE
+    // the limit the read below carries, which `can_pin` only accepts from hub#1662 (v1.1.17). A
+    // hub under it would take the recipe and grant the read WIDE, which is the whole point of the
+    // pin — so, fail-closed, the card is not offered there either.
+    needs: ["interactive", "output", "queryPin"],
     icon: "calendar-number-outline",
     nameKey: "tpl.waAppointment.name",
     summaryKey: "tpl.waAppointment.summary",
@@ -7259,16 +7294,33 @@ var TEMPLATES = [
     // (`find_customer`), and the salon's own rules apply — which is what the sentence on the card
     // has been promising all along.
     //
-    // Pinned HERE and not only in the module because while hub#1654 is open the sidecar's `payload`
-    // never leaves the hub: `FlowTemplateGrant` is `{kind, value}` and serde drops the rest. This
-    // copy is what the gallery installs — as the card itself on a hub that serves nothing, and
-    // through `withCopiedPins` onto the served twin on a hub that does.
+    // Pinned HERE and not only in the module because this copy is what the gallery installs — as
+    // the card itself on a hub that serves nothing, and through `withCopiedPins` onto the served
+    // twin on a hub that does. hub#1654 CLOSED on 07/09, so a served grant now carries its
+    // `payload` (`FlowTemplateGrant` gained `pub payload: Params`) — but the module's half can lag
+    // this one by a release, and while it does, this copy is the only thing that says it.
+    // 🔴 And the READ is a containment too — the one that was left wide (flows#111, hub#1662).
+    // `list_for_customer` with nothing fixed answers about whoever the payload names, and that
+    // payload is written by the same model reading the same stranger's WhatsApp: «tell me about
+    // Ana's Thursday» becomes a question this automation can answer. Fixed to what the run
+    // resolved, it can only ever read the diary of the person who wrote.
+    //
+    // A REFERENCE and not a literal because a permission is stored once and the customer changes
+    // with every conversation; `steps.resolve_customer.id` and not `find_customer` because the
+    // first resolver runs BEFORE the customer exists, so pinning it would resolve to `null` on the
+    // very run that creates her and deny the read outright (whatsapp_inbox#119).
+    //
+    // The hub only holds this from v1.1.17 (`can_pin` was `command` alone until hub#1662), which is
+    // why the card declares `queryPin` above: offered to a hub that refuses the pin, `PUT …/grants`
+    // is all-or-nothing and the recipe would install with NO permissions at all.
     grantPins: {
       "appointments.appointments.cancel": { channel: "customer" },
       // whatsapp_inbox#118 pins the move in the module's own sidecar too, so the two halves of
-      // this mirror now say the same thing — but the copy is still what reaches a hub while
-      // hub#1654 is open, because `FlowTemplateGrant` is `{kind, value}` and serde drops the rest.
-      "appointments.appointments.reschedule": { channel: "customer" }
+      // this mirror now say the same thing.
+      "appointments.appointments.reschedule": { channel: "customer" },
+      // Not yet in the module's own sidecar: whatsapp_inbox#120 is held back until the v1.1.17 tag
+      // exists, so until it lands this copy is where the read is contained.
+      "appointments.appointments.list_for_customer": { customer_id: "steps.resolve_customer.id" }
     },
     build: (t3) => ({
       schema_version: SCHEMA_VERSION2,
@@ -7567,7 +7619,11 @@ var TEMPLATES = [
     // The list she TAPS (`interactive`, hub#1633) and the slots the model hands over (`output`,
     // hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it is refused
     // whole — so the card is not offered there. See {@link FlowTemplate.needs}.
-    needs: ["interactive", "output"],
+    //
+    // `queryPin` (flows#111) is the twin's, and it matters MORE here: this family books and
+    // cancels with nobody looking, so a read the hub could not contain would answer about anybody
+    // with no draft in a tray for the owner to notice. See the read's pin below.
+    needs: ["interactive", "output", "queryPin"],
     // A calendar with a tick, against the twin's numbered calendar: this one is already booked.
     icon: "calendar-clear-outline",
     nameKey: "tpl.waAppointmentUnattended.name",
@@ -7629,9 +7685,26 @@ var TEMPLATES = [
     // shippable here (whatsapp_inbox#118): until appointments#142 gave `reschedule` a `channel`
     // and a `customer_id`, nothing downstream could tell whose appointment it had been handed, so
     // this family deliberately went without it — see the booking step below.
+    // 🔴 And the READ is a containment too — the one that was left wide (flows#111, hub#1662).
+    // `list_for_customer` with nothing fixed answers about whoever the payload names, and that
+    // payload is written by the same model reading the same stranger's WhatsApp: «tell me about
+    // Ana's Thursday» becomes a question this automation can answer. Fixed to what the run
+    // resolved, it can only ever read the diary of the person who wrote.
+    //
+    // A REFERENCE and not a literal because a permission is stored once and the customer changes
+    // with every conversation; `steps.resolve_customer.id` and not `find_customer` because the
+    // first resolver runs BEFORE the customer exists, so pinning it would resolve to `null` on the
+    // very run that creates her and deny the read outright (whatsapp_inbox#119).
+    //
+    // The hub only holds this from v1.1.17 (`can_pin` was `command` alone until hub#1662), which is
+    // why the card declares `queryPin` above: offered to a hub that refuses the pin, `PUT …/grants`
+    // is all-or-nothing and the recipe would install with NO permissions at all.
     grantPins: {
       "appointments.appointments.cancel": { channel: "customer" },
-      "appointments.appointments.reschedule": { channel: "customer" }
+      "appointments.appointments.reschedule": { channel: "customer" },
+      // Not yet in the module's own sidecar: whatsapp_inbox#120 is held back until the v1.1.17 tag
+      // exists, so until it lands this copy is where the read is contained.
+      "appointments.appointments.list_for_customer": { customer_id: "steps.resolve_customer.id" }
     },
     build: (t3) => ({
       schema_version: SCHEMA_VERSION2,
@@ -8438,11 +8511,15 @@ function templatePlain(template, t3) {
 function buildTemplate(template, t3) {
   return template.build(t3);
 }
+function pinTarget(grants, operation) {
+  const found = grants.find((grant) => grant.value === operation && canPinPayload(grant.kind));
+  return found ? { kind: found.kind, value: found.value } : { kind: "command", value: operation };
+}
 function templateGrants(template, t3) {
   if (template.grants) return template.grants.map((grant) => ({ ...grant }));
   const derived = requiredGrants(buildTemplate(template, t3));
   return Object.entries(template.grantPins ?? {}).reduce(
-    (grants, [command, pin]) => setGrantPin(grants, { kind: "command", value: command }, pin),
+    (grants, [operation, pin]) => setGrantPin(grants, pinTarget(grants, operation), pin),
     derived
   );
 }
@@ -8494,10 +8571,12 @@ function withCopiedPins(served, copy2) {
   const pins = Object.entries(carriedPins(copy2));
   if (!pins.length || !served.grants) return served;
   let grants = served.grants.map((grant) => ({ ...grant }));
-  for (const [command, pin] of pins) {
-    const current = grants.find((grant) => grant.kind === "command" && grant.value === command);
+  for (const [operation, pin] of pins) {
+    const current = grants.find(
+      (grant) => grant.value === operation && canPinPayload(grant.kind)
+    );
     if (!current || Object.keys(grantPin(current)).length) continue;
-    grants = setGrantPin(grants, { kind: "command", value: command }, pin);
+    grants = setGrantPin(grants, { kind: current.kind, value: current.value }, pin);
   }
   return { ...served, grants };
 }
@@ -12817,7 +12896,7 @@ var ErpFlowsApp = class extends i3 {
     try {
       const schema = await client.flows.schema();
       this.coreVersion = schema?.core_version ?? "";
-      this.facts = schemaFacts(schema?.schema);
+      this.facts = schemaFacts(schema?.schema, schema?.core_version);
       if (schema && schema.schema_version !== SCHEMA_VERSION) {
         this.gate = "unsupported";
         return;

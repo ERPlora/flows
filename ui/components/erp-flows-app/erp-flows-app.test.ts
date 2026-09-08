@@ -156,6 +156,48 @@ describe('the list of automations', () => {
     expect(gallery!.facts?.aiOutput, 'output reached the gallery').toBe(true);
   });
 
+  /**
+   * **The half of the hand-off that is NOT in the schema** (flows#111).
+   *
+   * One capability a card can need — «this hub stores the limit a READ carries», hub#1662 — is not
+   * derivable from the schema's shape: the schema declares no grants and no pins, and
+   * `schema_version` has been `const 1` since v1.1.15. The same response carries `core_version`,
+   * and that is the only thing that answers it, so the wire is `schemaFacts(schema, core_version)`
+   * and not `schemaFacts(schema)`.
+   *
+   * Dropping the second argument fails the same silent way as dropping `.facts` above: every fact
+   * that IS in the schema keeps arriving, the two appointment cards vanish from every hub
+   * including a current one, and nothing else in the suite notices.
+   */
+  const galleryFactsOn = async (coreVersion: string) => {
+    const client = fakeClient({
+      flows: {
+        list: vi.fn(async () => []),
+        schema: vi.fn(async () => ({
+          schema_version: 1,
+          core_version: coreVersion,
+          schema: { $defs: { step: { properties: { interactive: {}, output: {} } } } },
+        })),
+      },
+    });
+    const el = await mount(client);
+    const gallery = el.renderRoot.querySelector('erp-flows-gallery') as
+      | (Element & { facts?: { queryGrantPin: boolean } })
+      | null;
+    expect(gallery, 'the gallery is on screen').toBeTruthy();
+    return gallery!.facts;
+  };
+
+  it('tells the gallery which RELEASE the hub is, not only what its schema declares', async () => {
+    expect((await galleryFactsOn('1.1.17'))?.queryGrantPin).toBe(true);
+  });
+
+  // The other side, so the assertion above cannot pass on a hard-coded `true`: the very release
+  // below the floor, which declares both step keys and still refuses the pin.
+  it('says a hub one release short cannot hold a read\u2019s limit', async () => {
+    expect((await galleryFactsOn('1.1.16'))?.queryGrantPin).toBe(false);
+  });
+
   it('pauses one WITHOUT touching what it does', async () => {
     // `PUT /flows/{id}` revalidates the document and re-seeds the triggers. Sending anything less
     // than the whole flow to flip a switch would rewrite the automation.

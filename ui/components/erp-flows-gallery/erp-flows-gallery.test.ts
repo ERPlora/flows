@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
-import { schemaFacts } from '../../lib/ai-draft';
+import { QUERY_GRANT_PIN_CORE, schemaFacts } from '../../lib/ai-draft';
 import type { SchemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery } from './erp-flows-gallery';
 import { ErpFlowsApp } from '../erp-flows-app/erp-flows-app';
@@ -15,9 +15,15 @@ import en from '../../../locales/en.json';
  * absent from it. Every test here that is about something ELSE says «a normal hub» once, right
  * here, so the floor is asserted where it belongs and nowhere else.
  */
-const CURRENT_CORE = schemaFacts({
-  $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
-});
+const CURRENT_CORE = schemaFacts(
+  {
+    $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+  },
+  // The release goes in too since flows#111: one need is answered by `core_version` and not by the
+  // schema, so a hub described by its schema alone is a hub that cannot store a read's limit —
+  // and the two appointment cards would be absent from every test in this file.
+  QUERY_GRANT_PIN_CORE,
+);
 
 
 /** The shell's translator, reduced to the lookup a test needs, `{param}` included. */
@@ -469,10 +475,16 @@ describe('a card that would double up on a trigger says so first (whatsapp_inbox
  * save. The floor is the CARD's, so every other card of the sector stays on the shelf.
  */
 describe('the gallery does not offer a recipe this hub could not parse (flows#92)', () => {
+  // The release is fixed at the floor and the KEYS are what each test varies: this describe is
+  // about the step-key half of `needs`, and a hub with no release would hide the card for the
+  // other half (flows#111) — green for a reason none of these tests is asking about.
   const declaring = (...keys: string[]) =>
-    schemaFacts({
-      $defs: { step: { properties: Object.fromEntries(keys.map((k) => [k, { type: 'object' }])) } },
-    });
+    schemaFacts(
+      {
+        $defs: { step: { properties: Object.fromEntries(keys.map((k) => [k, { type: 'object' }])) } },
+      },
+      QUERY_GRANT_PIN_CORE,
+    );
 
   async function shelf(facts?: SchemaFacts): Promise<ErpFlowsGallery> {
     const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;

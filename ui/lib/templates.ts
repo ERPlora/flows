@@ -28,7 +28,7 @@
  * honest place for them.
  */
 import type { FlowDoc, Grant, Step } from './flow-doc';
-import { grantPin, requiredGrants, setGrantPin } from './flow-doc';
+import { canPinPayload, grantPin, requiredGrants, setGrantPin } from './flow-doc';
 import type { Translator } from './plain-language';
 import type { SchemaFacts } from './ai-draft';
 import { schemaFacts } from './ai-draft';
@@ -60,15 +60,21 @@ export interface TemplateBlank {
 }
 
 /**
- * A kernel capability a card's document depends on, named by the step key that carries it and
- * answered by the schema the hub serves — see {@link SchemaFacts}.
+ * A kernel capability a card depends on, answered by what the hub serves at
+ * `GET /api/hub/flows/schema` — see {@link SchemaFacts}.
+ *
+ * Most are named by the STEP KEY that carries them, because the document is where they show up and
+ * a hub whose schema does not declare the key refuses that document whole. `queryPin` is the one
+ * that is not (flows#111): a limit on a READ is not written in the document at all — it lives in
+ * the permission — so the schema's shape cannot answer it and the hub's RELEASE has to.
  */
-export type TemplateNeed = 'interactive' | 'output';
+export type TemplateNeed = 'interactive' | 'output' | 'queryPin';
 
-/** Which fact of the hub's schema answers each need. */
+/** Which fact of the hub's answer settles each need. */
 const NEED_FACT: Record<TemplateNeed, keyof SchemaFacts> = {
   interactive: 'interactiveNotify',
   output: 'aiOutput',
+  queryPin: 'queryGrantPin',
 };
 
 export interface FlowTemplate {
@@ -556,7 +562,12 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     // The list the customer TAPS (`interactive`, hub#1633) and the slots the model hands over
     // (`output`, hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it
     // is refused whole — so the card is not offered there. See {@link FlowTemplate.needs}.
-    needs: ['interactive', 'output'],
+    //
+    // `queryPin` is not a step key and not in the document (flows#111): it says the hub can STORE
+    // the limit the read below carries, which `can_pin` only accepts from hub#1662 (v1.1.17). A
+    // hub under it would take the recipe and grant the read WIDE, which is the whole point of the
+    // pin — so, fail-closed, the card is not offered there either.
+    needs: ['interactive', 'output', 'queryPin'],
     icon: 'calendar-number-outline',
     nameKey: 'tpl.waAppointment.name',
     summaryKey: 'tpl.waAppointment.summary',
@@ -605,16 +616,33 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     // (`find_customer`), and the salon's own rules apply — which is what the sentence on the card
     // has been promising all along.
     //
-    // Pinned HERE and not only in the module because while hub#1654 is open the sidecar's `payload`
-    // never leaves the hub: `FlowTemplateGrant` is `{kind, value}` and serde drops the rest. This
-    // copy is what the gallery installs — as the card itself on a hub that serves nothing, and
-    // through `withCopiedPins` onto the served twin on a hub that does.
+    // Pinned HERE and not only in the module because this copy is what the gallery installs — as
+    // the card itself on a hub that serves nothing, and through `withCopiedPins` onto the served
+    // twin on a hub that does. hub#1654 CLOSED on 07/09, so a served grant now carries its
+    // `payload` (`FlowTemplateGrant` gained `pub payload: Params`) — but the module's half can lag
+    // this one by a release, and while it does, this copy is the only thing that says it.
+    // 🔴 And the READ is a containment too — the one that was left wide (flows#111, hub#1662).
+    // `list_for_customer` with nothing fixed answers about whoever the payload names, and that
+    // payload is written by the same model reading the same stranger's WhatsApp: «tell me about
+    // Ana's Thursday» becomes a question this automation can answer. Fixed to what the run
+    // resolved, it can only ever read the diary of the person who wrote.
+    //
+    // A REFERENCE and not a literal because a permission is stored once and the customer changes
+    // with every conversation; `steps.resolve_customer.id` and not `find_customer` because the
+    // first resolver runs BEFORE the customer exists, so pinning it would resolve to `null` on the
+    // very run that creates her and deny the read outright (whatsapp_inbox#119).
+    //
+    // The hub only holds this from v1.1.17 (`can_pin` was `command` alone until hub#1662), which is
+    // why the card declares `queryPin` above: offered to a hub that refuses the pin, `PUT …/grants`
+    // is all-or-nothing and the recipe would install with NO permissions at all.
     grantPins: {
       'appointments.appointments.cancel': { channel: 'customer' },
       // whatsapp_inbox#118 pins the move in the module's own sidecar too, so the two halves of
-      // this mirror now say the same thing — but the copy is still what reaches a hub while
-      // hub#1654 is open, because `FlowTemplateGrant` is `{kind, value}` and serde drops the rest.
+      // this mirror now say the same thing.
       'appointments.appointments.reschedule': { channel: 'customer' },
+      // Not yet in the module's own sidecar: whatsapp_inbox#120 is held back until the v1.1.17 tag
+      // exists, so until it lands this copy is where the read is contained.
+      'appointments.appointments.list_for_customer': { customer_id: 'steps.resolve_customer.id' },
     },
     build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
@@ -914,7 +942,11 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     // The list she TAPS (`interactive`, hub#1633) and the slots the model hands over (`output`,
     // hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it is refused
     // whole — so the card is not offered there. See {@link FlowTemplate.needs}.
-    needs: ['interactive', 'output'],
+    //
+    // `queryPin` (flows#111) is the twin's, and it matters MORE here: this family books and
+    // cancels with nobody looking, so a read the hub could not contain would answer about anybody
+    // with no draft in a tray for the owner to notice. See the read's pin below.
+    needs: ['interactive', 'output', 'queryPin'],
     // A calendar with a tick, against the twin's numbered calendar: this one is already booked.
     icon: 'calendar-clear-outline',
     nameKey: 'tpl.waAppointmentUnattended.name',
@@ -976,9 +1008,26 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     // shippable here (whatsapp_inbox#118): until appointments#142 gave `reschedule` a `channel`
     // and a `customer_id`, nothing downstream could tell whose appointment it had been handed, so
     // this family deliberately went without it — see the booking step below.
+    // 🔴 And the READ is a containment too — the one that was left wide (flows#111, hub#1662).
+    // `list_for_customer` with nothing fixed answers about whoever the payload names, and that
+    // payload is written by the same model reading the same stranger's WhatsApp: «tell me about
+    // Ana's Thursday» becomes a question this automation can answer. Fixed to what the run
+    // resolved, it can only ever read the diary of the person who wrote.
+    //
+    // A REFERENCE and not a literal because a permission is stored once and the customer changes
+    // with every conversation; `steps.resolve_customer.id` and not `find_customer` because the
+    // first resolver runs BEFORE the customer exists, so pinning it would resolve to `null` on the
+    // very run that creates her and deny the read outright (whatsapp_inbox#119).
+    //
+    // The hub only holds this from v1.1.17 (`can_pin` was `command` alone until hub#1662), which is
+    // why the card declares `queryPin` above: offered to a hub that refuses the pin, `PUT …/grants`
+    // is all-or-nothing and the recipe would install with NO permissions at all.
     grantPins: {
       'appointments.appointments.cancel': { channel: 'customer' },
       'appointments.appointments.reschedule': { channel: 'customer' },
+      // Not yet in the module's own sidecar: whatsapp_inbox#120 is held back until the v1.1.17 tag
+      // exists, so until it lands this copy is where the read is contained.
+      'appointments.appointments.list_for_customer': { customer_id: 'steps.resolve_customer.id' },
     },
     build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
@@ -2030,6 +2079,25 @@ export function buildTemplate(template: FlowTemplate, t: Translator): FlowDoc {
  * where the typo lives, and a grant naming a command that does not exist reads as authorisation on
  * screen right up until the automation silently does nothing.
  */
+/**
+ * The permission a declared limit lands on, found by the operation it names (flows#111).
+ *
+ * The kind is READ OUT of the permissions the card derived instead of assumed, because a limit is
+ * not only a command's any more: `channel: "customer"` lands on a `command` and
+ * `customer_id: "steps.…"` on a `query`, and both are values the hub is handed to judge
+ * ({@link canPinPayload}). Assuming `command` does not fail loudly — {@link setGrantPin} matches on
+ * `kind` AND `value`, so the pin lands on nothing at all and the read installs WIDE while the
+ * source above still reads like a containment.
+ *
+ * The fallback keeps that old behaviour for an operation the card does not use — it lands on
+ * nothing — because the catalogue guard already refuses that case at build time, and inventing a
+ * row here would ask the hub for a permission the document never justified.
+ */
+function pinTarget(grants: readonly Grant[], operation: string): Pick<Grant, 'kind' | 'value'> {
+  const found = grants.find((grant) => grant.value === operation && canPinPayload(grant.kind));
+  return found ? { kind: found.kind, value: found.value } : { kind: 'command', value: operation };
+}
+
 export function templateGrants(template: FlowTemplate, t: Translator): Grant[] {
   // flows#98 — a served card asks for what its module DECLARED in `<family>.grants.json`, which is
   // the list `erplora validate` checked against the recipe. Deriving them again here would be a
@@ -2040,10 +2108,10 @@ export function templateGrants(template: FlowTemplate, t: Translator): Grant[] {
   // flows#80 — the limits the card declares, laid onto the permissions it derived. `setGrantPin`
   // and not a hand-rolled merge on purpose: it is the same function the Permissions screen writes
   // pins with, so a limit shown here and a limit typed there cannot drift into different shapes.
-  // A pin naming a command this card does not run lands on nothing; the catalogue test above
+  // A pin naming an operation this card does not use lands on nothing; the catalogue test above
   // refuses that at build time rather than letting it read as a containment that fixes nothing.
   return Object.entries(template.grantPins ?? {}).reduce(
-    (grants, [command, pin]) => setGrantPin(grants, { kind: 'command', value: command }, pin),
+    (grants, [operation, pin]) => setGrantPin(grants, pinTarget(grants, operation), pin),
     derived,
   );
 }
@@ -2232,10 +2300,15 @@ function withCopiedPins(served: FlowTemplate, copy: FlowTemplate): FlowTemplate 
   const pins = Object.entries(carriedPins(copy));
   if (!pins.length || !served.grants) return served;
   let grants: Grant[] = served.grants.map((grant) => ({ ...grant }));
-  for (const [command, pin] of pins) {
-    const current = grants.find((grant) => grant.kind === 'command' && grant.value === command);
+  for (const [operation, pin] of pins) {
+    // Matched by operation and not by an assumed `command`, for the reason {@link pinTarget}
+    // carries: a limit on a READ would find no row, and the served card would keep the wide
+    // permission with every test here still green.
+    const current = grants.find(
+      (grant) => grant.value === operation && canPinPayload(grant.kind),
+    );
     if (!current || Object.keys(grantPin(current)).length) continue;
-    grants = setGrantPin(grants, { kind: 'command', value: command }, pin);
+    grants = setGrantPin(grants, { kind: current.kind, value: current.value }, pin);
   }
   return { ...served, grants };
 }

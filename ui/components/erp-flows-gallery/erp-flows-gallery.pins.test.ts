@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
-import { schemaFacts } from '../../lib/ai-draft';
+import { QUERY_GRANT_PIN_CORE, schemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery } from './erp-flows-gallery';
 import { carriedPins, templateById, templateGrants } from '../../lib/templates';
 import { grantPin, type Grant } from '../../lib/flow-doc';
@@ -15,9 +15,15 @@ import es from '../../../locales/es.json';
  * absent from it. Every test here that is about something ELSE says «a normal hub» once, right
  * here, so the floor is asserted where it belongs and nowhere else.
  */
-const CURRENT_CORE = schemaFacts({
-  $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
-});
+const CURRENT_CORE = schemaFacts(
+  {
+    $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+  },
+  // The release goes in too since flows#111: one need is answered by `core_version` and not by the
+  // schema, so a hub described by its schema alone is a hub that cannot store a read's limit —
+  // and the two appointment cards would be absent from every test in this file.
+  QUERY_GRANT_PIN_CORE,
+);
 
 
 const t = (key: string, params?: Record<string, unknown>): string => {
@@ -37,6 +43,14 @@ const LIMITED = 'whatsapp-appointment-unattended';
 const PLAIN = 'no-show-followup';
 const CANCEL = 'appointments.appointments.cancel';
 const RESCHEDULE = 'appointments.appointments.reschedule';
+/** The READ the same card limits since flows#111 — the diary of whoever wrote, and nobody else. */
+const READ = 'appointments.appointments.list_for_customer';
+/** What each limited permission fixes, by operation: the two writes say WHO, the read says WHOSE. */
+const PINS: Record<string, Record<string, unknown>> = {
+  [CANCEL]: { channel: 'customer' },
+  [RESCHEDULE]: { channel: 'customer' },
+  [READ]: { customer_id: 'steps.resolve_customer.id' },
+};
 
 /**
  * A hub whose `PUT …/grants` behaves like the kernel from hub#1623: a complete replace that keeps
@@ -98,14 +112,16 @@ describe('a recipe with a limit installs LIMITED, or it does not install the per
     const [flowId, sent] = h.replaceGrants.mock.calls[0];
     expect(flowId).toBe('created-1');
     // ONLY the limited ones. Everything else stays a decision the owner makes on the Permissions
-    // screen — installing a recipe is not a reason to hand it the rest without being asked. Two
-    // since whatsapp_inbox#118 gave this card the move back: cancelling and moving are both
-    // pinned to `channel: customer`, and neither may install wide.
-    expect(sent.map((g: Grant) => `${g.kind} ${g.value}`)).toEqual([
-      `command ${CANCEL}`,
-      `command ${RESCHEDULE}`,
-    ]);
-    for (const grant of sent) expect(grantPin(grant), grant.value).toEqual({ channel: 'customer' });
+    // screen — installing a recipe is not a reason to hand it the rest without being asked. Three
+    // since flows#111: the two writes whatsapp_inbox#118 pinned to `channel: customer`, and the
+    // READ, which is a containment of the same weight — `list_for_customer` with nothing fixed
+    // answers about every customer in the salon. None of the three may install wide.
+    expect(sent.map((g: Grant) => `${g.kind} ${g.value}`).sort()).toEqual(
+      [`command ${CANCEL}`, `command ${RESCHEDULE}`, `query ${READ}`].sort(),
+    );
+    // Each one with the limit IT declares, not a shared one: asserting «they all fix `channel`»
+    // would have gone green on a read pinned to the wrong field, or to nothing that names a person.
+    for (const grant of sent) expect(grantPin(grant), grant.value).toEqual(PINS[grant.value]);
     // Derived from the card rather than from this list, so a limit added to it is installed here
     // too instead of being silently left behind.
     expect(sent.map((g: Grant) => g.value).sort()).toEqual(

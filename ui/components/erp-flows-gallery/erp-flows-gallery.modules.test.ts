@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
 import { ErpFlowsGallery } from './erp-flows-gallery';
-import { schemaFacts } from '../../lib/ai-draft';
+import { QUERY_GRANT_PIN_CORE, schemaFacts } from '../../lib/ai-draft';
 import { TEMPLATES } from '../../lib/templates';
 import { moduleTemplateId } from '../../lib/module-templates';
 import { execFileSync } from 'node:child_process';
@@ -19,9 +19,15 @@ import en from '../../../locales/en.json';
  * came with, that the copy steps aside without breaking the link other modules publish, and that a
  * hub too old to serve any of it still shows the gallery it always showed.
  */
-const CURRENT_CORE = schemaFacts({
-  $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
-});
+const CURRENT_CORE = schemaFacts(
+  {
+    $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+  },
+  // The release goes in too since flows#111: one need is answered by `core_version` and not by the
+  // schema, so a hub described by its schema alone is a hub that cannot store a read's limit —
+  // and the two appointment cards would be absent from every test in this file.
+  QUERY_GRANT_PIN_CORE,
+);
 
 const t = (key: string, params?: Record<string, unknown>): string => {
   let cur: unknown = en;
