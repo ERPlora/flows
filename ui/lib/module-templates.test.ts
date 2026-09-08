@@ -444,12 +444,18 @@ describe('the unattended WhatsApp card moves an appointment only as the customer
     expect(pinned).toEqual([`command ${CANCEL}`, `command ${RESCHEDULE}`]);
   });
 
-  it('does not touch the hand copy, which cannot move an appointment at all', () => {
-    // The copy mirrors the family as PUBLISHED today (13 grants, no move — whatsapp_inbox#74's
-    // scope cut). A pin staged for the served twin must not read as a permission this document
-    // asks for: on a hub that serves nothing, the card is still exactly what it was.
-    const asked = templateGrants(unattended, t).map((g) => g.value);
-    expect(asked).toContain(CANCEL);
-    expect(asked).not.toContain(RESCHEDULE);
+  it('asks for the move on the hand copy too, and just as narrowly', () => {
+    // whatsapp_inbox#118 landed, so the copy mirrors a family that MOVES: the limit stopped being
+    // something staged for the served twin and became this card's own (`grantPins`). On a hub that
+    // serves nothing, the hand copy is the only carrier of it — so it has to be narrow HERE.
+    const grant = templateGrants(unattended, t).find((g) => g.value === RESCHEDULE);
+    expect(templateGrants(unattended, t).map((g) => g.value)).toContain(CANCEL);
+    expect(grant, 'the hand copy asks to move appointments').toBeTruthy();
+    expect(grantPin(grant!)).toEqual({ channel: 'customer' });
+    // …and it is a containment, not decoration: the call it exists to stop is refused.
+    const move = { appointment_id: 'a1', start_datetime: '2026-09-10T10:00:00Z' };
+    expect(grantAllowsCall(grant!, { ...move, channel: 'customer', customer_id: 'c1' })).toBe(true);
+    expect(grantAllowsCall(grant!, { ...move, channel: 'staff' })).toBe(false);
+    expect(grantAllowsCall(grant!, move)).toBe(false);
   });
 });

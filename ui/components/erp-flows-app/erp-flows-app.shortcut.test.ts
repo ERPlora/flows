@@ -77,7 +77,17 @@ function fakeClient() {
       getRun: vi.fn(async () => ({ steps: [] })),
       run: vi.fn(async () => ({})),
       get: vi.fn(async (id: string) => rows.find((r) => r.id === id)),
-      schema: vi.fn(async () => ({ schema_version: 1, core_version: '1.0.2', schema: {} })),
+      // A hub on a CURRENT core, declaring the two step keys `whatsapp-appointment` writes
+      // (`interactive`, hub#1633; `output`, hub#1639). With an empty schema the gallery correctly
+      // refuses to offer the card — the floor of flows#92 is fail-closed — and every test below
+      // would go red about a card that never appears, which is not what any of them is asking.
+      schema: vi.fn(async () => ({
+        schema_version: 1,
+        core_version: '1.1.16',
+        schema: {
+          $defs: { step: { properties: { interactive: { type: 'object' }, output: { type: 'object' } } } },
+        },
+      })),
       approvals: vi.fn(async () => []),
     },
     events: {
