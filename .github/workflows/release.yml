@@ -65,8 +65,17 @@ jobs:
     if: ${{ !startsWith(github.event.head_commit.message, 'chore(release)') }}
     uses: ERPlora/module-toolkit/.github/workflows/module-gate.yml@main
 
+  # The same reasoning as `gate`, applied to the check the shared gate does not carry (flows#107).
+  # Guarding only the pull request would leave the publishing door open: a direct push to main, or
+  # a merge whose gate ran before this job existed, would still bump the version and hand the
+  # marketplace code that does not typecheck. Interim — ERPlora/module-toolkit#230 moves it into
+  # the shared gate, and then both `typecheck` jobs get deleted.
+  typecheck:
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release)') }}
+    uses: ./.github/workflows/typecheck.yml
+
   bump:
-    needs: gate
+    needs: [gate, typecheck]
     # Same switch as the gate it depends on: the organization's own runner when `CI_RUNNER_LABEL`
     # is set, GitHub's image when it is not. Without this the job is INVISIBLY the weak link — the
     # gate would go green on the org runner and the bump would die on a hosted image the Actions

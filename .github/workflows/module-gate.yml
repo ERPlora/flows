@@ -27,3 +27,13 @@ concurrency:
 jobs:
   validate:
     uses: ERPlora/module-toolkit/.github/workflows/module-gate.yml@main
+
+  # `tsc --noEmit`, which the shared gate above does NOT run: it transpiles the TypeScript with
+  # oxc, and oxc strips the types without comparing them (flows#107). Interim and local on purpose
+  # — the shared body is what the other 26 modules run, and 23 of them have no `tsconfig.json` to
+  # point it at. It moves there in ERPlora/module-toolkit#230, and this job goes away with it.
+  #
+  # A separate job, not a step of the one above: the two are independent, so they run in parallel
+  # and a red typecheck still tells you whether the SQL was fine.
+  typecheck:
+    uses: ./.github/workflows/typecheck.yml

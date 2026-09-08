@@ -1,0 +1,105 @@
+# `tsc --noEmit` over this module's TypeScript — ERPlora/flows#107.
+#
+# WHY THIS EXISTS. The shared gate (`ERPlora/module-toolkit/.github/workflows/module-gate.yml`)
+# runs `erplora validate` and `erplora test`, and NEITHER of them typechecks: the toolkit's vitest
+# config transpiles with oxc, which strips the types without ever comparing them. So the module's
+# typecheck had rotted to 44 errors that nothing looked at — and a real one, of the kind that puts
+# a wrong value on a screen, would have been just as invisible as the noise it was buried in. Two
+# of the 44 were exactly that: a component method that shadowed `ChildNode.remove()` (any normal
+# DOM teardown ran the DELETE of a flow) and a getter that shadowed `Element.matches()` (returning
+# an array where the DOM contract promises a boolean, so event delegation matched everything).
+#
+# 🟡 THIS FILE IS THE INTERIM, AND IT IS MEANT TO BE DELETED. The right home is the shared gate,
+# so all 27 modules get it at once — ERPlora/module-toolkit#230. It is not here yet because of what
+# that issue measures: 23 of the 27 modules have no `tsconfig.json` at all (the toolkit would have
+# to SYNTHESISE one), and of the 4 that do, 3 say `extends: "../../tsconfig.json"` — a path that
+# exists only inside the development workspace, so they die on `TS5083` in a bare checkout. That is
+# a design decision, not a flag. `flows` is the first module to switch it on. When the toolkit
+# ships it, DELETE this workflow and the two `uses:` that call it — a check that runs twice is a
+# check nobody maintains.
+#
+# WHY BOTH CONFIGS. `tsconfig.json` compiles what runs in a BROWSER, with `types: []`, so a
+# component that reaches for `process` or `fs` is red there. `tsconfig.test.json` adds the
+# `ui/**/*.test.ts` that really are Node programs. Running only one of the two misses half the
+# code: measured on this module, an error planted in a test file is invisible to `tsconfig.json`
+# (which excludes tests) and an error planted in a component is invisible to nothing — but the
+# Node-globals rule only exists in the first. Both, always.
+name: Typecheck
+
+on:
+  workflow_call:
+
+jobs:
+  tsc:
+    name: tsc --noEmit
+    # Same switch as the shared gate: the organization's own runner when `CI_RUNNER_LABEL` is set,
+    # GitHub's image when it is not, so this job cannot become the weak link that queues forever
+    # against a label nobody answers to.
+    runs-on: ${{ vars.CI_RUNNER_LABEL || 'ubuntu-latest' }}
+    # The whole job measures well under a minute; this is only here so a hung `npm install` cannot
+    # burn the org's Actions budget (private repos are billed by the minute).
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install what `tsc` needs to resolve this module's imports
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Every bare specifier `ui/**` and `types/**` import, and nothing else — checked with
+          # `grep -rhoE "from '[^'.][^']*'"`: `lit`, `lit/decorators.js`, `vitest`, the `node:*`
+          # builtins (hence `@types/node`), and `@erplora/outfitkit/define`, which is NOT installed
+          # because `types/outfitkit-define.d.ts` declares it ambiently (that package ships no
+          # declaration for the subpath — ERPlora/outfitkit#130). No `@erplora/module-sdk` either:
+          # `ui/lib/hub-flows.ts` declares those types itself, on purpose. If an import is ever
+          # added that is not in this list, `tsc` fails on «Cannot find module» — loudly, which is
+          # the behaviour we want, not a silent `any`.
+          #
+          # Versions come from THIS module's package.json, so CI cannot drift from what the author
+          # typechecks against; the fallbacks only apply to a specifier pnpm resolves off-registry.
+          ver() {
+            node -e '
+              const [, manifest, name, fallback] = process.argv;
+              let declared = {};
+              try {
+                const p = require(manifest);
+                declared = { ...p.dependencies, ...p.devDependencies };
+              } catch { /* no package.json: take the fallback */ }
+              const v = declared[name];
+              process.stdout.write(v && /^[~^]?[0-9]/.test(v) ? v : fallback);
+            ' "$PWD/package.json" "$1" "$2"
+          }
+          deps="$RUNNER_TEMP/erplora-flows-tsc-deps"
+          # A scratch prefix, never the module itself: `npm install` here would try to resolve the
+          # `workspace:*` dependencies of package.json and fail as a whole.
+          rm -rf "$deps"
+          mkdir -p "$deps"
+          # `--legacy-peer-deps` for the same reason the toolkit uses it: npm's arborist crashes
+          # walking vitest's optional peers when a new major of the family is published
+          # (module-toolkit#171).
+          npm install --prefix "$deps" --cache "$deps/.npm-cache" \
+            --no-audit --no-fund --loglevel=error --legacy-peer-deps \
+            "typescript@$(ver typescript ^5.9.0)" \
+            "lit@$(ver lit ^3.2.0)" \
+            "vitest@$(ver vitest ^4.1.10)" \
+            "@types/node@$(ver @types/node ^26.0.0)"
+          # `moduleResolution: Bundler` walks up from the file, so the packages have to be
+          # physically resolvable from the module directory.
+          mkdir -p node_modules/@types
+          ln -sfn "$deps/node_modules/lit" node_modules/lit
+          ln -sfn "$deps/node_modules/vitest" node_modules/vitest
+          ln -sfn "$deps/node_modules/@types/node" node_modules/@types/node
+
+      - name: Typecheck both halves
+        shell: bash
+        run: |
+          set -euo pipefail
+          tsc="$RUNNER_TEMP/erplora-flows-tsc-deps/node_modules/typescript/bin/tsc"
+          echo '── production (ui/**, browser globals only) ──'
+          node "$tsc" --noEmit -p tsconfig.json
+          echo '── tests (ui/**/*.test.ts, plus Node globals) ──'
+          node "$tsc" --noEmit -p tsconfig.test.json
