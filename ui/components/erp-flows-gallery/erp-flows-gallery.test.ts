@@ -5,6 +5,7 @@ import type { SchemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery } from './erp-flows-gallery';
 import { ErpFlowsApp } from '../erp-flows-app/erp-flows-app';
 import { TEMPLATES, templateById, buildTemplate } from '../../lib/templates';
+import { moduleTemplateId } from '../../lib/module-templates';
 import en from '../../../locales/en.json';
 
 /**
@@ -62,6 +63,53 @@ const notFound = (): never => {
   throw Object.assign(new Error('nope'), { code: 'not_found' });
 };
 
+/**
+ * **A recipe the way an installed app serves it** (flows#98 → flows#101).
+ *
+ * Several tests below need a card that is offered where the WRITTEN ones are not — one whose
+ * document carries a gated kernel key, or one that survives a hub that has never heard of
+ * `tasks`. Until flows#101 that card was one of the four WhatsApp hand copies; they were the only
+ * written cards with a floor and the only ones witnessing no `tasks` event. They are gone, so the
+ * card comes from where the real one comes from: `GET /api/hub/flows/templates`.
+ *
+ * A served card carries no witnesses on purpose (`module-templates.ts`) — the hub applied every
+ * `requires.json` floor before answering — which is exactly why it is the honest control for «this
+ * hub is missing a module»: the missing module hides the written cards and cannot hide this one.
+ */
+const servedRow = (over: Record<string, unknown> = {}) => ({
+  module: 'whatsapp_inbox',
+  family: 'appointment-from-whatsapp',
+  documents: {
+    en: {
+      schema_version: 1,
+      name: 'WhatsApp → appointment',
+      triggers: [
+        {
+          kind: 'event',
+          event: 'whatsapp_inbox.message.received',
+          filter: { 'event.direction': { neq: 'outbound' } },
+        },
+      ],
+      steps: [
+        { id: 'ask', kind: 'notify', channel: 'whatsapp', interactive: { rows: [] } },
+        { id: 'read', kind: 'ai', output: { slots: 'x' } },
+        { id: 'book', kind: 'command', command: 'appointments.appointments.create', params: {} },
+      ],
+    },
+  },
+  grants: [{ kind: 'command', value: 'appointments.appointments.create' }],
+  requires: { whatsapp_inbox: '2.1.0' },
+  ...over,
+});
+
+/** The unattended twin: the same trigger, which is the whole of the collision warning. */
+const UNATTENDED = 'appointment-from-whatsapp-unattended';
+const servedPair = () => [servedRow(), servedRow({ family: UNATTENDED })];
+const servedId = (family: string): string => moduleTemplateId('whatsapp_inbox', family);
+
+/** `flows.templates` as a hub that serves those rows answers it. */
+const serving = (rows: unknown[] = servedPair()) => ({ templates: vi.fn(async () => rows) });
+
 async function mount(client: unknown): Promise<ErpFlowsGallery> {
   const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
   el.facts = CURRENT_CORE;
@@ -113,11 +161,18 @@ describe('a template this hub cannot run', () => {
   // life) is the sentence below the cards now, once instead of on every grey card.
   it('is not offered at all', async () => {
     const el = await mount(
-      hub({ events: { shape: vi.fn(async (name: string) => (name.startsWith('tasks.') ? notFound() : { event_name: name, declared_by: ['x'], samples: 0, fields: [] })) } }),
+      hub({
+        events: { shape: vi.fn(async (name: string) => (name.startsWith('tasks.') ? notFound() : { event_name: name, declared_by: ['x'], samples: 0, fields: [] })) },
+        // The control has to be a card this probe cannot reach. Since flows#101 EVERY written card
+        // witnesses `tasks.task.created`, so a hub without `tasks` hides the lot and «hidden» and
+        // «broken» would look the same. A SERVED card carries no witnesses — the hub already
+        // decided it can be run — which is precisely the card that must survive this.
+        flows: serving([servedRow()]),
+      }),
     );
     expect(card(el, 'no-show-followup')).toBeNull();
     // The control: the cards this hub CAN run are still there, so «hidden» is not «broken».
-    expect(card(el, 'whatsapp-appointment')).toBeTruthy();
+    expect(card(el, servedId('appointment-from-whatsapp'))).toBeTruthy();
   });
 
   it('does not hide anything while the hub has not answered yet', async () => {
@@ -365,36 +420,48 @@ describe('the gallery says WHICH modules the hidden cards needed (flows#38 · fl
 describe('a card that would double up on a trigger says so first (whatsapp_inbox#58)', () => {
   beforeEach(() => document.body.replaceChildren());
 
+  /**
+   * Both twins come from the APP now (flows#101): the hand copies this describe used to drive are
+   * gone, and the pair the warning is about is the pair the hub serves. Everything else here is
+   * unchanged — same event, same filter, same question put to the owner.
+   */
+  const CARD = servedId(UNATTENDED);
+  const collides = (over: Record<string, unknown> = {}) =>
+    hub({ flows: { ...serving(), ...over } });
+
   /** The attended twin, as the hub would hand it back from `flows.list()`. */
   const attendedFlow = () => ({
     id: 'f1',
     name: 'WhatsApp → appointment proposal',
     enabled: true,
-    definition: buildTemplate(templateById('whatsapp-appointment')!, t) as unknown as Record<string, unknown>,
+    definition: servedRow().documents.en as unknown as Record<string, unknown>,
   });
   const warning = (el: ErpFlowsGallery): Element | null =>
     el.renderRoot.querySelector('[data-same-trigger]');
 
-  it('names the flow already waiting on that event, in the panel, before the button', async () => {
-    const client = hub({ flows: { list: vi.fn(async () => [attendedFlow()]) } });
+  async function openCard(client: unknown): Promise<ErpFlowsGallery> {
     const el = await mount(client);
-    el.open('whatsapp-appointment-unattended');
+    // The card has to BE there before `open` means anything: opening an id this gallery does not
+    // have shows no panel and therefore no warning, which is the shape every assertion below
+    // would read as «no collision». It is the only way this describe can go green proving nothing.
+    expect(card(el, CARD), 'the served card never reached the shelf — the panel proves nothing').toBeTruthy();
+    el.open(CARD);
     await el.updateComplete;
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
     await el.updateComplete;
+    return el;
+  }
 
+  it('names the flow already waiting on that event, in the panel, before the button', async () => {
+    const el = await openCard(collides({ list: vi.fn(async () => [attendedFlow()]) }));
     const note = warning(el);
     expect(note, 'no warning shown for a card that collides').toBeTruthy();
     expect(note?.textContent).toContain('WhatsApp → appointment proposal');
   });
 
   it('still lets them create it — it is their hub', async () => {
-    const client = hub({ flows: { list: vi.fn(async () => [attendedFlow()]) } });
-    const el = await mount(client);
-    el.open('whatsapp-appointment-unattended');
-    await el.updateComplete;
-    for (let i = 0; i < 6; i += 1) await Promise.resolve();
-    await el.updateComplete;
+    const client = collides({ list: vi.fn(async () => [attendedFlow()]) });
+    const el = await openCard(client);
     await el.use();
 
     expect(client.flows.create).toHaveBeenCalledTimes(1);
@@ -404,13 +471,9 @@ describe('a card that would double up on a trigger says so first (whatsapp_inbox
     // The switch-over this card exists for: the salon pauses the attended flow to move to the
     // unattended one. A paused flow does not fire, so there is nothing to double up on — and a
     // warning that still names it tells the owner to do what they have just done.
-    const client = hub({ flows: { list: vi.fn(async () => [{ ...attendedFlow(), enabled: false }]) } });
-    const el = await mount(client);
-    el.open('whatsapp-appointment-unattended');
-    await el.updateComplete;
-    for (let i = 0; i < 6; i += 1) await Promise.resolve();
-    await el.updateComplete;
-
+    const el = await openCard(
+      collides({ list: vi.fn(async () => [{ ...attendedFlow(), enabled: false }]) }),
+    );
     expect(warning(el), 'a PAUSED twin is still being warned about').toBeNull();
   });
 
@@ -423,12 +486,7 @@ describe('a card that would double up on a trigger says so first (whatsapp_inbox
       enabled: true,
       definition: { schema_version: 1, triggers: [{ kind: 'cron', cron: '0 9 * * 5' }], steps: [] },
     };
-    const el = await mount(hub({ flows: { list: vi.fn(async () => [other]) } }));
-    el.open('whatsapp-appointment-unattended');
-    await el.updateComplete;
-    for (let i = 0; i < 6; i += 1) await Promise.resolve();
-    await el.updateComplete;
-
+    const el = await openCard(collides({ list: vi.fn(async () => [other]) }));
     expect(warning(el)).toBeNull();
   });
 
@@ -442,23 +500,19 @@ describe('a card that would double up on a trigger says so first (whatsapp_inbox
     // AFTER the failed load passed against a gallery that DID set an error — the mutant survived.
     // Swapping the client re-runs the load through `updated()`, which is a real path (the shell
     // hands over a new client) and the one where a refusal can reach an open panel.
-    const el = await mount(hub({ flows: { list: vi.fn(async () => []) } }));
-    el.open('whatsapp-appointment-unattended');
-    await el.updateComplete;
+    const el = await openCard(collides({ list: vi.fn(async () => []) }));
 
-    el.client = hub({
-      flows: {
-        list: vi.fn(async () => {
-          throw new Error('nope');
-        }),
-      },
+    el.client = collides({
+      list: vi.fn(async () => {
+        throw new Error('nope');
+      }),
     }) as never;
     await el.updateComplete;
     for (let i = 0; i < 6; i += 1) await Promise.resolve();
     await el.updateComplete;
 
     expect(warning(el)).toBeNull();
-    expect(card(el, 'whatsapp-appointment-unattended')).toBeTruthy();
+    expect(card(el, CARD)).toBeTruthy();
     expect(
       el.renderRoot.querySelector('ok-inline-feedback[tone="danger"]'),
       'a refusal to LIST flows became an error on the catalogue',
@@ -473,6 +527,11 @@ describe('a card that would double up on a trigger says so first (whatsapp_inbox
  * `v1.1.16` neither key degrades: the core answers `flow.invalid_definition` for the whole
  * document, so a hub that installed it from here would end up with an automation that refuses to
  * save. The floor is the CARD's, so every other card of the sector stays on the shelf.
+ *
+ * 🔴 Since flows#101 the card carrying that floor is a SERVED one, and it has to be: the four hand
+ * copies were the only written cards that declared `needs`, and with them gone no card in
+ * `templates.ts` has a floor at all. Anchored on a written card this describe would go green on
+ * every hub it was handed — including the one it exists to keep the recipe away from.
  */
 describe('the gallery does not offer a recipe this hub could not parse (flows#92)', () => {
   // The release is fixed at the floor and the KEYS are what each test varies: this describe is
@@ -486,9 +545,11 @@ describe('the gallery does not offer a recipe this hub could not parse (flows#92
       QUERY_GRANT_PIN_CORE,
     );
 
+  const GATED = servedId(UNATTENDED);
+
   async function shelf(facts?: SchemaFacts): Promise<ErpFlowsGallery> {
     const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
-    el.client = hub() as never;
+    el.client = hub({ flows: serving() }) as never;
     el.t = t;
     if (facts) el.facts = facts;
     document.body.appendChild(el);
@@ -500,22 +561,32 @@ describe('the gallery does not offer a recipe this hub could not parse (flows#92
 
   it('paints it where the hub declares both keys', async () => {
     const el = await shelf(declaring('interactive', 'output'));
-    expect(card(el, 'whatsapp-appointment-unattended')).toBeTruthy();
+    expect(card(el, GATED)).toBeTruthy();
   });
 
   it('does not paint it on a hub that declares neither', async () => {
     const el = await shelf(declaring());
-    expect(card(el, 'whatsapp-appointment-unattended')).toBeNull();
+    expect(card(el, GATED)).toBeNull();
     // Its attended twin neither: both write the same two keys since whatsapp_inbox#97, and only
     // one of them said so until flows#100. A card offered here installs and then refuses to save.
-    expect(card(el, 'whatsapp-appointment')).toBeNull();
+    expect(card(el, servedId('appointment-from-whatsapp'))).toBeNull();
     // …and the sector is not empty: the floor belongs to the cards that carry it, not to the
     // gallery. `no-show-followup` writes no gated key and stays on the shelf.
     expect(card(el, 'no-show-followup')).toBeTruthy();
   });
 
+  it('does not paint it where the hub declares only one of the two', async () => {
+    // One key is not «nearly enough»: `parse_step` refuses the WHOLE document over the other one,
+    // so a card offered on a half-way hub installs and then will not save.
+    for (const key of ['interactive', 'output']) {
+      document.body.replaceChildren();
+      const el = await shelf(declaring(key));
+      expect(card(el, GATED), `offered on a hub that declares only ${key}`).toBeNull();
+    }
+  });
+
   it('does not paint it before the hub has answered: fail-closed', async () => {
     const el = await shelf();
-    expect(card(el, 'whatsapp-appointment-unattended')).toBeNull();
+    expect(card(el, GATED)).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 {
   "file": "dist/flows.esm.js",
-  "sources_sha256": "f26af9efce0a29b014d760e9c4801dd6229f447cffc555b0ec6513914afe0cc8",
+  "sources_sha256": "057fd123088100f8ba77316e3dd789758c34c20d18c5b50b87f51db93a412e6a",
   "locales_sha256": "76761fb3d1f65db4cef8c04bd395d26b742fd9fb9c67d88bac45baeebb66d587",
-  "bundle_sha256": "478a3f546109bd1730f546c02809e6f21eec82794f8ac785768bad8814507eb4",
-  "built_at": "2026-09-08T10:04:19.322Z"
+  "bundle_sha256": "5e8a2ae97aecb7219df29d386814c18855ecf036be9fc0badc481d6110a18c63",
+  "built_at": "2026-09-08T12:50:41.288Z"
 }

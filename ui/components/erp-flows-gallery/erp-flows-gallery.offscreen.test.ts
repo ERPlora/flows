@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import './erp-flows-gallery';
 import { QUERY_GRANT_PIN_CORE, schemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery, offScreen } from './erp-flows-gallery';
+import { moduleTemplateId } from '../../lib/module-templates';
 
 /**
  * **The hub these tests are about: one on a current core** (flows#92).
@@ -41,7 +42,32 @@ const CURRENT_CORE = schemaFacts(
  * observer is driven by hand below and why the ancestor walk is tested directly.
  */
 
-const LINKED = 'whatsapp-appointment';
+/**
+ * **The address the app publishes, and the card it opens** (flows#58 → flows#101).
+ *
+ * `whatsapp-appointment` is what `whatsapp_inbox` builds, so it is what the shortcut carries. The
+ * hand copy behind it is gone and the app serves the recipe itself, so the card that comes on
+ * screen is the served one the address forwards to.
+ */
+const ASKED = 'whatsapp-appointment';
+const LINKED = moduleTemplateId('whatsapp_inbox', 'appointment-from-whatsapp');
+
+/** The recipe that hub serves, the only card these tests need on the shelf. */
+const SERVED_ROW = {
+  module: 'whatsapp_inbox',
+  family: 'appointment-from-whatsapp',
+  documents: {
+    en: {
+      schema_version: 1,
+      name: 'WhatsApp → appointment',
+      triggers: [{ kind: 'event', event: 'whatsapp_inbox.message.received' }],
+      steps: [
+        { id: 'book', kind: 'command', command: 'appointments.appointments.create', params: {} },
+      ],
+    },
+  },
+  grants: [{ kind: 'command', value: 'appointments.appointments.create' }],
+};
 
 /** A `ResizeObserver` the test can fire, because happy-dom lays nothing out. */
 class FakeResizeObserver {
@@ -78,7 +104,10 @@ const realObserver = (globalThis as { ResizeObserver?: unknown }).ResizeObserver
 
 function hub() {
   return {
-    flows: { create: vi.fn(async (flow: unknown) => ({ id: 'created-1', ...(flow as object) })) },
+    flows: {
+      create: vi.fn(async (flow: unknown) => ({ id: 'created-1', ...(flow as object) })),
+      templates: vi.fn(async () => [SERVED_ROW]),
+    },
     events: {
       shape: vi.fn(async (name: string) => ({ event_name: name, declared_by: ['x'], samples: 0, fields: [] })),
     },
@@ -118,7 +147,9 @@ async function mountIn(parent: HTMLElement): Promise<ErpFlowsGallery> {
 const card = (el: ErpFlowsGallery, id: string): HTMLElement | null =>
   el.renderRoot.querySelector(`[data-template="${id}"]`);
 const panel = (el: ErpFlowsGallery, id: string): Element | null =>
-  el.renderRoot.querySelector(`#panel-${id}`);
+  // By attribute and not `#panel-<id>`: a served id carries a colon and a slash, neither of which
+  // can be written in an id selector without escaping every one of them.
+  el.renderRoot.querySelector(`[data-template="${id}"] .panel`);
 
 let scrolled: string[] = [];
 
@@ -142,13 +173,13 @@ describe('a card is only «brought on screen» when there is a screen (flows#58)
   });
 
   it('opens the card even while the page is still off screen', async () => {
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const el = await mountIn(cachedPage());
     expect(panel(el, LINKED), 'the card was not even opened').toBeTruthy();
   });
 
   it('does not spend its one scroll on a page with no box', async () => {
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const el = await mountIn(cachedPage());
     expect(scrolled, 'it scrolled into a hidden page and called the job done').toEqual([]);
     expect(FakeResizeObserver.instances.length, 'nothing is watching for the page to come back').toBe(1);
@@ -156,7 +187,7 @@ describe('a card is only «brought on screen» when there is a screen (flows#58)
   });
 
   it('brings the card on screen as soon as the page is shown again', async () => {
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const page = cachedPage();
     const el = await mountIn(page);
     page.style.display = '';
@@ -167,7 +198,7 @@ describe('a card is only «brought on screen» when there is a screen (flows#58)
   });
 
   it('does it once, and does not drag the owner back to it later', async () => {
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const page = cachedPage();
     const el = await mountIn(page);
     page.style.display = '';
@@ -186,7 +217,7 @@ describe('a card is only «brought on screen» when there is a screen (flows#58)
    */
   it('still tries where there is nothing to observe with', async () => {
     delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     await mountIn(cachedPage());
     expect(scrolled).toEqual([LINKED]);
   });
@@ -198,7 +229,7 @@ describe('a card is only «brought on screen» when there is a screen (flows#58)
    * first one is not what they are waiting to see any more.
    */
   it('shows the card of the second shortcut, not the one before it', async () => {
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const page = cachedPage();
     const el = await mountIn(page);
     const other = [...el.renderRoot.querySelectorAll('[data-template]')]
@@ -220,7 +251,7 @@ describe('a card is only «brought on screen» when there is a screen (flows#58)
   });
 
   it('stops watching when it leaves the screen', async () => {
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const el = await mountIn(cachedPage());
     el.remove();
     expect(FakeResizeObserver.instances[0].disconnected, 'a detached gallery left an observer behind').toBe(true);

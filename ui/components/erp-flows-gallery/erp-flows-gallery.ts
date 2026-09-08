@@ -46,10 +46,25 @@ import type { Translator } from '../../lib/plain-language';
  * bookmark, a template retired two releases ago or a typo has to land on the gallery the owner
  * would have seen anyway; the one thing it can never do is leave the screen empty with nothing on
  * it to explain why.
+ *
+ * 🔴 **«This catalogue» is the one ON SCREEN, half of which may have come from the hub**
+ * (flows#101). Checked against the written cards alone, a link naming a card an app SERVES —
+ * `module:whatsapp_inbox/appointment-from-whatsapp` — matches nothing and opens the whole gallery,
+ * and so does the id of a hand copy the served twin has retired once that copy is gone
+ * (flows#101). Both are addresses another repository publishes, so both have to keep landing on
+ * the card. A retired id is accepted and handed back UNCHANGED: forwarding it is
+ * `ErpFlowsGallery.landsOn`'s job, and doing it in two places is how the two come to disagree.
  */
-export function templateFromSearch(search: string): string {
+export function templateFromSearch(
+  search: string,
+  catalogue: {
+    cards: readonly FlowTemplate[];
+    aliases: Readonly<Record<string, string>>;
+  } = { cards: TEMPLATES, aliases: {} },
+): string {
   const id = new URLSearchParams(search).get('template') ?? '';
-  return templateById(id) ? id : '';
+  if (!id) return '';
+  return catalogue.aliases[id] || templateById(id, catalogue.cards) ? id : '';
 }
 
 /**
@@ -432,14 +447,22 @@ export class ErpFlowsGallery extends LitElement {
     this.load();
   }
 
-  /** Everything this screen asks the hub when it opens, asked once per client. */
+  /**
+   * Everything this screen asks the hub when it opens, asked once per client.
+   *
+   * The three go out together; only the last question waits, and on purpose (flows#101). «Which
+   * flows are worth asking about» is answered by the catalogue, and half the catalogue arrives in
+   * {@link loadModuleTemplates} — so asking before it lands is asking about the written cards
+   * alone, and every flow built from a recipe an app served comes back unasked, its card reading
+   * «absent» over an automation that is already running. Waiting costs nothing this screen was not
+   * already waiting for: the cards themselves cannot be painted until that same answer arrives.
+   */
   private load(): void {
     const client = this.client;
     if (!client || client === this.asked) return;
     this.asked = client;
     void this.probe();
-    void this.loadExisting();
-    void this.loadModuleTemplates();
+    void this.loadExisting(this.loadModuleTemplates());
   }
 
   /**
@@ -464,6 +487,10 @@ export class ErpFlowsGallery extends LitElement {
       const rows = await ask.call(client!.flows);
       this.served = moduleTemplates(rows, client!.locale);
       this.modules = 'ok';
+      // The catalogue just grew, and the shortcut was read against the written half alone
+      // (flows#101): a link naming a card only the hub knows about was dropped as «no such card».
+      // Re-read only while nothing is open — an owner who has since opened a card is not moved.
+      if (!this.picked) this.followShortcut();
     } catch {
       // A hub that HAS the door and refused. Said on screen, never swallowed: the owner installed
       // an app for this, and a recipe missing without a word reads as an app that does nothing.
@@ -520,7 +547,7 @@ export class ErpFlowsGallery extends LitElement {
   private followShortcut(): void {
     let id = '';
     try {
-      id = templateFromSearch(window.location.search);
+      id = templateFromSearch(window.location.search, this.catalogue);
     } catch {
       return; // No address bar, no shortcut. Still a gallery.
     }
@@ -589,7 +616,7 @@ export class ErpFlowsGallery extends LitElement {
    * warning into an error message, because that reads as «the gallery is broken» for a feature the
    * owner did not ask for.
    */
-  private async loadExisting(): Promise<void> {
+  private async loadExisting(served: Promise<void>): Promise<void> {
     const client = this.client;
     if (!client?.flows?.list) return;
     let flows: Flow[];
@@ -605,6 +632,9 @@ export class ErpFlowsGallery extends LitElement {
       // Carried through on purpose: a paused flow does not fire, so it is not a collision.
       definition: (flow.definition ?? {}) as Record<string, unknown>,
     }));
+    // Never rejects — {@link loadModuleTemplates} answers «none» for a hub that has not got the
+    // door and for one that refused, so this cannot leave the badge unasked.
+    await served;
     await this.loadGrants(flows);
   }
 
@@ -618,11 +648,24 @@ export class ErpFlowsGallery extends LitElement {
    * card on every visit. Swallowed on failure, one flow at a time: an unanswered flow stays
    * `undefined` — «not asked» — and its card keeps the invitation it had before this existed,
    * which is the behaviour to fall back to and never an error on the catalogue.
+   *
+   * 🔴 **Asked of the catalogue ON SCREEN, not of the written one** (flows#101). A flow built from
+   * a card an app serves matches nothing in `TEMPLATES`, so it was never asked about, came back
+   * with no commands, and its card read «absent» — the gallery inviting the owner to build a
+   * SECOND copy of the automation it is looking at. It goes unnoticed today only because every
+   * served recipe the fleet has happens to have a hand copy here waiting on the same event; the
+   * day those copies go (flows#101) it is every WhatsApp card, and it is already true for any app
+   * that serves a recipe this file never copied.
+   *
+   * Asked ONCE per candidate, which is why {@link load} makes this wait for the served recipes
+   * instead of asking twice — before and after they land. The saving this whole function exists
+   * for is measured in round trips; paying for every answer twice on every visit would undo it,
+   * and the screen would look exactly the same either way.
    */
   private async loadGrants(flows: readonly Flow[]): Promise<void> {
     const read = this.client?.flows?.grants;
     if (typeof read !== 'function') return; // A core whose flows surface predates grants.
-    const candidates = flowsWorthAsking(flows, this.t);
+    const candidates = flowsWorthAsking(flows, this.t, this.catalogue.cards);
     if (!candidates.length) return;
     const held = await Promise.all(
       candidates.map(async (flow) => {
@@ -696,9 +739,18 @@ export class ErpFlowsGallery extends LitElement {
     );
   }
 
-  /** Expands one template's panel. Public so the shell (and the tests) can drive it. */
+  /**
+   * Expands one template's panel. Public so the shell (and the tests) can drive it.
+   *
+   * 🔴 **The comparison goes through {@link landsOn}, both sides** (flows#101). What a shortcut
+   * leaves in `picked` is the id the OWNER's link named, which since the WhatsApp copies were
+   * retired is routinely a retired id — while the card on screen, and the id its own button hands
+   * back, is the served one it forwards to. Compared raw, those two never match: the salon arrives
+   * from Settings → WhatsApp with the card open, taps its heading to shut it, and the first tap
+   * does nothing at all, because it re-picks the same card under its other name.
+   */
   open(id: string): void {
-    this.picked = this.picked === id ? null : id;
+    this.picked = this.landsOn(this.picked) === this.landsOn(id) ? null : id;
     this.error = '';
   }
 

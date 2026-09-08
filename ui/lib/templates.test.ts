@@ -1,26 +1,24 @@
 import { describe, it, expect } from 'vitest';
-import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import {
   TEMPLATES,
   SECTORS,
   availableTemplates,
   buildTemplate,
-  carriedPins,
   missingModules,
   moduleName,
+  runnableHere,
   templateGrants,
   templateById,
   unavailableModules,
   flowsOnSameTrigger,
   templatesOf,
 } from './templates';
+import { moduleTemplates } from './module-templates';
 import { conditionResult } from './simulate';
 import { QUERY_GRANT_PIN_CORE, schemaFacts } from './ai-draft';
 import type { SchemaFacts } from './ai-draft';
 import type { Condition, FlowDoc } from './flow-doc';
+import type { FlowTemplate } from './templates';
 import {
   MAX_ITERS_CAP,
   canPinPayload,
@@ -28,6 +26,7 @@ import {
   grantPin,
   isSpineKind,
   readDoc,
+  requiredGrants,
 } from './flow-doc';
 import en from '../../locales/en.json';
 import es from '../../locales/es.json';
@@ -58,7 +57,7 @@ const CURRENT_CORE = schemaFacts(
 
 const t = (key: string): string => lookup(en, key) ?? key;
 
-/** The same, in Spanish: a mirror is verbatim in BOTH languages or it is not a mirror. */
+/** The same, in Spanish: a card says the same thing in BOTH languages or it says it in one. */
 const tEs = (key: string): string => lookup(es, key) ?? key;
 
 /** Every i18n key a template hands to `t()`. */
@@ -150,8 +149,15 @@ describe('the template catalogue', () => {
       ).toBe(true);
       disjointPairs += 1;
     }
-    // …and the exception is reachable, so the rule above is not a rule about an empty set.
-    expect(disjointPairs).toBeGreaterThan(0);
+    // 🔴 …and the exception is no longer reachable FROM HERE, which is stated rather than left to
+    // be discovered (flows#101). The four cards that woke two ways were copies of recipes
+    // `whatsapp_inbox` publishes and they went with the copies; the pair itself is asserted where
+    // the document is authored — `whatsapp_inbox/tests/flow_templates.test.py` refuses an overlap
+    // that reads as disjoint. The rule above stays, because it is what the next card is measured
+    // against; this line is what turns «no disjoint pair» into a fact about today's catalogue
+    // instead of a branch nobody notices has stopped running. A card that grows a second way in
+    // turns it red on purpose: say so here, deliberately.
+    expect(disjointPairs, 'a card written here grew a second way in').toBe(0);
   });
 
   it('gives every step a distinct id, because one step reads another by id', () => {
@@ -295,10 +301,14 @@ describe('what a template needs from this hub', () => {
    * `parse_step` walks an allowlist per step kind, so a key it does not know is not ignored and
    * does not degrade: the hub answers `flow.invalid_definition` for the WHOLE document and the
    * recipe dies at save. {@link FlowTemplate.needs} is what keeps such a card from being offered
-   * where it cannot be parsed — and it is hand-written next to a document that is a MIRROR of what
-   * another module publishes, so it goes stale exactly when the mirror is re-synced and the source
-   * has grown a key. That is how three of these four cards ended up writing `interactive` and
-   * `output` while only one of them declared them (flows#100).
+   * where it cannot be parsed.
+   *
+   * 🔴 **The rule is checked over the SERVED cards as well as the written ones** (flows#101). It
+   * used to be hand-written beside a document that was a MIRROR of what another module publishes,
+   * which is how three of those four copies ended up writing `interactive` and `output` while only
+   * one declared them (flows#100). The copies are gone and the recipes now arrive from the module,
+   * so no card written here carries a floor at all — and a rule anchored on `TEMPLATES` alone
+   * would be an empty loop that goes green for ever, over the exact population it exists to watch.
    *
    * Derived from the document rather than listed here, and anchored BOTH ways: a card that writes
    * a gated key without declaring it is offered to a hub that refuses it whole, and a card that
@@ -309,8 +319,48 @@ describe('what a template needs from this hub', () => {
    */
   const GATED_STEP_KEYS = ['interactive', 'output'] as const;
 
+  /**
+   * Recipes as an app serves them, covering each floor and its absence.
+   *
+   * Written out as rows and put through {@link moduleTemplates}, so what is checked is the card the
+   * gallery really paints — deriving `needs` here as well would be the rule marking its own work.
+   */
+  const servedRow = (family: string, steps: unknown[], grants: unknown[]) => ({
+    module: 'whatsapp_inbox',
+    family,
+    documents: {
+      en: { schema_version: 1, name: family, triggers: [{ kind: 'event', event: 'e' }], steps },
+    },
+    grants,
+  });
+
+  const READ = 'appointments.appointments.list_for_customer';
+  const SERVED: readonly FlowTemplate[] = moduleTemplates(
+    [
+      servedRow('asks', [{ id: 's', kind: 'notify', channel: 'whatsapp', interactive: { rows: [] } }], []),
+      servedRow('reads-out', [{ id: 's', kind: 'ai', output: { slots: 'x' } }], []),
+      servedRow(
+        'both-and-pinned',
+        [
+          { id: 'a', kind: 'notify', channel: 'whatsapp', interactive: { rows: [] } },
+          { id: 'b', kind: 'ai', output: { slots: 'x' } },
+        ],
+        [{ kind: 'query', value: READ, payload: { customer_id: 'steps.resolve_customer.id' } }],
+      ),
+      servedRow(
+        'plain',
+        [{ id: 's', kind: 'command', command: 'customers.create', params: {} }],
+        [{ kind: 'query', value: READ }],
+      ),
+    ],
+    'en',
+  );
+
+  /** Every card this gallery can offer: the ones written here and the ones an app serves. */
+  const EVERY_CARD: readonly FlowTemplate[] = [...TEMPLATES, ...SERVED];
+
   it('declares every gated step key its document writes, and none that it does not', () => {
-    for (const template of TEMPLATES) {
+    for (const template of EVERY_CARD) {
       const doc = buildTemplate(template, t);
       const written = GATED_STEP_KEYS.filter((key) =>
         doc.steps.some((step) => Object.prototype.hasOwnProperty.call(step, key)),
@@ -338,8 +388,26 @@ describe('what a template needs from this hub', () => {
    * - A card that declares it without pinning anything is hidden from hubs that run it perfectly
    *   well, for a containment it does not actually carry.
    */
-  it('declares the read limit exactly when it carries one', () => {
+  /**
+   * 🔴 **A card written here asks for exactly what its document justifies** (flows#101).
+   *
+   * `templateGrants` used to lay a declared `grantPins` layer on top of the derived permissions,
+   * for the four WhatsApp hand copies: `FlowTemplateGrant` could not carry a payload, so the copy
+   * declared the limit its original fixes. hub#1654 carries it now and the copies are gone, so the
+   * layer went with them — and this is what says so, in both directions. A pin laid on here again
+   * turns it red, and so does a permission quietly dropped or invented on the way out.
+   */
+  it('installs a written card exactly as its document derives it, nothing pinned on the way out', () => {
+    expect(TEMPLATES.length, 'no card to measure: this test proves nothing').toBeGreaterThan(0);
     for (const template of TEMPLATES) {
+      expect(templateGrants(template, t), template.id).toEqual(
+        requiredGrants(buildTemplate(template, t)),
+      );
+    }
+  });
+
+  it('declares the read limit exactly when it carries one', () => {
+    for (const template of EVERY_CARD) {
       const pinsARead = templateGrants(template, t).some(
         (grant) => grant.kind === 'query' && Object.keys(grantPin(grant)).length > 0,
       );
@@ -348,26 +416,33 @@ describe('what a template needs from this hub', () => {
   });
 
   it('has a card that pins a read at all, so the rule above is not vacuous', () => {
-    const pinners = TEMPLATES.filter((tpl) =>
+    const pinners = EVERY_CARD.filter((tpl) =>
       templateGrants(tpl, t).some(
         (grant) => grant.kind === 'query' && Object.keys(grantPin(grant)).length > 0,
       ),
     );
     expect(pinners.map((tpl) => tpl.id)).toEqual([
-      'whatsapp-appointment',
-      'whatsapp-appointment-unattended',
+      'module:whatsapp_inbox/both-and-pinned',
     ]);
   });
 
-  // The control above only means something if a gated key is actually reachable from this
-  // catalogue: with none written anywhere it would be green on an empty set for ever.
+  // The control above only means something if a gated key is actually reachable: over an empty set
+  // both rules are green for ever, which is exactly what they looked like the moment the four
+  // copies that carried them were deleted.
   it('has cards that write a gated key at all, so the rule above is not vacuous', () => {
     for (const key of GATED_STEP_KEYS) {
-      const writers = TEMPLATES.filter((tpl) =>
+      const writers = EVERY_CARD.filter((tpl) =>
         buildTemplate(tpl, t).steps.some((step) => Object.prototype.hasOwnProperty.call(step, key)),
       );
       expect(writers.length, `no card writes \`${key}\``).toBeGreaterThan(0);
     }
+  });
+
+  // …and the negative of both, in the same population: a card that carries neither must come out
+  // asking for nothing, or «declares exactly what it writes» is satisfied by declaring everything.
+  it('leaves a card that carries neither asking for nothing', () => {
+    const plain = SERVED.find((tpl) => tpl.id === 'module:whatsapp_inbox/plain')!;
+    expect(plain.needs ?? []).toEqual([]);
   });
 
   it('reports the modules this hub is missing, by name', () => {
@@ -539,366 +614,6 @@ describe('the everyday automations of flows#18', () => {
 });
 
 /**
- * **The automation the WhatsApp module ships, offered where people look for it** (flows#52).
- *
- * `whatsapp_inbox` has carried `flows/appointment-from-whatsapp.{es,en}.flow.json` since it
- * learned to book — the case the product is sold on — and nobody installed it: the hub reads no
- * `*.flow.json` anywhere (`grep '\.flow\.json' hub/crates` = 0), so the only thing that ever
- * created it was the module's own end-to-end test. A shop that connects its number and opens
- * Automations found «somebody writes on WhatsApp → make a task» and nothing else.
- *
- * The card below is that document, in this catalogue, so it can be picked. What it is NOT is a
- * second design: the trigger, the four steps and the eleven permissions are pinned here against
- * the ones the module publishes — by COMMIT, and by a hash of the whole document in both
- * languages — so the two cannot quietly say different things.
- */
-
-/**
- * **What the mirror mirrors.** Pinned by commit and not by module version because
- * `whatsapp_inbox`'s release workflow does not bump on `flows/**`: v2.1.31 named BOTH the
- * four-step document (before whatsapp_inbox#55) and the three-step one (after), so «v2.1.31» said
- * nothing about which one a copy was. The commit does.
- *
- * Re-syncing the mirror is: copy the source's steps and prompts into `templates.ts` and the two
- * locale files, set `commit` to the source commit **on `main`**, and recompute the two digests
- * from the source files with the SAME canonical form `digest()` below uses. On `main`, and not
- * the PR branch head: `merge-pr.sh` squashes the source PR, so the branch head is gone the moment
- * it lands and only the squash commit exists (whatsapp_inbox#69 → `89f8d02`, #75 → `ba2f293`). A
- * mirror opened while the source is still a branch is re-pinned once the source lands — the last
- * test of this file names the sha to set, and goes red until it is set.
- *
- *     git -C ../whatsapp_inbox show <commit>:flows/appointment-from-whatsapp.en.flow.json \
- *       | node -e 'const s=v=>Array.isArray(v)?v.map(s):v&&typeof v==="object"?Object.fromEntries(Object.keys(v).sort().map(k=>[k,s(v[k])])):v;
- *         const {name,...d}=JSON.parse(require("node:fs").readFileSync(0,"utf8"));
- *         console.log(require("node:crypto").createHash("sha256").update(JSON.stringify(s(d))).digest("hex"))'
- *
- * (`node:` on purpose, and not only for style: `erplora test` reads every bare name handed to
- * `require` under `ui/` — comments included — as a package the module needs, and the plain
- * `fs` / `crypto` forms in this very comment had the gate declare all 27 TypeScript tests
- * unrunnable. The `node:` form is skipped by that scanner.)
- */
-interface MirrorSource {
-  /** The `TEMPLATES` id this pin belongs to — one card mirrors exactly one published family. */
-  template: string;
-  module: string;
-  commit: string;
-  files: { en: string; es: string; grants: string };
-  digest: { en: string; es: string };
-}
-
-/**
- * **Every family the module publishes, and the card that mirrors it.** One entry per family, and
- * the list is what the «no family without a card» test below counts against the source checkout —
- * so adding a family to `whatsapp_inbox/flows/` without adding its card here goes RED instead of
- * shipping a module whose automation no hub can install.
- */
-const SOURCES: readonly MirrorSource[] = [
-  {
-    template: 'whatsapp-appointment',
-    module: 'whatsapp_inbox',
-    // whatsapp_inbox #67: a «no» from the salon used to end the run where it stood, so the
-    // customer who had been promised an answer never got one. The proposing step now says
-    // `on_reject: "continue"`, and a step after it writes what she actually receives — the booking
-    // words when nothing was refused, and a real «that time cannot be, tell me another» when it
-    // was. Before it, PR #75 (#61) taught the proposing step to CANCEL as well as book, PR #69
-    // (first half of #58) added `confirm_to_customer`, and PR #63 (#55) made the two model steps
-    // one.
-    //
-    // Re-pinned from the branch head (`67c163c`) to the squash the day wi#85 landed on `main`,
-    // which is the drill the last test of this file enforces: it went red naming this very sha,
-    // and the two digests below did not move — the documents are the same, only the commit that
-    // carries them is new. The source could only merge once hub#1622 was in `develop`: an `ai`
-    // step carrying `on_reject` is refused whole (`flow.invalid_definition`) by any hub without it.
-    //
-    // Moved again by whatsapp_inbox#90 (squashed as `c4b5368`), and this time the digests DID
-    // move: the trigger grew two clauses so the automation stops answering the owner's own echo
-    // and the 180 days of backlog Meta hands over on connection. This is the other half of the
-    // drill — the neighbour test above went red on the digests, not the pin, because the source
-    // documents changed rather than merely moving commit.
-    //
-    // And moved again by whatsapp_inbox#82 (squashed as `0f8eb60`), digests with it: point 5 of
-    // CANCELLING now orders the `customer_id` the first point already looked up by phone, because
-    // from appointments 1.1.72 (appointments#140) a cancellation on the customer channel without
-    // it is refused whole with `invalid_payload`. Until this landed the gallery kept handing out
-    // the version that cannot cancel (flows#64) — and NOTHING here went red, which is why the
-    // third pin test below now exists.
-    // And moved by whatsapp_inbox#74 (squashed as `33e7c0f`): the proposing step gained MOVING —
-    // in THIS family only. It had book and cancel and
-    // no way to change an appointment's hour, so «can you change it to Thursday?» fell into the
-    // «anything else» branch — or was read as a new booking and the customer ended up with two.
-    // Moving is `appointments.appointments.reschedule`, ONE call and never cancel-then-book, and
-    // the id always comes out of `list_for_customer` because that command carries no `channel` and
-    // no `customer_id` (appointments 1.1.72), so nothing below it can tell whose appointment it is.
-    // The grants list grows by one (13 → 14) and `reply_to_customer` learns to say that a refused
-    // MOVE leaves the appointment she already had exactly where it was.
-    //
-    // Its twin below did NOT gain it, and that asymmetry is the whole point: `reschedule` cannot
-    // be bound to the customer asking (no `channel`, no `customer_id`, and the handler never looks
-    // at whose appointment it is), so the move only ships where a PERSON approves the write.
-    //
-    // Re-pinned from the branch head (`5cdfb79`) to that squash the day whatsapp_inbox#102 landed,
-    // which is the drill this file enforces: the mirror was opened while its source was still a
-    // branch, `merge-pr.sh` squashed it, and the first pin test went red naming the sha to set.
-    // The four digests did NOT move — the documents are the same, only the commit that carries
-    // them is new.
-    //
-    // 🪤 And the sha to set is the one that CARRIES the documents, not the tip: that red names
-    // `main` as fetched, which the day of this re-pin was `0fd8a74` — a `chore(release)` bump that
-    // touches no template. Pinned there, the two tests below would still pass (a descendant that
-    // did not touch the files hashes the same), and the pin would stop saying WHICH change it
-    // mirrors, which is the one job it has. `git log -1 <file>` on the source's `main` is the
-    // answer, and it is what the third test names in its own remedy.
-    //
-    // And moved twice more, which is this re-sync (flows#100). whatsapp_inbox#111 (`7f75b9a`) gave
-    // the family the TAP: a second trigger for the row a customer touches, `reply_to_customer`
-    // grew the two availability reads and an `output.slots`, and a guarded `notify` sends the
-    // hours as a list instead of a paragraph she has to retype. Then whatsapp_inbox#118
-    // (`d736923`) pinned `channel: "customer"` on the move in the module's own `grants.json` —
-    // the permissions did not change, the prompt did.
-    commit: 'd73692362c0e8ebc708189ac4789630fbaa8ecc4',
-    files: {
-      en: 'flows/appointment-from-whatsapp.en.flow.json',
-      es: 'flows/appointment-from-whatsapp.es.flow.json',
-      grants: 'flows/appointment-from-whatsapp.grants.json',
-    },
-    digest: {
-      en: '65bee040625b030e1f6c206c34d065124362d0cfe88e8356bc3ef4fb8f480e6f',
-      es: '83148f8b20d8e322e52e6e7f5ee0b8e95529bbef90832c8525dda29107daee5b',
-    },
-  },
-  {
-    template: 'whatsapp-appointment-unattended',
-    module: 'whatsapp_inbox',
-    // whatsapp_inbox PR #77 (second half of #58), squash-merged as `a44a3f1`: the unattended
-    // family — the same four steps with both model steps on `auto`, so the appointment is booked
-    // inside the turn instead of waiting in the approval tray. It carries the review's own commit
-    // (`hour_choice_problems`, `silence_problems` hardened), which is what keeps «you never choose
-    // the hour» in the prompt this mirror copies.
-    //
-    // Re-pinned from the branch head to the squash the day wi#77 landed, which is the drill the
-    // last test of this file enforces: it went red naming this very sha, and the two digests below
-    // did not move — the documents are the same, only the commit that carries them is new.
-    //
-    // Moved again by whatsapp_inbox#90 (`c4b5368`), with the digests: this family books without
-    // asking anybody, so the echo and the backlog it used to answer went straight into the diary
-    // as appointments. Its trigger now carries the same two clauses as the twin's.
-    //
-    // And by whatsapp_inbox#82 (`0f8eb60`), the same identified cancellation as the twin — with
-    // nobody watching, here it mattered more: the customer was told nothing and no salon saw the
-    // refusal.
-    //
-    // 🔴 whatsapp_inbox#74 did NOT touch this family, and the pin stays where it was to say so:
-    // the twin above learned to MOVE an appointment and this one deliberately did not, so it keeps
-    // thirteen permissions against the twin's fourteen. `appointments.appointments.reschedule`
-    // carries no `channel` and no `customer_id` (`additionalProperties: false` over
-    // `appointment_id`, `start_datetime`, `duration_minutes`) and its handler never checks whose
-    // appointment it is, so nothing downstream can refuse a stranger's. Cancelling CAN be bound
-    // that way — which is why whatsapp_inbox#100 can pin `payload` in its grant once hub#1632
-    // ships, and why the same trick has nothing to bite on here. With `policy: "auto"` there is no
-    // person in the loop either, so the family answers «somebody from the salon will get back to
-    // you». It reopens with appointments#142 first, then whatsapp_inbox#103.
-    //
-    // And moved by whatsapp_inbox#101 (squashed as `8460f33`), with both digests — flows#92. The
-    // customer stopped having to TYPE the slot: the document gained a second trigger for the tap,
-    // the booking step DECLARES the slots it found (`output`) and a guarded `notify` sends them as
-    // a list she taps. The permissions did not move (`grants.json` is still on `a44a3f1`), which
-    // is the shape of this change: a different way of asking, not a wider one.
-    //
-    // 🔴 This is the pin whose drift the gallery was living with for a day: the source landed and
-    // the card kept handing out «reply with the service, the day and the hour». The guard below
-    // named it, in red, with this very sha — which is the one job it has.
-    //
-    // 🔴 And moved by whatsapp_inbox#118 (`d736923`) — flows#100 — which REVERSES the paragraph
-    // above: this family MOVES an appointment now, and its grants go 13 → 14. What made it
-    // shippable is not a change of mind but appointments#142, which gave
-    // `appointments.appointments.reschedule` the `channel` and the `customer_id` it had no way to
-    // be bound by; pinned to `customer`, the handler compares the appointment's own `customer_id`
-    // with the one the flow resolved from the phone the message came from. The `grants.json`
-    // pins the move there too, and this file's copy pins it here, for the hubs hub#1654 has not
-    // reached yet.
-    commit: 'd73692362c0e8ebc708189ac4789630fbaa8ecc4',
-    files: {
-      en: 'flows/appointment-from-whatsapp-unattended.en.flow.json',
-      es: 'flows/appointment-from-whatsapp-unattended.es.flow.json',
-      grants: 'flows/appointment-from-whatsapp-unattended.grants.json',
-    },
-    digest: {
-      en: '7abf72abd9b13cbc4e74ed17167f6cacd3d70055d0302732a256d60afd8ca5f1',
-      es: 'ce46c35ce497552bd076e58a925090e411e1efe5d6806576301511c01b794a70',
-    },
-  },
-  {
-    template: 'whatsapp-reservation',
-    module: 'whatsapp_inbox',
-    // whatsapp_inbox#60, squash-merged as `6a8e1d7`: the same recipe one module over, writing into
-    // `reservations` instead of `appointments`. A restaurant that connected its number was offered
-    // the two cards of a hairdresser and nothing it could use, and the module's own battery went
-    // green over it — every rule there judges the documents that EXIST, and the missing one is not
-    // a document anything can miss. `shipped_recipe_problems` is the guard that closed it there;
-    // the last test of this file is the one that closes it HERE, and it is what went red naming
-    // these two families the day the source landed.
-    //
-    // 🔴 Four steps and NOT five: there is no `know_the_customer`. `customer_id` is optional on a
-    // reservation, so the booking step looks the guest up with `customers.list` and, when the
-    // restaurant does not have them, books on the name and phone they gave and creates NOBODY —
-    // one write and one permission fewer than the salon's twin (nine grants against fourteen).
-    //
-    // 🔴 And it hands NO tool that could touch a table that already exists.
-    // `reservations.reservations.set_status` and `.update` take `{reservation_id, …}` with
-    // `additionalProperties: false`, no `channel` and no `customer_id`, and the handler only
-    // validates the state machine — never whose row it is. With
-    // `reservations.reservations.list` filtering `guest_phone` with `like`, any id is one query
-    // away, so a model answering a phone number could move a stranger's table. Both families
-    // answer «somebody from the restaurant will take care of it» instead, and the module's battery
-    // pins that with `unowned_table_problems`. It reopens with ERPlora/reservations#50 — the twin
-    // of appointments#140, and the same shape as appointments#142 for `reschedule`.
-    //
-    // Moved by whatsapp_inbox#113 (squashed as `74e87af`) — flows#100 — which brings the TAP to
-    // the table families: a second trigger for the row the guest touches, `reply_to_customer` with
-    // the two reads it needs to know what is really free and an `output.slots`, and a guarded
-    // `notify` that sends the windows as a list. 🔴 A row here carries the party size as well as
-    // the time (`2026-09-08T21:00|party:4`): what is free at nine for two is not what is free at
-    // nine for eight, so the number of people is part of the question and never part of the list.
-    // The permissions did not move — `grants.json` is still on `6a8e1d7`, which is the shape of
-    // this change: a different way of asking, not a wider one.
-    commit: '74e87afb1c713e1f1976591a72e29b156d05fe97',
-    files: {
-      en: 'flows/reservation-from-whatsapp.en.flow.json',
-      es: 'flows/reservation-from-whatsapp.es.flow.json',
-      grants: 'flows/reservation-from-whatsapp.grants.json',
-    },
-    digest: {
-      en: '02b060dfe1cf9c4fe7522c41b507f72c2216d5a39db04f103f6fba0bba991836',
-      es: '7053eb16b00a0f63e7df5f9e8bfa1e838c0506cfce6086432addc4ba664809c6',
-    },
-  },
-  {
-    template: 'whatsapp-reservation-unattended',
-    module: 'whatsapp_inbox',
-    // The unattended half of the same source commit: three steps, the booking one on `auto`, and
-    // no `reply_to_customer` because with no approval in the middle there is no outcome to put
-    // into words — the booking step writes the guest's message itself, in the same reply.
-    //
-    // What keeps it shippable is a paragraph of prompt, pinned in both languages by the module's
-    // `hour_choice_problems`: the model never chooses the hour NOR the party size. Its own
-    // sentence, not the salon's — «You never choose the hour or how many people are coming. They
-    // do.» — because the harm has one more field here: an hour nobody asked for seats people while
-    // the kitchen is shut, and a party size nobody said seats four at a table for two.
-    //
-    // Moved by the same whatsapp_inbox#113 (`74e87af`) as its twin — flows#100. Here the slots
-    // hang off the BOOKING step, because there is no `reply_to_customer` to hang them off: the
-    // step that books is also the one that writes, so it is the one that declares what it is
-    // offering. Same rule as the twin, and it matters more with nobody watching — the row carries
-    // the party size, so a tap can never seat four at a table for two.
-    commit: '74e87afb1c713e1f1976591a72e29b156d05fe97',
-    files: {
-      en: 'flows/reservation-from-whatsapp-unattended.en.flow.json',
-      es: 'flows/reservation-from-whatsapp-unattended.es.flow.json',
-      grants: 'flows/reservation-from-whatsapp-unattended.grants.json',
-    },
-    digest: {
-      en: '3b50e111443c0939d1d5cd056d3e4121ec30c1c34d4d9fa2523e9a1b2acdf92b',
-      es: '03ccdf40e78ebde334beb1007cd8fc218a6e0cb173a03e2e97ac19729f785ab4',
-    },
-  },
-] as const;
-
-/** The family this file was written around, and the one most of the tests below name. */
-const SOURCE = SOURCES[0];
-
-/**
- * The document in its canonical form — keys sorted, no whitespace, the module's `name` left out
- * because this catalogue carries the name as the card's title — hashed. Two documents that say the
- * same thing in a different key order hash the same; one word of a prompt changed does not.
- */
-function digest(doc: FlowDoc | Record<string, unknown>): string {
-  const sort = (v: unknown): unknown =>
-    Array.isArray(v)
-      ? v.map(sort)
-      : v && typeof v === 'object'
-        ? Object.fromEntries(
-            Object.keys(v as Record<string, unknown>)
-              .sort()
-              .map((k) => [k, sort((v as Record<string, unknown>)[k])]),
-          )
-        : v;
-  const { name: _name, ...rest } = doc as Record<string, unknown>;
-  return createHash('sha256').update(JSON.stringify(sort(rest))).digest('hex');
-}
-
-/**
- * The `whatsapp_inbox` checkout beside this module to judge the mirror by: of every checkout in
- * the workspace at or past {@link SOURCE.commit} — the canonical one and the fleet's worktrees
- * alike — the one whose HEAD is NEWEST. A worktree where somebody is already moving the document
- * (whatsapp_inbox#58's second half, #61) is exactly the one that should be heard, and it is newer
- * than a canonical checkout that merely reached the pin. A checkout OLDER than the pin is not a
- * source to judge by — it would report a drift that is its own — and neither is a directory that
- * is not a git checkout at all. Ties go to the canonical checkout.
- */
-function sourceCheckout(source: MirrorSource = SOURCE): string | null {
-  const modules = resolve(__dirname, '../../..');
-  let entries: string[];
-  try {
-    entries = readdirSync(modules);
-  } catch {
-    return null;
-  }
-  const candidates = entries
-    .filter((d) => d === source.module || d.startsWith(`${source.module}-`))
-    .sort((a, b) => (a === source.module ? -1 : b === source.module ? 1 : a.localeCompare(b)));
-  let best: { dir: string; at: number } | null = null;
-  for (const entry of candidates) {
-    const dir = join(modules, entry);
-    try {
-      const manifest = JSON.parse(readFileSync(join(dir, 'module.json'), 'utf8')) as { id?: string };
-      if (manifest.id !== source.module || !existsSync(join(dir, source.files.en))) continue;
-      execFileSync('git', ['-C', dir, 'merge-base', '--is-ancestor', source.commit, 'HEAD'], {
-        stdio: 'ignore',
-      });
-      const at = Number(
-        execFileSync('git', ['-C', dir, 'log', '-1', '--format=%ct', 'HEAD'], { stdio: ['ignore', 'pipe', 'ignore'] })
-          .toString()
-          .trim(),
-      );
-      if (!best || at > best.at) best = { dir, at };
-    } catch {
-      // No manifest, no template, or a checkout older than the pin: keep looking.
-    }
-  }
-  return best?.dir ?? null;
-}
-
-/**
- * **The source's `origin/main`, which is where the PUBLISHED document lives.** {@link
- * sourceCheckout} answers with a working tree, and a working tree is whatever branch somebody left
- * it on: the fleet keeps a dozen `whatsapp_inbox-*` worktrees beside this module, so «the newest
- * HEAD at or past the pin» can be a branch that predates a fix already on `main` — on flows#64 it
- * was, and it agreed with a stale mirror. It also disappears the moment the pin moves ahead of
- * every local checkout, taking its test with it, silently, as a skip.
- *
- * A ref does neither. This returns the canonical checkout's `refs/remotes/origin/main` as last
- * fetched, and a `git` bound to it — `null` where there is no canonical checkout at all (CI, until
- * module-toolkit#211 brings the source repo to the runner). `git fetch` is not something a test
- * does, so on a stale checkout this reports late; it never reports a drift that is not there.
- */
-function sourceMain(
-  module: string,
-): { sha: string; git: (...args: string[]) => string | null } | null {
-  const canonical = join(resolve(__dirname, '../../..'), module);
-  const git = (...args: string[]): string | null => {
-    try {
-      return execFileSync('git', ['-C', canonical, ...args], { stdio: ['ignore', 'pipe', 'ignore'] })
-        .toString()
-        .trim();
-    } catch {
-      return null;
-    }
-  };
-  if (!existsSync(join(canonical, 'module.json'))) return null;
-  const sha = git('rev-parse', 'refs/remotes/origin/main');
-  return sha === null ? null : { sha, git };
-}
-/**
  * **The card that turns a WhatsApp into a job on somebody's list** (flows#67).
  *
  * It waits on the MODULE's event and not the core's, which is the whole reason it needed fixing
@@ -971,662 +686,6 @@ describe('WhatsApp → task, the card that puts a message on somebody’s list (
   });
 });
 
-describe('WhatsApp → appointment, the card the WhatsApp module has always shipped (flows#52)', () => {
-  const template = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment');
-
-  it('is in the gallery at all — until flows#52 the only way in was the module’s own test', () => {
-    expect(template, 'no `whatsapp-appointment` template in the catalogue').toBeTruthy();
-  });
-
-  it('starts on what a customer wrote just now — not the owner’s echo, not the backlog', () => {
-    const trigger = buildTemplate(template!, t).triggers[0];
-    // `hub.whatsapp.message_received` is the runtime's own event (`crates/server/src/inbound_poll.rs`),
-    // which is what the module's published template waits for. An empty body is a sticker or an
-    // image: there is nothing for a model to read, and answering it costs money.
-    //
-    // The other two clauses are whatsapp_inbox#90. The poller asks for `?direction=all&source=all`,
-    // so the same event also carries what the OWNER writes from her own WhatsApp Business app
-    // (echoed back, it had the salon confirming an appointment to itself) and the 180 days of
-    // history Meta delivers when the number is first connected (everyone who wrote in March got
-    // confirmed today). Pinned whole and not clause by clause on purpose: this is the shape the
-    // module publishes, and the digests further down hash the same document — a clause dropped
-    // here is a clause the gallery would install without it.
-    //
-    // `neq` rather than `eq`/`in`: `direction` and `source` only exist on the event from hub#1621,
-    // which no published hub tag carries, and in the kernel an absent path is `null`, so the
-    // affirmative form matches nothing at all on a hub at the module's declared floor — silently.
-    // whatsapp_inbox#95 flips both the day that floor rises.
-    expect(trigger).toEqual({
-      kind: 'event',
-      event: 'hub.whatsapp.message_received',
-      filter: {
-        'event.text': { neq: '' },
-        'event.direction': { neq: 'outbound' },
-        'event.source': { neq: 'history' },
-      },
-      input: {
-        from: 'event.from',
-        text: 'event.text',
-        wa_message_id: 'event.wa_message_id',
-        received_at: 'event.received_at',
-        // Mapped on the WORDS trigger too, and not only on the tap: one document, one set of
-        // fields, so the steps read the same `input` whichever way she answered. On this path
-        // both resolve to `null`, which is what the kernel gives an absent path anyway.
-        reply_id: 'event.reply_id',
-        reply_title: 'event.reply_title',
-      },
-    });
-  });
-
-  it('has a second way in for the row she TAPS, and the two cannot both fire', () => {
-    // whatsapp_inbox#101 gave this family the tapped list its unattended twin already had. A
-    // tapped row arrives with `text` empty and `reply_id` full, so the trigger above — which
-    // demands words — never sees it. `text` maps from `reply_title` here, so the steps read the
-    // same field either way, and `reply_id` carries the slot she actually chose.
-    const [words, tap] = buildTemplate(template!, t).triggers;
-    expect(tap, 'the tapped-row trigger is missing').toBeTruthy();
-    expect(tap.event).toBe(words.event);
-    expect(tap.filter?.['event.text']).toEqual({ eq: '' });
-    expect(tap.filter?.['event.reply_id']).toEqual({ neq: '' });
-    expect(tap.input?.text).toBe('event.reply_title');
-    // The echo and the backlog are excluded on BOTH ways in: an exclusion on one of two doors is
-    // no exclusion at all.
-    for (const trigger of [words, tap]) {
-      expect(trigger.filter?.['event.direction'], String(trigger.input?.text)).toEqual({
-        neq: 'outbound',
-      });
-      expect(trigger.filter?.['event.source'], String(trigger.input?.text)).toEqual({
-        neq: 'history',
-      });
-    }
-    // Disjoint by construction: no message has a body and no body at once, so nothing is ever
-    // answered twice.
-    const tapped = { event: { text: '', reply_id: 'slot-1', reply_title: '10:30' } };
-    const written = { event: { text: 'hola', reply_id: '' } };
-    expect(conditionResult(words.filter!, written).matched).toBe(true);
-    expect(conditionResult(tap.filter!, written).matched).toBe(false);
-    expect(conditionResult(words.filter!, tapped).matched).toBe(false);
-    expect(conditionResult(tap.filter!, tapped).matched).toBe(true);
-  });
-
-  it('acknowledges, knows the customer, finds the slot AND proposes in ONE turn, then tells them', () => {
-    const steps = buildTemplate(template!, t).steps;
-    // «Find what is free» and «propose» are ONE model step: they used to be two (a step that only
-    // asked, `auto`, and one that wrote from its report), the workaround for a hub that refused a
-    // read inside a `manual` step — hub#1595 made the read legal and whatsapp_inbox#55 collapsed
-    // them. The fourth step is whatsapp_inbox#67's: the one that knows how the salon DECIDED and
-    // writes what the customer actually reads — it is what makes the fifth (whatsapp_inbox#58's
-    // first half, the only thing that ever speaks to her) say something on a «no» too.
-    //
-    // The two `query` steps are whatsapp_inbox#103's: the customer is looked up DETERMINISTICALLY,
-    // by the phone the message came from, because a model holding `customers.list` can search the
-    // address book by NAME and read out a stranger's diary. Twice, and not once, because
-    // `know_the_customer` may CREATE her in between: the first read answers «is she on file», the
-    // second carries the id that exists afterwards.
-    // The last two are whatsapp_inbox#97's, the same pair its unattended twin carries: the model
-    // DECLARES the slots it found and the guard only sends the list when there is something in it
-    // — an empty `list` is refused by Meta, paid for, and answered with an error nobody sees.
-    expect(steps.map((s) => [s.id, s.kind])).toEqual([
-      ['acknowledge', 'notify'],
-      ['find_customer', 'query'],
-      ['know_the_customer', 'ai'],
-      ['resolve_customer', 'query'],
-      ['propose_appointment', 'ai'],
-      ['reply_to_customer', 'ai'],
-      ['confirm_to_customer', 'notify'],
-      ['any_slot_to_offer', 'condition'],
-      ['offer_slots', 'notify'],
-    ]);
-    // Every model step waits for a person: the first two WRITE (a customer card, a booking), and
-    // the third only looks availability up, so `manual` costs it nothing — there is never a
-    // proposal to approve. The `query` steps carry no policy: they are the document's own read,
-    // not a model's, so there is nothing for anybody to approve. Neither do the `condition` and
-    // the `notify` that close the run: the tray is for what a MODEL proposes.
-    expect(steps.map((s) => s.policy)).toEqual([
-      undefined,
-      undefined,
-      'manual',
-      undefined,
-      'manual',
-      'manual',
-      undefined,
-      undefined,
-      undefined,
-    ]);
-  });
-
-  it('only offers the tapped list when the model actually found something to offer', () => {
-    // whatsapp_inbox#97. `slots` is empty whenever the step above booked, cancelled, moved or
-    // answered something else, and Meta refuses an interactive `list` with no rows — so without
-    // the guard the salon pays for a message the customer never gets and an error it never sees.
-    const steps = buildTemplate(template!, t).steps;
-    const guard = steps.find((s) => s.id === 'any_slot_to_offer');
-    expect(guard?.when).toEqual({ 'steps.reply_to_customer.slots': { neq: [] } });
-    // Guarding the RIGHT step: it reads the slots from the one that declared them.
-    const found = (slots: unknown[]) => ({ steps: { reply_to_customer: { slots } } });
-    expect(conditionResult(guard!.when!, found([])).matched).toBe(false);
-    expect(conditionResult(guard!.when!, found(['10:30'])).matched).toBe(true);
-    // And the list she taps is built from those same slots, so the row that comes back is the
-    // slot itself and not «the second one».
-    const offer = steps.find((s) => s.id === 'offer_slots');
-    expect(offer?.channel).toBe('whatsapp');
-    expect(offer?.to).toEqual(steps[0].to);
-    expect(JSON.stringify(offer?.interactive)).toContain('steps.reply_to_customer.slots');
-  });
-
-  it('carries on when the salon says NO, instead of ending the run at the rejection', () => {
-    // whatsapp_inbox#67. The kernel's default for a model's proposal is `cancel`: the run stops
-    // AT the refusal and every step after it — including the only one that ever speaks to the
-    // customer — never runs. She had been promised «we will confirm as soon as the salon opens»,
-    // and then nothing came. Without this key the card below is decoration.
-    const propose = buildTemplate(template!, t).steps.find((s) => s.id === 'propose_appointment');
-    expect(propose?.on_reject).toBe('continue');
-  });
-
-  it('lets one step, and only one, write what the customer reads — and it may only LOOK UP', () => {
-    const steps = buildTemplate(template!, t).steps;
-    const reply = steps.find((s) => s.id === 'reply_to_customer');
-    // It has to know how it ended AND what was written for her: the outcome alone cannot name the
-    // day, the hour and the professional, and the words alone describe an appointment she may not
-    // have. Both, or the message is wrong on one branch or the other.
-    expect(reply?.prompt).toContain('{{steps.propose_appointment.status}}');
-    expect(reply?.prompt).toContain('{{steps.propose_appointment.text}}');
-    // It used to carry NO tools at all. whatsapp_inbox#97 gave it the two availability reads,
-    // because it now also declares the slots the tapped list offers and a paragraph of prose is
-    // not something to build a list of real hours from.
-    expect(reply?.tools?.queries ?? []).toEqual([]);
-    expect(reply?.tools?.commands).toEqual([
-      'appointments.availability.day_opening',
-      'appointments.availability.slots',
-    ]);
-    // 🔴 The line that has to hold, and it is stated as a PROPERTY and not as a copy of the list
-    // above: this step is the one nothing stands between and the customer, so it may look things
-    // up and it may never change one. A booking tool added here is red because of what it does.
-    for (const command of reply?.tools?.commands ?? []) {
-      expect(command, `${command} is not a read`).toMatch(/^appointments\.availability\./);
-    }
-    // …and the rule is not vacuous: the steps that ACT do hold commands outside that namespace.
-    const acting = buildTemplate(template!, t)
-      .steps.filter((s) => s.kind === 'ai' && s.id !== 'reply_to_customer')
-      .flatMap((s) => s.tools?.commands ?? [])
-      .filter((command) => !command.startsWith('appointments.availability.'));
-    expect(acting.length).toBeGreaterThan(0);
-    // Enough turns for the two reads and the answer, and no budget to go wandering.
-    expect(reply?.max_iters).toBe(4);
-    expect(reply?.max_iters).toBeLessThan(MAX_ITERS_CAP);
-  });
-
-  it('confirms to the customer with the deciding step’s own words, through the same conversation', () => {
-    const steps = buildTemplate(template!, t).steps;
-    const confirm = steps.find((s) => s.id === 'confirm_to_customer');
-    // The text comes from the step that knows how the salon decided — NOT straight from the one
-    // that booked, which cannot know it was turned down and would cheerfully send «you are booked
-    // for Thursday at five» after the salon refused Thursday at five. Not a template of ours: the
-    // salon pays for one WhatsApp, and the customer reads what the assistant wrote for her.
-    expect(confirm?.vars?.text).toBe('{{steps.reply_to_customer.text}}');
-    // Same recipient resolution as the acknowledgement: the conversation, never a typed number —
-    // so the two notifies cost ONE recipient grant and ONE channel grant, not two of each.
-    expect(confirm?.channel).toBe('whatsapp');
-    expect(confirm?.to).toEqual(steps[0].to);
-  });
-
-  it('gives the proposing step the whole budget the hub allows, and not one iteration more', () => {
-    // The merged step asks up to nine tools in a row (catalogue, opening hours, slots, check,
-    // staff, schedules, check again, customer, create), so the source pins `max_iters` at the
-    // kernel's cap. Above it the hub refuses the document at save; below it the proposal never
-    // arrives. Zero margin either way — whoever adds a tool to this step adds a STEP instead.
-    const propose = buildTemplate(template!, t).steps.find((s) => s.id === 'propose_appointment');
-    expect(propose?.max_iters).toBe(MAX_ITERS_CAP);
-  });
-
-  it('writes back on WhatsApp through the conversation, never to a number in the document', () => {
-    const notify = buildTemplate(template!, t).steps[0];
-    expect(notify.channel).toBe('whatsapp');
-    expect(notify.to).toEqual({
-      query: 'whatsapp_inbox.conversations.list',
-      params: { f_wa_contact_id: 'input.from' },
-      field: 'contact_phone',
-    });
-    // The acknowledgement is the one sentence every shop wants in its own words, so it is a blank.
-    expect(template!.blanks.length).toBeGreaterThan(0);
-    expect(String(notify.vars?.text ?? '')).not.toBe('');
-  });
-
-  /**
-   * The list is `flows/appointment-from-whatsapp.grants.json` of `whatsapp_inbox@SOURCE.commit`,
-   * written out here because the two repositories cannot read each other at CI time. If the card
-   * ever derives one grant more, or one fewer, than the automation the module publishes, this is
-   * where it is caught — and a grant is the difference between an automation that books and one
-   * that writes to a customer without being allowed to.
-   *
-   * Fourteen: eleven, plus the two whatsapp_inbox#61 needs to CANCEL — reading what a customer
-   * already has, and cancelling it — plus the one whatsapp_inbox#74 needs to MOVE one. Moving
-   * needs no fifteenth: it reuses the same `list_for_customer` read to know WHICH appointment it
-   * is moving, and the availability trio to know where to move it to. (It was twelve before
-   * whatsapp_inbox#55 dropped
-   * `appointments.appointments.conflicting`: `availability.check` already refuses an overlap with
-   * the booking gate's own authority, and the reads it does on the way run as the SYSTEM
-   * (`preload_reads`), which no grant governs.)
-   */
-  it('asks for the fourteen permissions the module’s own grants file lists, and no fifteenth', () => {
-    expect(
-      templateGrants(template!, t)
-        .map((g) => `${g.kind} ${g.value}`)
-        .sort(),
-    ).toEqual(
-      [
-        'command appointments.appointments.cancel',
-        'command appointments.appointments.create',
-        'command appointments.appointments.reschedule',
-        'command appointments.availability.check',
-        'command appointments.availability.day_opening',
-        'command appointments.availability.slots',
-        'command customers.create',
-        'notify whatsapp',
-        'query appointments.appointments.list_for_customer',
-        'query customers.list',
-        'query services.services.list',
-        'query staff.members.list',
-        'query staff.schedules.list_for_member',
-        'recipient_query whatsapp_inbox.conversations.list#contact_phone',
-      ].sort(),
-    );
-  });
-
-  /**
-   * **Verbatim means verbatim, and this is where it is measured.** The whole document this card
-   * builds — trigger, steps, tools, prompts, the acknowledgement — in BOTH languages, hashed in
-   * the canonical form of {@link digest}, against the hashes of the source files at
-   * {@link SOURCE.commit}. The grants test above cannot see a prompt reworded, a `max_iters`
-   * nudged or a tool moved between steps; this can. A mismatch is one of two things — a mirror
-   * that drifted from its source, or a re-sync that forgot to move the pin — and both are the bug.
-   */
-  it('names the five modules it needs, so a hub without one of them never shows it', () => {
-    expect([...new Set(template!.witnesses.map((w) => w.module))].sort()).toEqual([
-      'appointments',
-      'customers',
-      'services',
-      'staff',
-      'whatsapp_inbox',
-    ]);
-  });
-
-  it('tells the model which tools it may use, and offers no tool it has no permission for', () => {
-    const granted = new Set(templateGrants(template!, t).map((g) => `${g.kind} ${g.value}`));
-    const ai = buildTemplate(template!, t).steps.filter((s) => s.kind === 'ai');
-    for (const step of ai) {
-      expect(step.prompt, step.id).toBeTruthy();
-      for (const query of step.tools?.queries ?? []) expect(granted.has(`query ${query}`), query).toBe(true);
-      for (const command of step.tools?.commands ?? []) expect(granted.has(`command ${command}`), command).toBe(true);
-    }
-    // WHICH steps carry tools is the shape itself, not an accident, so it is named here rather
-    // than left to «at least one»: all three have them since whatsapp_inbox#97 gave
-    // `reply_to_customer` the two availability reads it needs to offer real hours. Stripping the
-    // tools off a step would leave a model asked to book with nothing to book with — and, under
-    // the old «every ai step has at least one tool» wording, that failure only surfaced if it
-    // stripped the LAST one. What each of them may hold is judged in its own test above.
-    expect(
-      ai.filter((s) => (s.tools?.queries?.length ?? 0) + (s.tools?.commands?.length ?? 0) > 0).map((s) => s.id),
-    ).toEqual(['know_the_customer', 'propose_appointment', 'reply_to_customer']);
-  });
-});
-
-/**
- * **The mirror against its source, whenever the workspace has the source** (flows#52).
- *
- * Nothing in this repository can see `whatsapp_inbox` at CI time, so the pins above are what CI
- * runs. But this module is developed inside the monorepo workspace, beside the module it mirrors,
- * and there the real document is one directory away. This reads it — when it is there, and when it
- * is at least as new as the commit the mirror claims to copy — and compares the lot: both
- * documents, and the grants file.
- *
- * Skipped LOUDLY otherwise: on a bare checkout there is nothing to read, and a neighbour OLDER than
- * the pin would report a drift that is its own, not ours (the fleet's checkouts run behind).
- * `whatsapp_inbox/tests/flow_templates.test.py` applies the same rule when it reads ITS neighbours.
- * When the source moves past the pin — whatsapp_inbox#58 and #61 are next in line for this very
- * document — this is the test that goes red on this machine before the drift ships.
- */
-/**
- * **The unattended twin** (whatsapp_inbox#58).
- *
- * The digests above already prove this card IS the document the module publishes, byte for byte.
- * What they cannot do is say WHY it is different from its twin — and the difference is one word
- * repeated twice (`auto`), which is exactly the kind of thing a careless re-sync flips back. These
- * name it, so a mirror that quietly becomes a second copy of the attended family goes red here and
- * not only in a hash nobody can read.
- */
-describe('WhatsApp → appointment BOOKED, the family that runs with nobody watching (whatsapp_inbox#58)', () => {
-  const template = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment-unattended');
-  const attended = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment');
-
-  it('is in the gallery at all — which is the whole bug: it was published and unreachable', () => {
-    expect(template, 'no `whatsapp-appointment-unattended` template in the catalogue').toBeTruthy();
-  });
-
-  it('books inside the turn: BOTH model steps are `auto`, and there is no approval step', () => {
-    const steps = buildTemplate(template!, t).steps;
-    // The two `query` steps are whatsapp_inbox#103's, and this is the family it was opened
-    // against: with nobody reading the model's work before the customer does, a `customers.list`
-    // in its hands turned «what has María got booked?» into a stranger's diary sent over WhatsApp.
-    // The lookup is the document's now, keyed on the number the message came from.
-    // The last two are whatsapp_inbox#101's: the model DECLARES the slots it found and the guard
-    // only sends the list when there is something in it.
-    expect(steps.map((s) => [s.id, s.kind])).toEqual([
-      ['acknowledge', 'notify'],
-      ['find_customer', 'query'],
-      ['know_the_customer', 'ai'],
-      ['resolve_customer', 'query'],
-      ['book_appointment', 'ai'],
-      ['confirm_to_customer', 'notify'],
-      ['any_slot_to_offer', 'condition'],
-      ['offer_slots', 'notify'],
-    ]);
-    // The one word this family is: `manual` parks the write in `_flow_approvals` and ends the turn,
-    // which is the tray this salon has nobody to empty. The `query` steps have no policy at all —
-    // a deterministic read the document mapped is nobody's proposal to approve.
-    expect(steps.map((s) => s.policy)).toEqual([
-      undefined,
-      undefined,
-      'auto',
-      undefined,
-      'auto',
-      undefined,
-      undefined,
-      undefined,
-    ]);
-    // And the kernel's explicit pause (hub#950) is not smuggled back in by another name.
-    expect(steps.some((s) => s.kind === 'approval')).toBe(false);
-  });
-
-  it('tells the customer what they HAVE, in the words of the step that booked it', () => {
-    const steps = buildTemplate(template!, t).steps;
-    const confirm = steps.find((s) => s.id === 'confirm_to_customer');
-    // With no approval in the middle this notify is the customer's ONLY notice that the
-    // appointment exists. It has to quote the step that booked — a text of ours would announce a
-    // booking that may not have happened.
-    expect(confirm?.vars?.text).toBe('{{steps.book_appointment.text}}');
-    expect(confirm?.to).toEqual(steps[0].to);
-  });
-
-  /**
-   * **Fourteen against the twin's fourteen: the same set, the move included again**
-   * (whatsapp_inbox#74 → whatsapp_inbox#118).
-   *
-   * Running unattended is a reason to skip the tray, never a reason to want more authority — nor
-   * less. This card went a release WITHOUT `appointments.appointments.reschedule` because the
-   * command could not be scoped to the customer who is writing: it took no `channel` and no
-   * `customer_id`, and its handler checked state, notice, hours, blocks and overlap — never whose
-   * appointment it was. The grants this card already holds reach any of them (`customers.list`
-   * searches by name, `list_for_customer` takes any `customer_id`), so with `policy: "auto"` the
-   * only thing between a customer and a stranger's hour would have been a paragraph of prompt
-   * (hub#1623: not a control).
-   *
-   * appointments#142 gave `reschedule` its `channel` + `customer_id` and the same
-   * `customer_identity_refusal` cancelling already had, and whatsapp_inbox#118 re-added the branch.
-   * So the asymmetry is GONE and the assertion is the strict one again: identical sets, both ways.
-   * What replaced the missing permission as the boundary is the pin — asserted, with the call it
-   * has to refuse, in «a card installs the permission it PROMISED» below. Dropping this back to a
-   * subset check would let the move come back WIDE and read as the old, deliberate asymmetry.
-   */
-  it('asks for its attended twin’s permissions, exactly — the move included again', () => {
-    const mine = templateGrants(template!, t).map((g) => `${g.kind} ${g.value}`).sort();
-    const theirs = templateGrants(attended!, t).map((g) => `${g.kind} ${g.value}`).sort();
-    expect(mine).toContain('command appointments.appointments.reschedule');
-    expect(mine).toEqual(theirs);
-    expect(mine).toHaveLength(14);
-  });
-
-  it('needs the same five modules, so a hub short of one never sees it', () => {
-    expect([...new Set(template!.witnesses.map((w) => w.module))].sort()).toEqual([
-      'appointments',
-      'customers',
-      'services',
-      'staff',
-      'whatsapp_inbox',
-    ]);
-  });
-
-  it('offers no tool it has no permission for', () => {
-    const granted = new Set(templateGrants(template!, t).map((g) => `${g.kind} ${g.value}`));
-    for (const step of buildTemplate(template!, t).steps) {
-      if (step.kind !== 'ai') continue;
-      expect(step.prompt, step.id).toBeTruthy();
-      for (const query of step.tools?.queries ?? []) expect(granted.has(`query ${query}`), query).toBe(true);
-      for (const command of step.tools?.commands ?? []) expect(granted.has(`command ${command}`), command).toBe(true);
-    }
-  });
-
-  it('says on the card itself that nobody reviews it — in English and in Spanish', () => {
-    // The gallery is where the owner CHOOSES between the two, and the choice is «does a person say
-    // yes first?». A summary that does not answer that makes the two cards look like the same
-    // automation twice. Asserted on the meaning, not the prose: each locale must say, in its own
-    // words, that it books on its own, and must not promise a review.
-    for (const [lang, translate] of [['en', t], ['es', tEs]] as const) {
-      const summary = translate(template!.summaryKey!);
-      const plain = translate(template!.plainKey!);
-      expect(summary, `${lang}: the summary is still the i18n key`).not.toBe(template!.summaryKey);
-      const promise = lang === 'en' ? /no review|on its own|nobody/i : /sin revisión|ella sola|nadie/i;
-      expect(summary + plain, `${lang}: the card does not say nobody reviews it`).toMatch(promise);
-    }
-  });
-
-  it('waits on the SAME trigger as its twin — which is why a hub must run one, not both', () => {
-    // Not a detail: two enabled flows on one event book every incoming message twice. This is the
-    // fact `sharesTriggerWith` below turns into a warning the owner sees BEFORE creating it.
-    const mine = buildTemplate(template!, t).triggers[0];
-    const theirs = buildTemplate(attended!, t).triggers[0];
-    expect(mine.event).toBe(theirs.event);
-    expect(mine.filter).toEqual(theirs.filter);
-  });
-});
-
-describe.each(SOURCES)(
-  'the $template mirror against the whatsapp_inbox checkout beside this module (flows#52)',
-  (mirror: MirrorSource) => {
-    const template = TEMPLATES.find((tpl) => tpl.id === mirror.template);
-    const source = sourceCheckout(mirror);
-    const where = source
-      ? `read from ${source}`
-      : 'SKIPPED: no checkout at or past the pin beside this module';
-
-    /**
-     * The pinned hashes, checked without needing a neighbour at all — this is what CI runs. The
-     * grants test cannot see a prompt reworded, a `max_iters` nudged or a tool moved between
-     * steps; this can. A mismatch is a mirror that drifted or a re-sync that forgot the pin.
-     */
-    it('is, hashed, the very document the module publishes — in English and in Spanish', () => {
-      expect(digest(buildTemplate(template!, t)), 'en').toBe(mirror.digest.en);
-      expect(digest(buildTemplate(template!, tEs)), 'es').toBe(mirror.digest.es);
-    });
-
-    it.skipIf(!source)(`says exactly what the module’s own files say (${where})`, () => {
-      const read = (file: string): Record<string, unknown> =>
-        JSON.parse(readFileSync(join(source!, file), 'utf8')) as Record<string, unknown>;
-      expect(digest(buildTemplate(template!, t)), 'en').toBe(digest(read(mirror.files.en)));
-      expect(digest(buildTemplate(template!, tEs)), 'es').toBe(digest(read(mirror.files.es)));
-      const published = (read(mirror.files.grants) as { grants: { kind: string; value: string }[] })
-        .grants.map((g) => `${g.kind} ${g.value}`)
-        .sort();
-      expect(
-        templateGrants(template!, t)
-          .map((g) => `${g.kind} ${g.value}`)
-          .sort(),
-      ).toEqual(published);
-    });
-  },
-);
-
-/**
- * **The pin has to be a commit of the source's `main` — and twice in one batch it was not.**
- *
- * A mirror PR is written while the source PR is still a branch, so the honest pin at that moment is
- * the branch head. Then `merge-pr.sh` squashes the source: `main` gets a brand-new commit and the
- * branch head is gone (whatsapp_inbox#69 → `89f8d02`, whatsapp_inbox#75 → `ba2f293`). The digests
- * above stay true — the content is the same — but `SOURCE.commit` now names a commit no checkout on
- * `main` will ever contain: the neighbour test above keeps passing while a fleet worktree at the old
- * branch lingers, and quietly degrades to «skipped» the day that worktree is removed. Nothing said
- * «re-pin», and somebody had to remember it — twice.
- *
- * This says it. It reads `origin/main` of the canonical checkout as last fetched (`git fetch` is not
- * something a test does): the pin is in it → fine; the pin is NOT in it but the documents there
- * hash to what this mirror pins → the source LANDED and the pin was squashed away → red, naming the
- * sha to set; neither → the source is not on `main` yet, skipped out loud. Skipped too where there
- * is no canonical checkout (CI, until module-toolkit#211 brings the source repo to the runner).
- */
-describe.each(SOURCES)(
-  'the $template pin names a commit of whatsapp_inbox main (whatsapp_inbox#61, twice)',
-  (mirror: MirrorSource) => {
-  const on = sourceMain(mirror.module);
-  const git = on?.git ?? ((): string | null => null);
-  const main = on?.sha ?? null;
-  const pinned =
-    main !== null && git('merge-base', '--is-ancestor', mirror.commit, 'refs/remotes/origin/main') !== null;
-  const landed =
-    main !== null &&
-    !pinned &&
-    (['en', 'es'] as const).every((lang) => {
-      const body = git('show', `refs/remotes/origin/main:${mirror.files[lang]}`);
-      return body !== null && digest(JSON.parse(body) as Record<string, unknown>) === mirror.digest[lang];
-    });
-  const state =
-    main === null
-      ? 'SKIPPED: no canonical checkout with origin/main beside this module'
-      : pinned
-        ? `in origin/main as fetched, ${main.slice(0, 7)}`
-        : landed
-          ? 'the source LANDED and the pin was squashed away'
-          : 'SKIPPED: the source is not on main yet';
-
-  it.skipIf(main === null || (!pinned && !landed))(`is a commit of origin/main (${state})`, () => {
-    expect(
-      pinned,
-      `The pin of ${mirror.template}, ${mirror.commit.slice(0, 7)}, is not in whatsapp_inbox ` +
-        `origin/main, but the documents there hash to exactly what this mirror pins: the source PR ` +
-        `was squash-merged and its branch head is gone. Set its \`commit\` to ${main} — the ` +
-        `digests do not change.`,
-    ).toBe(true);
-  });
-
-  /**
-   * **…and it has to be the commit that actually CARRIES these documents.** The test above only
-   * asks whether the pin is an ancestor of `main`, and once a commit lands that stays true for
-   * ever — so a re-sync that updated the digests and forgot the `commit` kept a green suite while
-   * the pin named a commit whose documents were the OLD ones. Measured on whatsapp_inbox#90: with
-   * the cards and both digests correct and the pin left at the previous sha, all 74 tests here
-   * passed. Nothing else can catch it — the neighbour test reads the checkout's WORKING TREE, not
-   * the pinned commit, so it agrees with a pin that is years stale.
-   *
-   * That matters because the `commit` is the only thing that says WHICH version of the source a
-   * reader should diff against when the two drift (whatsapp_inbox#73). A pin that points at the
-   * wrong document sends them to compare against something that was never mirrored.
-   */
-  it.skipIf(main === null || !pinned)(`names the commit those digests were taken from (${state})`, () => {
-    for (const lang of ['en', 'es'] as const) {
-      const body = git('show', `${mirror.commit}:${mirror.files[lang]}`);
-      expect(body, `${mirror.files[lang]} is not in ${mirror.commit.slice(0, 7)}`).not.toBeNull();
-      expect(
-        digest(JSON.parse(body!) as Record<string, unknown>),
-        `${mirror.template} pins ${mirror.commit.slice(0, 7)}, but the ${lang} document AT that ` +
-          `commit is not the one these digests describe: the digests were re-taken and the ` +
-          `\`commit\` was left behind. Set it to the commit the documents actually come from.`,
-      ).toBe(mirror.digest[lang]);
-    }
-  });
-
-  /**
-   * **…and the source must not have MOVED PAST it.** The two tests above both judge the mirror
-   * against the commit it names, so once that commit is on `main` they stay green for ever — which
-   * is the hole whatsapp_inbox#97 fell through. Its squash (`0f8eb60`) rewrote all four documents,
-   * the pin at `c4b5368` was still an ancestor of `main`, and the documents AT `c4b5368` still
-   * hashed to what the cards carry, so all 76 tests here passed while the gallery handed out a
-   * cancellation `appointments` rejects with `invalid_payload` (flows#64).
-   *
-   * The neighbour test far above is not that alarm either, twice over: it reads the WORKING TREE of
-   * whichever checkout beside this module has the newest HEAD, and the fleet keeps a dozen
-   * `whatsapp_inbox-*` worktrees — on flows#64 it picked one whose branch predates the fix and
-   * agreed with the stale mirror. This reads `refs/remotes/origin/main`, which is the one place the
-   * PUBLISHED document lives, and names both the sha and the digests to set.
-   *
-   * Only when the pin is already on `main`, and that is the whole point of the condition: a mirror
-   * written while its source is still a branch legitimately carries documents `main` has never
-   * seen, and that case is the two tests above (`landed` → re-pin; neither → skipped out loud).
-   * Skipped where there is no canonical checkout at all (CI, until module-toolkit#211). `git fetch`
-   * is not something a test does, so a stale checkout reports what was last fetched — late, never
-   * a false red.
-   */
-  it.skipIf(main === null || !pinned)(`is what whatsapp_inbox publishes TODAY, not a document it has moved past (${state})`, () => {
-    const template = TEMPLATES.find((tpl) => tpl.id === mirror.template);
-    /** The commit the published document actually comes from — the sha to re-pin to, not the tip. */
-    const carrier = (file: string): string =>
-      git('log', '-1', '--format=%H', 'refs/remotes/origin/main', '--', file) ?? main!;
-    for (const lang of ['en', 'es'] as const) {
-      const body = git('show', `refs/remotes/origin/main:${mirror.files[lang]}`);
-      expect(body, `${mirror.files[lang]} is not in whatsapp_inbox origin/main`).not.toBeNull();
-      const published = digest(JSON.parse(body!) as Record<string, unknown>);
-      expect(
-        published,
-        `${mirror.template}: the ${lang} document whatsapp_inbox publishes on origin/main is NOT ` +
-          `the one this card carries. The source moved past the pin (${mirror.commit.slice(0, 7)}) ` +
-          `and the gallery is handing out the old automation — re-sync the card and the ${lang} ` +
-          `locale file from the source, set \`commit\` to ${carrier(mirror.files[lang])}, and set ` +
-          `the ${lang} digest to ${published}.`,
-      ).toBe(mirror.digest[lang]);
-    }
-    // The grants file the same way: it moves on its own (whatsapp_inbox#55 dropped one, #61 added
-    // two), and a card that keeps asking for a permission the source has stopped publishing is an
-    // automation the hub refuses to create — or, the other way round, one that books without being
-    // allowed to.
-    const grants = git('show', `refs/remotes/origin/main:${mirror.files.grants}`);
-    expect(grants, `${mirror.files.grants} is not in whatsapp_inbox origin/main`).not.toBeNull();
-    expect(
-      templateGrants(template!, t)
-        .map((g) => `${g.kind} ${g.value}`)
-        .sort(),
-      `${mirror.template}: the permissions this card derives are not the ones whatsapp_inbox ` +
-        `publishes on origin/main (${carrier(mirror.files.grants).slice(0, 7)}).`,
-    ).toEqual(
-      (JSON.parse(grants!) as { grants: { kind: string; value: string }[] }).grants
-        .map((g) => `${g.kind} ${g.value}`)
-        .sort(),
-    );
-  });
-
-  /**
-   * **…and the pin has to be the commit that CARRIES the documents, not just any commit that has
-   * them** (whatsapp_inbox#102's re-pin).
-   *
-   * The three tests above are all satisfied by a DESCENDANT of the right commit: `main`'s tip
-   * hashes the same documents as the squash that wrote them, so a pin moved to the tip passes
-   * every one of them. Measured on the re-pin of whatsapp_inbox#102 — pinned at
-   * `0fd8a74` (`chore(release): v2.1.40`, which touches no template) the suite was 77 green.
-   *
-   * That is not cosmetic. The `commit` has ONE job: say which change of the source this card
-   * mirrors, so a reader who finds the two drifting knows what to diff against (whatsapp_inbox#73)
-   * — and the release bump the fleet pushes minutes after every merge is the sha most likely to be
-   * grabbed by mistake, because it is what the FIRST test names in its remedy (it can only offer
-   * the tip it fetched). `git log -1 <file>` is the answer, and this is the test that insists on it.
-   *
-   * Judged per FILE and satisfied by any of them: the two documents and the grants file move in
-   * different commits (the unattended grants last moved in `a44a3f1`, its documents in `0f8eb60`),
-   * so demanding one single carrier for all three would be a red the day only one of them changes.
-   */
-  it.skipIf(main === null || !pinned)(`is the commit that carries them, not a later one (${state})`, () => {
-    const carrier = (file: string): string | null =>
-      git('log', '-1', '--format=%H', 'refs/remotes/origin/main', '--', file);
-    const carriers = [mirror.files.en, mirror.files.es, mirror.files.grants].map(carrier);
-    expect(
-      carriers,
-      `${mirror.template} pins ${mirror.commit.slice(0, 7)}, which is not the commit any of its ` +
-        `three files last moved in (${carriers
-          .map((c) => (c === null ? '—' : c.slice(0, 7)))
-          .join(', ')}). A pin on a later commit — a \`chore(release)\` bump, or the tip the first ` +
-        `test names — passes every other check here and stops saying WHICH change it mirrors.`,
-    ).toContain(mirror.commit);
-  });
-
-  },
-);
-
 /**
  * **A card for a module this hub does not have is not offered at all** (flows#52).
  *
@@ -1653,25 +712,29 @@ describe('the gallery only offers what this hub can run (flows#52)', () => {
   // whatever the modules say — and every assertion here about them would pass without testing the
   // module probe at all.
   it('drops the cards whose modules are missing, and keeps the rest', () => {
-    const known = without('tasks');
+    const known = without('sales');
     const shown = SECTORS.flatMap((sector) => availableTemplates(sector, known, CURRENT_CORE)).map(
       (tpl) => tpl.id,
     );
-    expect(shown).not.toContain('no-show-followup');
-    expect(shown).toContain('whatsapp-appointment');
+    expect(shown).not.toContain('note-big-sale');
+    expect(shown).toContain('whatsapp-answer');
   });
 
-  it('hides the WhatsApp card on a hub that has WhatsApp but no diary', () => {
-    // The case that made hiding the answer: every module of the card but one.
-    const shown = availableTemplates('beauty', without('appointments'), CURRENT_CORE).map(
-      (tpl) => tpl.id,
-    );
-    expect(shown).not.toContain('whatsapp-appointment');
-    // …and it is the missing diary that hides it, not the kernel floor: with the diary back the
-    // same hub is offered the card.
+  it('hides the WhatsApp card on a hub that has WhatsApp but no task list', () => {
+    // The case that made hiding the answer: every module of the card but one. `whatsapp-answer`
+    // reads a message and writes a job on somebody's list, so a hub with WhatsApp and no `tasks`
+    // is a hub that can receive the message and do nothing with it.
+    const shown = SECTORS.flatMap((sector) =>
+      availableTemplates(sector, without('tasks'), CURRENT_CORE),
+    ).map((tpl) => tpl.id);
+    expect(shown).not.toContain('whatsapp-answer');
+    // …and it is the missing list that hides it, not the kernel floor: with `tasks` back the same
+    // hub is offered the card.
     expect(
-      availableTemplates('beauty', without(), CURRENT_CORE).map((tpl) => tpl.id),
-    ).toContain('whatsapp-appointment');
+      SECTORS.flatMap((sector) => availableTemplates(sector, without(), CURRENT_CORE)).map(
+        (tpl) => tpl.id,
+      ),
+    ).toContain('whatsapp-answer');
   });
 
   it('offers everything while the hub has not answered yet', () => {
@@ -1691,7 +754,7 @@ describe('the gallery only offers what this hub can run (flows#52)', () => {
     const missing = unavailableModules(without('tasks', 'appointments'));
     expect(missing).toContain('tasks');
     expect(missing).toContain('appointments');
-    // Deduped: nine cards need `tasks`, and «Tasks, Tasks, Tasks» is not a sentence.
+    // Deduped: most cards here need `tasks`, and «Tasks, Tasks, Tasks» is not a sentence.
     expect(new Set(missing).size).toBe(missing.length);
   });
 
@@ -1711,106 +774,13 @@ describe('the gallery only offers what this hub can run (flows#52)', () => {
 });
 
 /**
- * **A family the module publishes and nobody mirrors is a family no hub can install**
- * (whatsapp_inbox#58).
- *
- * This gallery is, today, the ONLY door into a hub for an automation a module ships:
- * `erplora pack` leaves `flows/` out of the zip (module-toolkit#209) and the hub reads no
- * `.flow.json` from an installed module (hub#1611). Both open. So a family added to
- * `whatsapp_inbox/flows/` without a card here is written, reviewed, merged, published — and
- * unreachable. It happened with `appointment-from-whatsapp-unattended`: the module PR was green in
- * both repositories, and the salon still could not turn the unattended mode on.
- *
- * Nothing caught it, and that is the point. The tests above pin the ONE family they name, each
- * against its own digests; none of them ever asks the source «is that all of them?». This does:
- * it lists what the neighbour actually publishes and demands a mirror for every one.
- *
- * When either of those two issues closes and a module's flows reach a hub on their own, this test
- * stops being the safety net and becomes a consistency check — still worth keeping, because the
- * gallery is where an owner MEETS an automation, and a family only the installer knows about is
- * one nobody turns on.
- */
-describe('every family whatsapp_inbox publishes has a card in this gallery (whatsapp_inbox#58)', () => {
-  // Off `origin/main` and not off a neighbouring working tree: PUBLISHED is what this test is
-  // about, and a family still on a branch is not published yet. The working-tree version of this
-  // read also went quiet — a skip, and a green run — the moment a re-pin outran every local
-  // checkout, which is exactly when a new family is most likely to be arriving (flows#64).
-  const on = sourceMain(SOURCE.module);
-  const where = on
-    ? `read from origin/main as fetched, ${on.sha.slice(0, 7)}`
-    : 'SKIPPED: no canonical checkout beside this module';
-
-  it.skipIf(!on)(`leaves no published family without a mirror (${where})`, () => {
-    const families = (on!.git('ls-tree', '--name-only', 'refs/remotes/origin/main', 'flows/') ?? '')
-      .split('\n')
-      .map((f) => f.replace('flows/', ''))
-      .filter((f) => f.endsWith('.en.flow.json'))
-      .sort();
-    // The control that stops a green from meaning «the directory was empty»: whatever else is
-    // true, the neighbour publishes at least the family this file was written around.
-    expect(families, 'no `*.en.flow.json` beside the module — this test proved nothing').toContain(
-      SOURCE.files.en.replace('flows/', ''),
-    );
-    const mirrored = new Set(SOURCES.map((s) => s.files.en.replace('flows/', '')));
-    expect(
-      families.filter((f) => !mirrored.has(f)),
-      'published by whatsapp_inbox and mirrored by no card: an owner cannot install it',
-    ).toEqual([]);
-  });
-
-  /**
-   * **The pin and the card say the same thing about what is mirrored** (flows#98).
-   *
-   * `mergeTemplates` retires a hand copy by reading `mirrors` off the card in production, and this
-   * list of pins is what keeps those copies honest against the source. Two places naming the same
-   * pairing is exactly the arrangement this issue is about, so they are checked against each other:
-   * a card that loses its `mirrors` stops being retired and quietly comes back as a second copy on
-   * every hub that serves the family — with all four pin tests still green.
-   */
-  it('marks in PRODUCTION the very family each pin mirrors', () => {
-    for (const s of SOURCES) {
-      const card = TEMPLATES.find((tpl) => tpl.id === s.template);
-      // The PAIRING, and only the pairing: `mirrors` also carries the limits staged for the served
-      // twin (flows#103), which say nothing about which family is mirrored and have their own two
-      // guards. Anything else new in there would still have to pass the type — the field is a
-      // closed object literal — so nothing is let through by narrowing the comparison here.
-      const pairing = card?.mirrors && { module: card.mirrors.module, family: card.mirrors.family };
-      expect(pairing, `${s.template} is pinned to a published family but is not marked as a copy of it`)
-        .toEqual({ module: s.module, family: s.files.en.replace('flows/', '').replace('.en.flow.json', '') });
-    }
-    // And nothing is marked as a copy of something no pin watches: a mirror nobody checks against
-    // the source is the drift this catalogue has already shipped twice.
-    for (const tpl of TEMPLATES.filter((c) => c.mirrors)) {
-      expect(
-        SOURCES.find((s) => s.template === tpl.id),
-        `${tpl.id} says it mirrors ${tpl.mirrors?.family} and no pin watches that family`,
-      ).toBeTruthy();
-    }
-  });
-
-  it('has a real card behind every pin, and one card per pin', () => {
-    // The other half: a pin may not name a card that does not exist, and two pins may not point at
-    // the same card — either way the loop above would «cover» a family it never checked.
-    for (const s of SOURCES) {
-      expect(
-        TEMPLATES.find((tpl) => tpl.id === s.template),
-        `pin for ${s.files.en} names a card that is not in the catalogue: ${s.template}`,
-      ).toBeTruthy();
-    }
-    const ids = SOURCES.map((s) => s.template);
-    expect(new Set(ids).size, 'two pins share one card').toBe(ids.length);
-  });
-});
-
-/**
  * **Two automations on one event fire twice** (whatsapp_inbox#58).
  *
- * The unattended family and its attended twin wait on the SAME event with the SAME filter, so a
- * hub that runs both books every incoming message twice — two appointments, two WhatsApps, one
- * customer who now has to cancel one of them. Nothing in the kernel prevents it, and nothing
- * should: two flows on one event is a normal thing to want (log every message AND act on it). What
- * was missing is that the owner is never TOLD, and the only warning lived in a README they do not
- * read.
+ * Two automations can wait on the SAME event with the SAME filter, so a hub that runs both acts on
+ * every incoming message twice — two jobs on the list, two replies, one customer who now hears the
+ * same thing from the shop twice. Nothing in the kernel prevents it, and nothing should: two flows
+ * on one event is a normal thing to want (log every message AND act on it). What was missing is
+ * that the owner is never TOLD, and the only warning lived in a README they do not read.
  *
  * So the gallery asks before it creates the second one, which is what Zapier does with a duplicate
  * Zap and what Power Automate does with a duplicate flow — warn, name the one already there, and
@@ -1819,15 +789,27 @@ describe('every family whatsapp_inbox publishes has a card in this gallery (what
  * This is the pure half — the decision, with no component and no network around it.
  */
 describe('the gallery can see that a card would double up on a trigger (whatsapp_inbox#58)', () => {
-  const unattended = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment-unattended')!;
-  const attended = TEMPLATES.find((tpl) => tpl.id === 'whatsapp-appointment')!;
+  // The card is the one this catalogue still writes: the four WhatsApp copies went with flows#101,
+  // and the recipes that replaced them are served by the hub, so the collision this warns about is
+  // now between a written card and whatever the owner already has — which is the shape every
+  // assertion below already used.
+  const unattended = templateById('whatsapp-answer')!;
   const asFlow = (name: string, template: (typeof TEMPLATES)[number]) => ({
     name,
     definition: buildTemplate(template, t) as unknown as Record<string, unknown>,
   });
+  /** A flow of the owner's own, waiting on the very event the card above waits on. */
+  const onTheSameEvent = (name: string) => ({
+    name,
+    definition: {
+      schema_version: 1,
+      triggers: [{ kind: 'event', event: 'whatsapp_inbox.message.received' }],
+      steps: [],
+    } as Record<string, unknown>,
+  });
 
   it('names the flow already waiting on that event', () => {
-    expect(flowsOnSameTrigger(unattended, t, [asFlow('WhatsApp → appointment proposal', attended)])).toEqual([
+    expect(flowsOnSameTrigger(unattended, t, [onTheSameEvent('WhatsApp → appointment proposal')])).toEqual([
       'WhatsApp → appointment proposal',
     ]);
   });
@@ -1840,9 +822,11 @@ describe('the gallery can see that a card would double up on a trigger (whatsapp
     expect(flowsOnSameTrigger(unattended, t, [])).toEqual([]);
   });
 
-  it('warns in both directions: the attended card collides with the unattended one too', () => {
-    expect(flowsOnSameTrigger(attended, t, [asFlow('WhatsApp → cita reservada', unattended)])).toEqual([
-      'WhatsApp → cita reservada',
+  it('warns about a copy of ITSELF, which is what tapping «Use this» twice makes', () => {
+    // The same card, already installed. `asFlow` builds the document the card installs, so this is
+    // the collision an owner actually creates: the second «Use this» on a card they already used.
+    expect(flowsOnSameTrigger(unattended, t, [asFlow('WhatsApp → task', unattended)])).toEqual([
+      'WhatsApp → task',
     ]);
   });
 
@@ -1852,7 +836,11 @@ describe('the gallery can see that a card would double up on a trigger (whatsapp
     // exactly the flow that has been in production longest.
     const edited = {
       name: 'My WhatsApp thing',
-      definition: { schema_version: 1, triggers: [{ kind: 'event', event: 'hub.whatsapp.message_received' }], steps: [] },
+      definition: {
+        schema_version: 1,
+        triggers: [{ kind: 'event', event: 'whatsapp_inbox.message.received' }],
+        steps: [],
+      },
     };
     expect(flowsOnSameTrigger(unattended, t, [edited])).toEqual(['My WhatsApp thing']);
   });
@@ -1863,7 +851,7 @@ describe('the gallery can see that a card would double up on a trigger (whatsapp
     // warning that keeps naming it tells them to do what they have just done — the warning that
     // teaches an owner to click through warnings. A flow handed back WITHOUT `enabled` still counts:
     // not knowing is not the same as knowing it is off.
-    const twin = asFlow('WhatsApp → appointment proposal', attended);
+    const twin = onTheSameEvent('WhatsApp → appointment proposal');
     expect(flowsOnSameTrigger(unattended, t, [{ ...twin, enabled: false }])).toEqual([]);
     expect(flowsOnSameTrigger(unattended, t, [{ ...twin, enabled: true }])).toEqual([twin.name]);
     expect(flowsOnSameTrigger(unattended, t, [twin])).toEqual([twin.name]);
@@ -1882,240 +870,29 @@ describe('the gallery can see that a card would double up on a trigger (whatsapp
   });
 });
 
-// ── The limit travels with the card (flows#80) ────────────────────────────────────────────────
-
-describe('a card installs the permission it PROMISED, not the wide one next to it', () => {
-  const grantFor = (id: string, command: string) => {
-    const template = templateById(id);
-    return templateGrants(template!, t).find((g) => g.kind === 'command' && g.value === command);
-  };
-
-  /**
-   * **The two limits, and BOTH cards carry them now** (flows#80, flows#99, whatsapp_inbox#107).
-   *
-   * The tray is not a permission boundary. What waits there is a draft written FOR THE CUSTOMER —
-   * «I have cancelled your Thursday, see you next week» — and not the detail of the call underneath
-   * it, so the person approving reads a sentence and authorises an operation they were never shown.
-   * A cancellation on the salon's behalf skips the ownership check, the notice period and
-   * `allow_customer_cancellation`; a move on the salon's behalf skips the ownership check too. Both
-   * are one `channel` away, and `channel` DEFAULTS to `staff` in either command's schema.
-   *
-   * The unattended family used to carry only the first of the two: moving was cut from it because
-   * `reschedule` carried nothing that said whose appointment it was. appointments#142 gave it
-   * `channel` + `customer_id` and whatsapp_inbox#118 put the move back in the recipe, so the two
-   * families now run — and pin — exactly the same pair. On the unattended one the pin is the ONLY
-   * thing standing there: `policy: "auto"` means no tray and nobody looking.
-   *
-   * Pinned here and not only in the module: while hub#1654 is open the sidecar's `payload` never
-   * leaves the hub, and this copy is what the gallery installs — either as the card itself, or
-   * through `withCopiedPins` onto the served twin.
-   */
-  const PINNED: [string, Record<string, unknown>][] = [
-    ['appointments.appointments.cancel', { appointment_id: 'a1' }],
-    ['appointments.appointments.reschedule', { appointment_id: 'a1', start_datetime: '2026-09-10T10:00:00Z' }],
-  ];
-  const PINNED_CARDS = ['whatsapp-appointment', 'whatsapp-appointment-unattended'] as const;
-  const PINNED_PAIRS: [string, string, Record<string, unknown>][] = PINNED_CARDS.flatMap((card) =>
-    PINNED.map(([command, call]) => [card, command, call] as [string, string, Record<string, unknown>]),
-  );
-
-  it.each(PINNED_PAIRS)('%s carries the customer limit onto %s', (card, command) => {
-    const grant = grantFor(card, command);
-    expect(grant, `${card} asks for ${command}`).toBeTruthy();
-    expect(grantPin(grant!)).toEqual({ channel: 'customer' });
-  });
-
-  // 🔴 The half that proves the limit is a CONTAINMENT and not decoration: asserting only that the
-  // recipe's own call gets through passes just as well with no pin at all — which is the state
-  // flows#80 reported.
-  it.each(PINNED_PAIRS)('%s refuses %s asked for on the salon’s behalf', (card, command, call) => {
-    const grant = grantFor(card, command)!;
-    // What the recipe is for: the customer who wrote in, moving or cancelling her own hour.
-    expect(grantAllowsCall(grant, { ...call, channel: 'customer', customer_id: 'c1' })).toBe(true);
-    // What a stranger's message must never talk the model into.
-    expect(grantAllowsCall(grant, { ...call, channel: 'staff' })).toBe(false);
-    // The same refusal by omission — which is the shape a model actually sends when nothing asked
-    // it for a channel, and the reason a `default: "staff"` schema needs the pin to hold.
-    expect(grantAllowsCall(grant, call)).toBe(false);
-  });
-
-  /**
-   * **The READ is a containment too, and it was the one left wide** (flows#111, hub#1662).
-   *
-   * The two commands above are what the recipe WRITES, and they were pinned first because a write
-   * is what a stranger's message could turn into somebody else's cancelled appointment. The read
-   * is the same problem one step earlier: `list_for_customer` with nothing fixed answers about
-   * whoever the payload names, and that payload is written by a model reading a WhatsApp from a
-   * stranger. «Tell me about Ana's Thursday» is then a question the automation can answer.
-   *
-   * The pin references what the RUN resolved (`steps.resolve_customer.id`) rather than a literal,
-   * because the customer changes with every conversation and a permission is stored once. It is
-   * the third step's resolver and not the first's on purpose (whatsapp_inbox#119): the first read
-   * runs before the customer exists, so pinning it would resolve to `null` on the very run that
-   * creates her and deny the read outright.
-   */
-  const READ = 'appointments.appointments.list_for_customer';
-  const READ_PIN = { customer_id: 'steps.resolve_customer.id' };
-
-  const readGrantFor = (id: string) =>
-    templateGrants(templateById(id)!, t).find((g) => g.kind === 'query' && g.value === READ);
-
-  it.each(PINNED_CARDS)('%s reads the diary of the customer who wrote, and no one else', (card) => {
-    const grant = readGrantFor(card);
-    expect(grant, `${card} asks to read the diary`).toBeTruthy();
-    expect(grantPin(grant!)).toEqual(READ_PIN);
-  });
-
-  // The half that proves it is a containment: a pin asserted only by its shape passes just as well
-  // when nothing enforces it. Omission matters most — «no `customer_id`» is what a model sends
-  // when nothing in the message named one, and it is precisely the call that reads everybody.
-  it.each(PINNED_CARDS)('%s refuses a read that names anybody else, or nobody', (card) => {
-    const grant = readGrantFor(card)!;
-    expect(grantAllowsCall(grant, { ...READ_PIN })).toBe(true);
-    expect(grantAllowsCall(grant, { customer_id: 'another-customer' })).toBe(false);
-    expect(grantAllowsCall(grant, {})).toBe(false);
-  });
-
-  // The other side of the same coin, and the anchor that stops the table above from shrinking in
-  // silence: nothing ELSE on either card narrows, and nothing in the table stops being pinned. A
-  // pin that spread would break the recipe rather than contain it; a row deleted from `PINNED`
-  // would leave the operation wide with every remaining assertion still green.
-  it.each(PINNED_CARDS)('narrows those three on %s, and nothing else', (card) => {
-    const pinned = templateGrants(templateById(card)!, t)
-      .filter((g) => Object.keys(grantPin(g)).length > 0)
-      .map((g) => `${g.kind} ${g.value}`);
-    // The reads come before the writes in the document, so the read's grant is derived first.
-    expect(pinned.sort()).toEqual(
-      [`query ${READ}`, ...PINNED.map(([command]) => `command ${command}`)].sort(),
-    );
-  });
-
-  /**
-   * **A pin that REFERENCES a step has to name a step the card runs** (flows#111).
-   *
-   * The sibling of the rule below, on the other half of the pin: that one checks what the limit
-   * lands ON, this one checks what it POINTS AT. Until flows#111 every pin in this catalogue was a
-   * literal (`channel: "customer"`) and there was nothing to point at; a reference is new, and it
-   * fails in a way a literal cannot.
-   *
-   * The hub resolves `steps.<id>.<field>` against the run and, finding no such step, refuses the
-   * call with `flow.grant_payload_denied` — fail-closed, so the automation is not dangerous. It is
-   * DEAD: it installs, it is switched on, and it refuses every single call from the first message
-   * onwards, with nothing on the card to say why. A rename of a step is all it takes, and
-   * `erplora validate` does not catch it either — the toolkit judges the pin's ROOT, not whether
-   * the step exists (module-toolkit#235).
-   */
-  it('never points a limit at a step its own document does not run', () => {
-    for (const template of TEMPLATES) {
-      if (template.grants) continue; // a SERVED card's document is the module's, not ours
-      const ids = new Set(buildTemplate(template, t).steps.map((step) => step.id));
-      for (const [operation, pin] of Object.entries(carriedPins(template))) {
-        for (const [field, value] of Object.entries(pin)) {
-          if (typeof value !== 'string' || !value.startsWith('steps.')) continue;
-          const step = value.split('.')[1];
-          expect(
-            ids,
-            `${template.id} pins ${operation}.${field} to \`${value}\`, and it runs no step \`${step}\``,
-          ).toContain(step);
-        }
-      }
-    }
-  });
-
-  // The control that stops the rule above from being green on an empty set: with no reference
-  // anywhere in the catalogue it would never look at anything, for ever.
-  it('has a card whose limit points at a step at all, so the rule above is not vacuous', () => {
-    const pointing = TEMPLATES.filter((tpl) =>
-      Object.values(carriedPins(tpl)).some((pin) =>
-        Object.values(pin).some((v) => typeof v === 'string' && v.startsWith('steps.')),
-      ),
-    ).map((tpl) => tpl.id);
-    expect(pointing).toEqual(['whatsapp-appointment', 'whatsapp-appointment-unattended']);
-  });
-
-  // A universal rule for the catalogue, not a check on one card: a pin naming a command the card
-  // never runs would sit in the source reading like a containment and fix NOTHING, because there
-  // is no grant for it to land on.
-  it('never declares a limit for an operation its own document does not use', () => {
-    for (const template of TEMPLATES) {
-      const derived = new Set(
-        templateGrants(template, t)
-          .filter((g) => canPinPayload(g.kind))
-          .map((g) => g.value),
-      );
-      for (const operation of Object.keys(template.grantPins ?? {})) {
-        expect(derived, `${template.id} pins \`${operation}\`, which it never uses`).toContain(
-          operation,
-        );
-      }
-    }
-  });
-
-  // The other half of the rule above, and the reason there are two fields (flows#103). A limit
-  // STAGED for the served twin is one this copy cannot apply to itself; the day the copy grows the
-  // operation, the entry has to move to `grantPins` — where the rule above starts watching it —
-  // rather than sit here leaving the copy's own permission wide.
-  it('stages for the twin only the limits its own document cannot carry', () => {
-    for (const template of TEMPLATES) {
-      const derived = new Set(
-        templateGrants(template, t)
-          .filter((g) => canPinPayload(g.kind))
-          .map((g) => g.value),
-      );
-      for (const command of Object.keys(template.mirrors?.pins ?? {})) {
-        expect(
-          derived,
-          `${template.id} stages \`${command}\` for its twin, but its own document runs it — ` +
-            'that limit belongs in `grantPins`',
-        ).not.toContain(command);
-      }
-    }
-  });
-
-  // Both halves at once, anchored from the fields rather than from the documents: one limit, one
-  // home. Written twice, an edit to either copy is a containment that silently disagrees with
-  // itself — and `carriedPins` would apply whichever the spread happened to put last.
-  it('never says the same limit in both places', () => {
-    for (const template of TEMPLATES) {
-      const own = Object.keys(template.grantPins ?? {});
-      const staged = Object.keys(template.mirrors?.pins ?? {});
-      expect(own.filter((command) => staged.includes(command)), template.id).toEqual([]);
-      // …and everything the merge applies comes from exactly those two.
-      expect(Object.keys(carriedPins(template)).sort()).toEqual([...own, ...staged].sort());
-    }
-  });
-
-  // The hub is handed values to judge on exactly two kinds — a `command`'s payload (hub#1623) and
-  // a `query`'s parameters (hub#1662) — and refuses a pin on any other with
-  // `flow.invalid_grant_payload`. `PUT …/grants` is all-or-nothing: one bad row does not fail that
-  // row, it loses the whole screen's worth of permissions.
-  it('never declares a limit the hub would refuse the whole screen for', () => {
-    for (const template of TEMPLATES) {
-      for (const grant of templateGrants(template, t)) {
-        if (Object.keys(grantPin(grant)).length) {
-          expect(canPinPayload(grant.kind), `${template.id} pins a ${grant.kind}`).toBe(true);
-        }
-      }
-    }
-  });
-});
-
 /**
- * **A recipe an older core cannot even parse is not offered to it** (flows#92).
+ * **A recipe an older core cannot even parse is not offered to it** (flows#92, flows#101).
  *
- * The unattended card's document carries `interactive` (hub#1633) and `output` (hub#1639), and a
- * core below `v1.1.16` does not degrade on them: `parse_step` walks an allowlist per step kind and
- * answers `flow.invalid_definition` for the WHOLE document, so the recipe dies at save. The
- * gallery has to know that BEFORE it offers the card.
+ * The cards this floor protects are the ones an app SERVES: a WhatsApp document carries
+ * `interactive` (hub#1633) and `output` (hub#1639), and a core below `v1.1.16` does not degrade on
+ * them — `parse_step` walks an allowlist per step kind and answers `flow.invalid_definition` for
+ * the WHOLE document, so the recipe dies at save. The gallery has to know that BEFORE it offers
+ * the card. The floor for a pinned READ (`queryPin`, `v1.1.17`) is the same rule about a different
+ * refusal: the document parses and `check_grants` refuses the pin, and `PUT …/grants` being
+ * all-or-nothing the owner ends up with no permissions at all.
  *
- * 🔴 And the floor is the CARD's, never the module's. Raising `flows`' own
- * `min_erplora_version` would put this floor on the twenty other cards that do not need it, and
- * take the gallery away from hubs using it perfectly well today.
+ * 🔴 And the floor is the CARD's, never the module's. Raising `flows`' own `min_erplora_version`
+ * would put this floor on the twenty cards that do not need it, and take the gallery away from
+ * hubs using it perfectly well today.
+ *
+ * The door is {@link runnableHere} and not {@link availableTemplates}: a served card does not live
+ * in a sector, so the sector list never sees it. Same two checks either way, which is what stops a
+ * card from being judged by one rule under its app's heading and another in the sector list.
  *
  * The probe is the same one the editor uses for the control (flows#75) and it is **fail-closed**,
- * unlike the module probe two describes above: «not asked yet» there costs a card that flickers
- * in, and here it would cost an automation that installs broken. Measured on the real schemas:
- * `v1.1.15` declares neither key and `v1.1.16` declares both.
+ * unlike the module probe: «not asked yet» there costs a card that flickers in, and here it would
+ * cost an automation that installs broken. Measured on the real schemas: `v1.1.15` declares neither
+ * key and `v1.1.16` declares both.
  */
 describe('the floor of a card is the card’s, not the module’s (flows#92)', () => {
   const everything: Record<string, boolean> = Object.fromEntries(
@@ -2133,28 +910,82 @@ describe('the floor of a card is the card’s, not the module’s (flows#92)', (
       coreVersion,
     );
 
-  /** Everything the two appointment cards need: both step keys AND a core that stores their pin. */
+  /** Everything a WhatsApp card needs: both step keys AND a core that stores its read's limit. */
   const currentHub = () => hubDeclaring(['interactive', 'output'], QUERY_GRANT_PIN_CORE);
 
-  const beautyOn = (facts?: SchemaFacts): string[] =>
-    availableTemplates('beauty', everything, facts).map((tpl) => tpl.id);
+  /** The recipe `whatsapp_inbox` serves, as `GET /api/hub/flows/templates` hands it over. */
+  const served = (): FlowTemplate =>
+    moduleTemplates(
+      [
+        {
+          module: 'whatsapp_inbox',
+          family: 'appointment-from-whatsapp',
+          documents: {
+            en: {
+              schema_version: 1,
+              name: 'WhatsApp → appointment',
+              triggers: [{ kind: 'event', event: 'whatsapp_inbox.message.received' }],
+              steps: [
+                { id: 'ask', kind: 'notify', channel: 'whatsapp', interactive: { rows: [] } },
+                { id: 'read', kind: 'ai', output: { slots: 'x' } },
+              ],
+            },
+          },
+          grants: [
+            {
+              kind: 'query',
+              value: 'appointments.appointments.list_for_customer',
+              payload: { customer_id: 'steps.resolve_customer.id' },
+            },
+          ],
+        },
+      ],
+      'en',
+    )[0]!;
+
+  /** A served recipe with no floor at all: plain steps, and every permission wide. */
+  const plainServed = (): FlowTemplate =>
+    moduleTemplates(
+      [
+        {
+          module: 'inventory',
+          family: 'restock-when-low',
+          documents: {
+            en: {
+              schema_version: 1,
+              name: 'Order more when stock runs low',
+              triggers: [{ kind: 'event', event: 'inventory.stock.low' }],
+              steps: [{ id: 'draft', kind: 'command', command: 'purchases.orders.draft', params: {} }],
+            },
+          },
+          grants: [{ kind: 'command', value: 'purchases.orders.draft' }],
+        },
+      ],
+      'en',
+    )[0]!;
+
+  const offered = (card: FlowTemplate, facts?: SchemaFacts): boolean =>
+    runnableHere(card, everything, facts);
+
+  // 🔴 THE control. Every «hidden» below is an absence, and an absence proves nothing about a card
+  // that asked for nothing: without this line the whole describe passes on a floor that vanished.
+  it('asks for all three floors in the first place', () => {
+    expect(served().needs).toEqual(['interactive', 'output', 'queryPin']);
+    expect(plainServed().needs ?? []).toEqual([]);
+  });
 
   it('offers it on a hub that declares both keys and can store its limits', () => {
-    expect(beautyOn(currentHub())).toContain('whatsapp-appointment-unattended');
+    expect(offered(served(), currentHub())).toBe(true);
   });
 
   it('hides it on a hub that declares neither, which is every hub on v1.1.15', () => {
-    expect(beautyOn(hubDeclaring([]))).not.toContain('whatsapp-appointment-unattended');
+    expect(offered(served(), hubDeclaring([]))).toBe(false);
   });
 
   it('hides it on a hub that declares only half of what the document carries', () => {
     // A build between the two kernel merges. Fail-closed means BOTH or nothing.
-    expect(beautyOn(hubDeclaring(['interactive'], QUERY_GRANT_PIN_CORE))).not.toContain(
-      'whatsapp-appointment-unattended',
-    );
-    expect(beautyOn(hubDeclaring(['output'], QUERY_GRANT_PIN_CORE))).not.toContain(
-      'whatsapp-appointment-unattended',
-    );
+    expect(offered(served(), hubDeclaring(['interactive'], QUERY_GRANT_PIN_CORE))).toBe(false);
+    expect(offered(served(), hubDeclaring(['output'], QUERY_GRANT_PIN_CORE))).toBe(false);
   });
 
   /**
@@ -2166,44 +997,37 @@ describe('the floor of a card is the card’s, not the module’s (flows#92)', (
    * about: they would get NO permissions, and an automation that stops at its first step with the
    * card still saying it was installed.
    */
-  it('hides both appointment cards on a v1.1.16 hub, which parses them but cannot hold the limit', () => {
-    const shown = beautyOn(hubDeclaring(['interactive', 'output'], '1.1.16'));
-    expect(shown).not.toContain('whatsapp-appointment');
-    expect(shown).not.toContain('whatsapp-appointment-unattended');
+  it('hides it on a v1.1.16 hub, which parses it but cannot hold the limit', () => {
+    expect(offered(served(), hubDeclaring(['interactive', 'output'], '1.1.16'))).toBe(false);
   });
 
-  it('hides them while the hub has not said which release it is', () => {
+  it('hides it while the hub has not said which release it is', () => {
     // Same fail-closed rule as the step keys, and the reason the version is read from the same
     // response: «not answered yet» must not read as «current».
-    const shown = beautyOn(hubDeclaring(['interactive', 'output']));
-    expect(shown).not.toContain('whatsapp-appointment');
-    expect(shown).not.toContain('whatsapp-appointment-unattended');
-  });
-
-  it('offers them again on the release that can hold the limit', () => {
-    expect(beautyOn(currentHub())).toContain('whatsapp-appointment');
+    expect(offered(served(), hubDeclaring(['interactive', 'output']))).toBe(false);
   });
 
   it('hides it while the hub has not answered yet: this probe is fail-closed', () => {
     // The opposite of the module probe, and on purpose: an unanswered module probe costs a card
     // that appears a second late; an unanswered kernel probe would cost an automation that
     // installs and then refuses to parse.
-    expect(beautyOn()).not.toContain('whatsapp-appointment-unattended');
+    expect(offered(served())).toBe(false);
   });
 
-  // Derived from `needs` rather than from a list of ids: four cards carry the floor now, not one
-  // (flows#100), and an id list here would have gone on claiming the other three were offered on a
-  // `v1.1.15` hub — where they are refused whole at save.
-  it('keeps offering every OTHER card of the sector on that same old hub', () => {
-    const shown = beautyOn(hubDeclaring([]));
-    const gated = templatesOf('beauty').filter((tpl) => (tpl.needs ?? []).length > 0);
-    const others = templatesOf('beauty')
-      .filter((tpl) => (tpl.needs ?? []).length === 0)
-      .map((tpl) => tpl.id);
-    expect(gated.length, 'no beauty card carries a floor: this test proves nothing').toBeGreaterThan(
-      0,
-    );
-    expect(shown.sort()).toEqual(others.sort());
-    expect(shown.length).toBeGreaterThan(0);
+  // The other half, and the one that keeps «fail-closed» from turning into «show nothing»: a card
+  // that carries no floor is still offered on that same old hub, served or written.
+  it('keeps offering every card that carries no floor on that same old hub', () => {
+    const old = hubDeclaring([]);
+    expect(offered(plainServed(), old)).toBe(true);
+    const shown = availableTemplates('beauty', everything, old).map((tpl) => tpl.id);
+    expect(shown.sort()).toEqual(templatesOf('beauty').map((tpl) => tpl.id).sort());
+    expect(shown.length, 'the beauty sector is empty: this test proves nothing').toBeGreaterThan(0);
+  });
+
+  // …and no card written in this catalogue carries one, which is why the sector list above is
+  // whole on a `v1.1.15` hub. Stated rather than assumed: the day one does, that line starts
+  // lying and this is what says so.
+  it('has no written card carrying a floor of its own', () => {
+    expect(TEMPLATES.filter((tpl) => (tpl.needs ?? []).length).map((tpl) => tpl.id)).toEqual([]);
   });
 });
