@@ -542,6 +542,10 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     id: 'whatsapp-appointment',
     mirrors: { module: 'whatsapp_inbox', family: 'appointment-from-whatsapp' },
     sector: 'beauty',
+    // The list the customer TAPS (`interactive`, hub#1633) and the slots the model hands over
+    // (`output`, hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it
+    // is refused whole — so the card is not offered there. See {@link FlowTemplate.needs}.
+    needs: ['interactive', 'output'],
     icon: 'calendar-number-outline',
     nameKey: 'tpl.waAppointment.name',
     summaryKey: 'tpl.waAppointment.summary',
@@ -885,23 +889,15 @@ export const TEMPLATES: readonly FlowTemplate[] = [
    */
   {
     id: 'whatsapp-appointment-unattended',
+    // No `pins` staged for the twin any more (flows#103 closed by whatsapp_inbox#118): moving was
+    // cut from this family only because `reschedule` carried nothing that said whose appointment it
+    // was, appointments#142 gave it `channel` + `customer_id`, and the recipe now RUNS the move
+    // itself. The limit therefore lives in `grantPins` below, which is where the catalogue guards
+    // watch it — a pin left staged here would leave this copy's own permission wide while reading
+    // like a containment. `withCopiedPins` carries both sets, so the served card keeps the pin.
     mirrors: {
       module: 'whatsapp_inbox',
       family: 'appointment-from-whatsapp-unattended',
-      // 🔴 flows#103 — waiting for the operation the recipe is about to grow (whatsapp_inbox#118).
-      //
-      // This copy CANNOT move an appointment: it mirrors the family as published, and moving was
-      // cut from it (see `book_appointment` below) precisely because `reschedule` carried nothing
-      // that said whose appointment it was. appointments#142 gave it `channel` + `customer_id` and
-      // the same `customer_identity_refusal` cancelling already had, so the operation can be opened
-      // — and the served card will ask for it WIDE, because while hub#1654 is open the `payload`
-      // the module fixes in `appointment-from-whatsapp-unattended.grants.json` never leaves the hub.
-      //
-      // Named here, the limit is already on the shelf when that card arrives; until then
-      // `withCopiedPins` finds no grant to put it on. The other order — recipe first, limit after —
-      // is a release of the fleet booking, cancelling AND moving unattended with `channel`
-      // defaulting to `staff`: no ownership check on the move at all.
-      pins: { 'appointments.appointments.reschedule': { channel: 'customer' } },
     },
     sector: 'beauty',
     // The list she TAPS (`interactive`, hub#1633) and the slots the model hands over (`output`,
@@ -1207,6 +1203,10 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     id: 'whatsapp-reservation',
     mirrors: { module: 'whatsapp_inbox', family: 'reservation-from-whatsapp' },
     sector: 'food',
+    // The list the guest TAPS (`interactive`, hub#1633) and the times the model hands over
+    // (`output`, hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it
+    // is refused whole — so the card is not offered there. See {@link FlowTemplate.needs}.
+    needs: ['interactive', 'output'],
     icon: 'restaurant-outline',
     nameKey: 'tpl.waReservation.name',
     summaryKey: 'tpl.waReservation.summary',
@@ -1444,6 +1444,10 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     id: 'whatsapp-reservation-unattended',
     mirrors: { module: 'whatsapp_inbox', family: 'reservation-from-whatsapp-unattended' },
     sector: 'food',
+    // The list the guest TAPS (`interactive`, hub#1633) and the times the model hands over
+    // (`output`, hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it
+    // is refused whole — so the card is not offered there. See {@link FlowTemplate.needs}.
+    needs: ['interactive', 'output'],
     // A bookmark against the twin's table setting: this one is already held.
     icon: 'bookmark-outline',
     nameKey: 'tpl.waReservationUnattended.name',

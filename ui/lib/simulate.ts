@@ -222,10 +222,37 @@ function asText(v: unknown): string | null {
   return null;
 }
 
-/** `def.rs::json_eq` — strict first, then numeric, then text. */
+/** Structural equality over decoded JSON — `serde_json::Value`'s own `PartialEq`. */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, i) => sameJson(item, b[i]));
+  }
+  if (typeof a === 'object' && typeof b === 'object' && a !== null && b !== null) {
+    const [x, y] = [a as Record<string, unknown>, b as Record<string, unknown>];
+    const keys = Object.keys(x);
+    if (keys.length !== Object.keys(y).length) return false;
+    return keys.every((key) => key in y && sameJson(x[key], y[key]));
+  }
+  return false;
+}
+
+/**
+ * `def.rs::json_eq` — strict first, then numeric, then text.
+ *
+ * 🔴 «Strict» is `a == b` on a `serde_json::Value`, and that is STRUCTURAL: in the hub two empty
+ * lists are equal. `===` here is referential, so they were not (flows#100) — and neither `as_number`
+ * nor `as_text` answers for a list, so the comparison fell all the way through to `false` and
+ * `neq: []` matched a list that WAS empty. The preview then promised a step the hub would skip, on
+ * exactly the guard that stops «WhatsApp → appointment» paying Meta for an interactive list with no
+ * rows. Compared as JSON, and by key-independent value for an object, because a `serde_json::Map`
+ * compares as a map and a scope decoded from a body has no order to rely on.
+ */
 function jsonEq(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a === null || b === null || a === undefined || b === undefined) return false;
+  if (typeof a === 'object' || typeof b === 'object') return sameJson(a, b);
   const [x, y] = [asNumber(a), asNumber(b)];
   if (x !== null && y !== null) return x === y;
   const [s, t] = [asText(a), asText(b)];

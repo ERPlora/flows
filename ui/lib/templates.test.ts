@@ -101,19 +101,41 @@ describe('the template catalogue', () => {
 
   it('writes the document version this editor writes, and one trigger unless they are disjoint', () => {
     // One trigger was «one way in» — two ways in is two automations wearing one name, and on an
-    // event card it is also the same message answered twice. It stays the rule, with ONE exception
-    // and only because it cannot fire twice: the unattended WhatsApp card wakes on words
+    // event card it is also the same message answered twice. It stays the rule, with ONE shape of
+    // exception and only because it cannot fire twice: a WhatsApp card wakes on words
     // (`text: neq ''`) and on a TAP (`text: eq ''` + `reply_id: neq ''`), and no message can
-    // satisfy both. Disjoint by construction, not by luck — and the invariant is asserted where
-    // the document is AUTHORED, not here: `whatsapp_inbox/tests/flow_templates.test.py` judges the
-    // UNION of the triggers and refuses the overlap that reads as disjoint. Here it is the digest
-    // guard that holds the line: a mirror whose triggers overlap stops matching the source.
-    const TWO_WAYS_IN = new Set(['whatsapp-appointment-unattended']);
+    // satisfy both. Disjoint by construction, not by luck.
+    //
+    // Judged on the FILTERS and not on a list of ids (flows#100): the list said one card and the
+    // source had grown the second way in on all four, so the rule would have had to be relaxed
+    // card by card — each edit reading like a fact about that card rather than what it is, the
+    // guard being switched off. The union is also asserted where the document is AUTHORED:
+    // `whatsapp_inbox/tests/flow_templates.test.py` refuses the overlap that reads as disjoint.
+    // Here the digest guard holds the other end: a mirror whose triggers overlap stops matching.
+    const wakesOnWords = (trigger: FlowDoc['triggers'][number]) =>
+      JSON.stringify(trigger.filter?.['event.text']) === JSON.stringify({ neq: '' });
+    const wakesOnATap = (trigger: FlowDoc['triggers'][number]) =>
+      JSON.stringify(trigger.filter?.['event.text']) === JSON.stringify({ eq: '' }) &&
+      JSON.stringify(trigger.filter?.['event.reply_id']) === JSON.stringify({ neq: '' });
+    let disjointPairs = 0;
     for (const template of TEMPLATES) {
       const doc = buildTemplate(template, t);
       expect(doc.schema_version).toBe(1);
-      expect(doc.triggers, template.id).toHaveLength(TWO_WAYS_IN.has(template.id) ? 2 : 1);
+      expect(doc.triggers.length, `${template.id} has more ways in than a card may have`)
+        .toBeLessThanOrEqual(2);
+      if (doc.triggers.length === 1) continue;
+      const [first, second] = doc.triggers;
+      // Same event, and the pair contradicts on `event.text`: whichever way she answered, exactly
+      // one of the two can match the message.
+      expect(second.event, template.id).toBe(first.event);
+      expect(
+        wakesOnWords(first) && wakesOnATap(second),
+        `${template.id} has two ways in that are not disjoint by construction`,
+      ).toBe(true);
+      disjointPairs += 1;
     }
+    // …and the exception is reachable, so the rule above is not a rule about an empty set.
+    expect(disjointPairs).toBeGreaterThan(0);
   });
 
   it('gives every step a distinct id, because one step reads another by id', () => {
@@ -248,6 +270,47 @@ describe('what a template needs from this hub', () => {
         const covered = template.witnesses.some((w) => w.module === owner);
         expect(covered, `${template.id} has no witness for the \`${owner}\` module`).toBe(true);
       }
+    }
+  });
+
+  /**
+   * **A step key an older core refuses is a FLOOR, and the floor has to be declared** (flows#92).
+   *
+   * `parse_step` walks an allowlist per step kind, so a key it does not know is not ignored and
+   * does not degrade: the hub answers `flow.invalid_definition` for the WHOLE document and the
+   * recipe dies at save. {@link FlowTemplate.needs} is what keeps such a card from being offered
+   * where it cannot be parsed — and it is hand-written next to a document that is a MIRROR of what
+   * another module publishes, so it goes stale exactly when the mirror is re-synced and the source
+   * has grown a key. That is how three of these four cards ended up writing `interactive` and
+   * `output` while only one of them declared them (flows#100).
+   *
+   * Derived from the document rather than listed here, and anchored BOTH ways: a card that writes
+   * a gated key without declaring it is offered to a hub that refuses it whole, and a card that
+   * declares a key it never writes is hidden from hubs that could run it perfectly well.
+   *
+   * The names match the step keys because that is what the probe reads — `schemaFacts` answers
+   * `interactiveNotify`/`aiOutput` off `$defs.step.properties.interactive`/`.output`.
+   */
+  const GATED_STEP_KEYS = ['interactive', 'output'] as const;
+
+  it('declares every gated step key its document writes, and none that it does not', () => {
+    for (const template of TEMPLATES) {
+      const doc = buildTemplate(template, t);
+      const written = GATED_STEP_KEYS.filter((key) =>
+        doc.steps.some((step) => Object.prototype.hasOwnProperty.call(step, key)),
+      );
+      expect([...(template.needs ?? [])].sort(), template.id).toEqual([...written].sort());
+    }
+  });
+
+  // The control above only means something if a gated key is actually reachable from this
+  // catalogue: with none written anywhere it would be green on an empty set for ever.
+  it('has cards that write a gated key at all, so the rule above is not vacuous', () => {
+    for (const key of GATED_STEP_KEYS) {
+      const writers = TEMPLATES.filter((tpl) =>
+        buildTemplate(tpl, t).steps.some((step) => Object.prototype.hasOwnProperty.call(step, key)),
+      );
+      expect(writers.length, `no card writes \`${key}\``).toBeGreaterThan(0);
     }
   });
 
@@ -886,8 +949,44 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
         text: 'event.text',
         wa_message_id: 'event.wa_message_id',
         received_at: 'event.received_at',
+        // Mapped on the WORDS trigger too, and not only on the tap: one document, one set of
+        // fields, so the steps read the same `input` whichever way she answered. On this path
+        // both resolve to `null`, which is what the kernel gives an absent path anyway.
+        reply_id: 'event.reply_id',
+        reply_title: 'event.reply_title',
       },
     });
+  });
+
+  it('has a second way in for the row she TAPS, and the two cannot both fire', () => {
+    // whatsapp_inbox#101 gave this family the tapped list its unattended twin already had. A
+    // tapped row arrives with `text` empty and `reply_id` full, so the trigger above — which
+    // demands words — never sees it. `text` maps from `reply_title` here, so the steps read the
+    // same field either way, and `reply_id` carries the slot she actually chose.
+    const [words, tap] = buildTemplate(template!, t).triggers;
+    expect(tap, 'the tapped-row trigger is missing').toBeTruthy();
+    expect(tap.event).toBe(words.event);
+    expect(tap.filter?.['event.text']).toEqual({ eq: '' });
+    expect(tap.filter?.['event.reply_id']).toEqual({ neq: '' });
+    expect(tap.input?.text).toBe('event.reply_title');
+    // The echo and the backlog are excluded on BOTH ways in: an exclusion on one of two doors is
+    // no exclusion at all.
+    for (const trigger of [words, tap]) {
+      expect(trigger.filter?.['event.direction'], String(trigger.input?.text)).toEqual({
+        neq: 'outbound',
+      });
+      expect(trigger.filter?.['event.source'], String(trigger.input?.text)).toEqual({
+        neq: 'history',
+      });
+    }
+    // Disjoint by construction: no message has a body and no body at once, so nothing is ever
+    // answered twice.
+    const tapped = { event: { text: '', reply_id: 'slot-1', reply_title: '10:30' } };
+    const written = { event: { text: 'hola', reply_id: '' } };
+    expect(conditionResult(words.filter!, written).matched).toBe(true);
+    expect(conditionResult(tap.filter!, written).matched).toBe(false);
+    expect(conditionResult(words.filter!, tapped).matched).toBe(false);
+    expect(conditionResult(tap.filter!, tapped).matched).toBe(true);
   });
 
   it('acknowledges, knows the customer, finds the slot AND proposes in ONE turn, then tells them', () => {
@@ -904,6 +1003,9 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
     // address book by NAME and read out a stranger's diary. Twice, and not once, because
     // `know_the_customer` may CREATE her in between: the first read answers «is she on file», the
     // second carries the id that exists afterwards.
+    // The last two are whatsapp_inbox#97's, the same pair its unattended twin carries: the model
+    // DECLARES the slots it found and the guard only sends the list when there is something in it
+    // — an empty `list` is refused by Meta, paid for, and answered with an error nobody sees.
     expect(steps.map((s) => [s.id, s.kind])).toEqual([
       ['acknowledge', 'notify'],
       ['find_customer', 'query'],
@@ -912,11 +1014,14 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
       ['propose_appointment', 'ai'],
       ['reply_to_customer', 'ai'],
       ['confirm_to_customer', 'notify'],
+      ['any_slot_to_offer', 'condition'],
+      ['offer_slots', 'notify'],
     ]);
     // Every model step waits for a person: the first two WRITE (a customer card, a booking), and
-    // the third carries no tools at all, so `manual` costs it nothing — there is never a proposal
-    // to approve. The `query` steps carry no policy: they are the document's own read, not a
-    // model's, so there is nothing for anybody to approve.
+    // the third only looks availability up, so `manual` costs it nothing — there is never a
+    // proposal to approve. The `query` steps carry no policy: they are the document's own read,
+    // not a model's, so there is nothing for anybody to approve. Neither do the `condition` and
+    // the `notify` that close the run: the tray is for what a MODEL proposes.
     expect(steps.map((s) => s.policy)).toEqual([
       undefined,
       undefined,
@@ -925,7 +1030,28 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
       'manual',
       'manual',
       undefined,
+      undefined,
+      undefined,
     ]);
+  });
+
+  it('only offers the tapped list when the model actually found something to offer', () => {
+    // whatsapp_inbox#97. `slots` is empty whenever the step above booked, cancelled, moved or
+    // answered something else, and Meta refuses an interactive `list` with no rows — so without
+    // the guard the salon pays for a message the customer never gets and an error it never sees.
+    const steps = buildTemplate(template!, t).steps;
+    const guard = steps.find((s) => s.id === 'any_slot_to_offer');
+    expect(guard?.when).toEqual({ 'steps.reply_to_customer.slots': { neq: [] } });
+    // Guarding the RIGHT step: it reads the slots from the one that declared them.
+    const found = (slots: unknown[]) => ({ steps: { reply_to_customer: { slots } } });
+    expect(conditionResult(guard!.when!, found([])).matched).toBe(false);
+    expect(conditionResult(guard!.when!, found(['10:30'])).matched).toBe(true);
+    // And the list she taps is built from those same slots, so the row that comes back is the
+    // slot itself and not «the second one».
+    const offer = steps.find((s) => s.id === 'offer_slots');
+    expect(offer?.channel).toBe('whatsapp');
+    expect(offer?.to).toEqual(steps[0].to);
+    expect(JSON.stringify(offer?.interactive)).toContain('steps.reply_to_customer.slots');
   });
 
   it('carries on when the salon says NO, instead of ending the run at the rejection', () => {
@@ -937,7 +1063,7 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
     expect(propose?.on_reject).toBe('continue');
   });
 
-  it('lets one step, and only one, write what the customer reads — with no tools of its own', () => {
+  it('lets one step, and only one, write what the customer reads — and it may only LOOK UP', () => {
     const steps = buildTemplate(template!, t).steps;
     const reply = steps.find((s) => s.id === 'reply_to_customer');
     // It has to know how it ended AND what was written for her: the outcome alone cannot name the
@@ -945,11 +1071,29 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
     // have. Both, or the message is wrong on one branch or the other.
     expect(reply?.prompt).toContain('{{steps.propose_appointment.status}}');
     expect(reply?.prompt).toContain('{{steps.propose_appointment.text}}');
-    // NO tools, on purpose: it cannot book, cancel or look anything up, so there is nothing here
-    // for the salon to approve and nothing a customer's message could talk it into doing. One
-    // turn is all it gets — it is composing a message, not working anything out.
-    expect(reply?.tools).toBeUndefined();
-    expect(reply?.max_iters).toBe(1);
+    // It used to carry NO tools at all. whatsapp_inbox#97 gave it the two availability reads,
+    // because it now also declares the slots the tapped list offers and a paragraph of prose is
+    // not something to build a list of real hours from.
+    expect(reply?.tools?.queries ?? []).toEqual([]);
+    expect(reply?.tools?.commands).toEqual([
+      'appointments.availability.day_opening',
+      'appointments.availability.slots',
+    ]);
+    // 🔴 The line that has to hold, and it is stated as a PROPERTY and not as a copy of the list
+    // above: this step is the one nothing stands between and the customer, so it may look things
+    // up and it may never change one. A booking tool added here is red because of what it does.
+    for (const command of reply?.tools?.commands ?? []) {
+      expect(command, `${command} is not a read`).toMatch(/^appointments\.availability\./);
+    }
+    // …and the rule is not vacuous: the steps that ACT do hold commands outside that namespace.
+    const acting = buildTemplate(template!, t)
+      .steps.filter((s) => s.kind === 'ai' && s.id !== 'reply_to_customer')
+      .flatMap((s) => s.tools?.commands ?? [])
+      .filter((command) => !command.startsWith('appointments.availability.'));
+    expect(acting.length).toBeGreaterThan(0);
+    // Enough turns for the two reads and the answer, and no budget to go wandering.
+    expect(reply?.max_iters).toBe(4);
+    expect(reply?.max_iters).toBeLessThan(MAX_ITERS_CAP);
   });
 
   it('confirms to the customer with the deciding step’s own words, through the same conversation', () => {
@@ -1056,13 +1200,14 @@ describe('WhatsApp → appointment, the card the WhatsApp module has always ship
       for (const command of step.tools?.commands ?? []) expect(granted.has(`command ${command}`), command).toBe(true);
     }
     // WHICH steps carry tools is the shape itself, not an accident, so it is named here rather
-    // than left to «at least one»: the two that act have them, and `reply_to_customer` has none
-    // BECAUSE it only writes prose (whatsapp_inbox#67). Stripping the tools off a step that acts
-    // would leave a model asked to book with nothing to book with — and, under the old «every ai
-    // step has at least one tool» wording, that failure only surfaced if it stripped the LAST one.
+    // than left to «at least one»: all three have them since whatsapp_inbox#97 gave
+    // `reply_to_customer` the two availability reads it needs to offer real hours. Stripping the
+    // tools off a step would leave a model asked to book with nothing to book with — and, under
+    // the old «every ai step has at least one tool» wording, that failure only surfaced if it
+    // stripped the LAST one. What each of them may hold is judged in its own test above.
     expect(
       ai.filter((s) => (s.tools?.queries?.length ?? 0) + (s.tools?.commands?.length ?? 0) > 0).map((s) => s.id),
-    ).toEqual(['know_the_customer', 'propose_appointment']);
+    ).toEqual(['know_the_customer', 'propose_appointment', 'reply_to_customer']);
   });
 });
 
@@ -1144,29 +1289,31 @@ describe('WhatsApp → appointment BOOKED, the family that runs with nobody watc
   });
 
   /**
-   * **Thirteen against the twin's fourteen, and the missing one is MOVING** (whatsapp_inbox#74).
+   * **Fourteen against the twin's fourteen: the same set, the move included again**
+   * (whatsapp_inbox#74 → whatsapp_inbox#118).
    *
-   * Running unattended is a reason to skip the tray, never a reason to want more authority — and
-   * here it is a reason to want LESS. `appointments.appointments.reschedule` cannot be scoped to
-   * the customer who is writing: it takes no `channel` and no `customer_id`, and its handler
-   * checks state, notice, hours, blocks and overlap — never whose appointment it is. The grants
-   * this card already holds reach any of them (`customers.list` searches by name,
-   * `list_for_customer` takes any `customer_id`), so with `policy: "auto"` the only thing between
-   * a customer and a stranger's hour would be a paragraph of prompt (hub#1623: not a control).
+   * Running unattended is a reason to skip the tray, never a reason to want more authority — nor
+   * less. This card went a release WITHOUT `appointments.appointments.reschedule` because the
+   * command could not be scoped to the customer who is writing: it took no `channel` and no
+   * `customer_id`, and its handler checked state, notice, hours, blocks and overlap — never whose
+   * appointment it was. The grants this card already holds reach any of them (`customers.list`
+   * searches by name, `list_for_customer` takes any `customer_id`), so with `policy: "auto"` the
+   * only thing between a customer and a stranger's hour would have been a paragraph of prompt
+   * (hub#1623: not a control).
    *
-   * Asserted as «the twin's set MINUS the move» and not as a literal list, so the day the twin
-   * gains a permission this card gains it too — the one asymmetry that is deliberate is named
-   * here, and any other one is a red. It goes back to being identical when appointments#142 gives
-   * `reschedule` its `channel` + `customer_id` and whatsapp_inbox#103 re-adds the branch.
+   * appointments#142 gave `reschedule` its `channel` + `customer_id` and the same
+   * `customer_identity_refusal` cancelling already had, and whatsapp_inbox#118 re-added the branch.
+   * So the asymmetry is GONE and the assertion is the strict one again: identical sets, both ways.
+   * What replaced the missing permission as the boundary is the pin — asserted, with the call it
+   * has to refuse, in «a card installs the permission it PROMISED» below. Dropping this back to a
+   * subset check would let the move come back WIDE and read as the old, deliberate asymmetry.
    */
-  it('asks for its attended twin’s permissions MINUS the move it must not have', () => {
+  it('asks for its attended twin’s permissions, exactly — the move included again', () => {
     const mine = templateGrants(template!, t).map((g) => `${g.kind} ${g.value}`).sort();
     const theirs = templateGrants(attended!, t).map((g) => `${g.kind} ${g.value}`).sort();
-    expect(mine).not.toContain('command appointments.appointments.reschedule');
-    expect(theirs).toContain('command appointments.appointments.reschedule');
-    expect(mine).toEqual(theirs.filter((g) => g !== 'command appointments.appointments.reschedule'));
-    expect(mine).toHaveLength(13);
-    expect(theirs).toHaveLength(14);
+    expect(mine).toContain('command appointments.appointments.reschedule');
+    expect(mine).toEqual(theirs);
+    expect(mine).toHaveLength(14);
   });
 
   it('needs the same five modules, so a hub short of one never sees it', () => {
@@ -1441,17 +1588,30 @@ describe('the gallery only offers what this hub can run (flows#52)', () => {
       TEMPLATES.flatMap((tpl) => tpl.witnesses).map((w) => [w.event, !modules.includes(w.module)]),
     );
 
+  // The kernel probe is held open in this whole describe (`CURRENT_CORE`) for the same reason it
+  // is held open below: it is fail-closed, so leaving it unanswered hides the WhatsApp cards
+  // whatever the modules say — and every assertion here about them would pass without testing the
+  // module probe at all.
   it('drops the cards whose modules are missing, and keeps the rest', () => {
     const known = without('tasks');
-    const shown = SECTORS.flatMap((sector) => availableTemplates(sector, known)).map((tpl) => tpl.id);
+    const shown = SECTORS.flatMap((sector) => availableTemplates(sector, known, CURRENT_CORE)).map(
+      (tpl) => tpl.id,
+    );
     expect(shown).not.toContain('no-show-followup');
     expect(shown).toContain('whatsapp-appointment');
   });
 
   it('hides the WhatsApp card on a hub that has WhatsApp but no diary', () => {
     // The case that made hiding the answer: every module of the card but one.
-    const shown = availableTemplates('beauty', without('appointments')).map((tpl) => tpl.id);
+    const shown = availableTemplates('beauty', without('appointments'), CURRENT_CORE).map(
+      (tpl) => tpl.id,
+    );
     expect(shown).not.toContain('whatsapp-appointment');
+    // …and it is the missing diary that hides it, not the kernel floor: with the diary back the
+    // same hub is offered the card.
+    expect(
+      availableTemplates('beauty', without(), CURRENT_CORE).map((tpl) => tpl.id),
+    ).toContain('whatsapp-appointment');
   });
 
   it('offers everything while the hub has not answered yet', () => {
@@ -1670,27 +1830,8 @@ describe('a card installs the permission it PROMISED, not the wide one next to i
     return templateGrants(template!, t).find((g) => g.kind === 'command' && g.value === command);
   };
 
-  it('carries a card’s declared limit onto the permission it derives', () => {
-    const grant = grantFor('whatsapp-appointment-unattended', 'appointments.appointments.cancel');
-    expect(grant, 'the card asks to cancel appointments').toBeTruthy();
-    expect(grantPin(grant!)).toEqual({ channel: 'customer' });
-  });
-
-  // 🔴 THE assertion this issue exists for, and it is about the call the recipe must NOT be able
-  // to make. Asserting only that its own call gets through would pass just as well with no limit
-  // at all — which is the state flows#80 reported.
-  it('refuses a cancellation asked for on the salon’s behalf', () => {
-    const grant = grantFor('whatsapp-appointment-unattended', 'appointments.appointments.cancel')!;
-    // What the recipe is for: the customer who wrote in, cancelling her own hour.
-    expect(grantAllowsCall(grant, { appointment_id: 'a1', channel: 'customer' })).toBe(true);
-    // What a stranger's message must never talk the model into.
-    expect(grantAllowsCall(grant, { appointment_id: 'a1', channel: 'staff' })).toBe(false);
-    // And the same refusal by omission — `channel` defaults to `staff` in the command's schema.
-    expect(grantAllowsCall(grant, { appointment_id: 'a1' })).toBe(false);
-  });
-
   /**
-   * **The attended twin, and the SAME two limits** (flows#99, whatsapp_inbox#107).
+   * **The two limits, and BOTH cards carry them now** (flows#80, flows#99, whatsapp_inbox#107).
    *
    * The tray is not a permission boundary. What waits there is a draft written FOR THE CUSTOMER —
    * «I have cancelled your Thursday, see you next week» — and not the detail of the call underneath
@@ -1699,48 +1840,54 @@ describe('a card installs the permission it PROMISED, not the wide one next to i
    * `allow_customer_cancellation`; a move on the salon's behalf skips the ownership check too. Both
    * are one `channel` away, and `channel` DEFAULTS to `staff` in either command's schema.
    *
+   * The unattended family used to carry only the first of the two: moving was cut from it because
+   * `reschedule` carried nothing that said whose appointment it was. appointments#142 gave it
+   * `channel` + `customer_id` and whatsapp_inbox#118 put the move back in the recipe, so the two
+   * families now run — and pin — exactly the same pair. On the unattended one the pin is the ONLY
+   * thing standing there: `policy: "auto"` means no tray and nobody looking.
+   *
    * Pinned here and not only in the module: while hub#1654 is open the sidecar's `payload` never
    * leaves the hub, and this copy is what the gallery installs — either as the card itself, or
    * through `withCopiedPins` onto the served twin.
    */
-  const ATTENDED_PINNED: [string, Record<string, unknown>][] = [
+  const PINNED: [string, Record<string, unknown>][] = [
     ['appointments.appointments.cancel', { appointment_id: 'a1' }],
     ['appointments.appointments.reschedule', { appointment_id: 'a1', start_datetime: '2026-09-10T10:00:00Z' }],
   ];
+  const PINNED_CARDS = ['whatsapp-appointment', 'whatsapp-appointment-unattended'] as const;
+  const PINNED_PAIRS: [string, string, Record<string, unknown>][] = PINNED_CARDS.flatMap((card) =>
+    PINNED.map(([command, call]) => [card, command, call] as [string, string, Record<string, unknown>]),
+  );
 
-  it.each(ATTENDED_PINNED)('carries the customer limit onto %s', (command) => {
-    const grant = grantFor('whatsapp-appointment', command);
-    expect(grant, `the attended card asks for ${command}`).toBeTruthy();
+  it.each(PINNED_PAIRS)('%s carries the customer limit onto %s', (card, command) => {
+    const grant = grantFor(card, command);
+    expect(grant, `${card} asks for ${command}`).toBeTruthy();
     expect(grantPin(grant!)).toEqual({ channel: 'customer' });
   });
 
   // 🔴 The half that proves the limit is a CONTAINMENT and not decoration: asserting only that the
-  // recipe's own call gets through passes just as well with no pin at all.
-  it.each(ATTENDED_PINNED)('refuses %s asked for on the salon’s behalf', (command, call) => {
-    const grant = grantFor('whatsapp-appointment', command)!;
+  // recipe's own call gets through passes just as well with no pin at all — which is the state
+  // flows#80 reported.
+  it.each(PINNED_PAIRS)('%s refuses %s asked for on the salon’s behalf', (card, command, call) => {
+    const grant = grantFor(card, command)!;
+    // What the recipe is for: the customer who wrote in, moving or cancelling her own hour.
     expect(grantAllowsCall(grant, { ...call, channel: 'customer', customer_id: 'c1' })).toBe(true);
+    // What a stranger's message must never talk the model into.
     expect(grantAllowsCall(grant, { ...call, channel: 'staff' })).toBe(false);
     // The same refusal by omission — which is the shape a model actually sends when nothing asked
     // it for a channel, and the reason a `default: "staff"` schema needs the pin to hold.
     expect(grantAllowsCall(grant, call)).toBe(false);
   });
 
-  it('narrows nothing else on the attended card', () => {
-    const pinned = templateGrants(templateById('whatsapp-appointment')!, t)
+  // The other side of the same coin, and the anchor that stops the table above from shrinking in
+  // silence: nothing ELSE on either card narrows, and nothing in the table stops being pinned. A
+  // pin that spread would break the recipe rather than contain it; a row deleted from `PINNED`
+  // would leave the operation wide with every remaining assertion still green.
+  it.each(PINNED_CARDS)('narrows those two on %s, and nothing else', (card) => {
+    const pinned = templateGrants(templateById(card)!, t)
       .filter((g) => Object.keys(grantPin(g)).length > 0)
       .map((g) => `${g.kind} ${g.value}`);
-    expect(pinned).toEqual(ATTENDED_PINNED.map(([command]) => `command ${command}`));
-  });
-
-  // The other side of the same coin: nothing else on the card silently narrows. A pin that spread
-  // would break the recipe rather than contain it.
-  it('leaves every other permission of that card exactly as wide as it was', () => {
-    const pinned = templateGrants(templateById('whatsapp-appointment-unattended')!, t).filter(
-      (g) => Object.keys(grantPin(g)).length > 0,
-    );
-    expect(pinned.map((g) => `${g.kind} ${g.value}`)).toEqual([
-      'command appointments.appointments.cancel',
-    ]);
+    expect(pinned).toEqual(PINNED.map(([command]) => `command ${command}`));
   });
 
   // A universal rule for the catalogue, not a check on one card: a pin naming a command the card
@@ -1861,11 +2008,18 @@ describe('the floor of a card is the card’s, not the module’s (flows#92)', (
     expect(beautyOn()).not.toContain('whatsapp-appointment-unattended');
   });
 
+  // Derived from `needs` rather than from a list of ids: four cards carry the floor now, not one
+  // (flows#100), and an id list here would have gone on claiming the other three were offered on a
+  // `v1.1.15` hub — where they are refused whole at save.
   it('keeps offering every OTHER card of the sector on that same old hub', () => {
     const shown = beautyOn(hubDeclaring());
+    const gated = templatesOf('beauty').filter((tpl) => (tpl.needs ?? []).length > 0);
     const others = templatesOf('beauty')
-      .map((tpl) => tpl.id)
-      .filter((id) => id !== 'whatsapp-appointment-unattended');
+      .filter((tpl) => (tpl.needs ?? []).length === 0)
+      .map((tpl) => tpl.id);
+    expect(gated.length, 'no beauty card carries a floor: this test proves nothing').toBeGreaterThan(
+      0,
+    );
     expect(shown.sort()).toEqual(others.sort());
     expect(shown.length).toBeGreaterThan(0);
   });
