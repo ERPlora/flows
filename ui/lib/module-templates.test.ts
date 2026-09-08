@@ -201,6 +201,53 @@ describe('the automations a module brings, as the hub serves them (flows#98)', (
     expect(moduleTemplates([wideRead], 'en')[0].needs ?? []).toEqual([]);
   });
 
+  /**
+   * The other side of that floor: a pinned COMMAND is not a pinned read (flows#101).
+   *
+   * `can_pin(Command)` has been there since hub#1623 (`v1.1.16`) and `can_pin(Query)` only since
+   * hub#1662 (`v1.1.17`), so the two floors are NOT the same floor. `whatsapp_inbox` fixes
+   * `channel: "customer"` on `appointments.appointments.cancel` — a limit the whole recipe rests
+   * on — and a family that fixes only that runs perfectly on a `v1.1.16` hub. Deriving `queryPin`
+   * from «carries some pin» instead of «pins a READ» would hide it there, and hiding a card the
+   * hub can run reads to the salon exactly like the app not being installed.
+   */
+  it('does not ask for the read floor because of a pinned COMMAND, which an older hub does hold', () => {
+    const pinnedCommand = row({
+      grants: [
+        {
+          kind: 'command',
+          value: 'appointments.appointments.cancel',
+          payload: { channel: 'customer' },
+        },
+      ],
+    });
+    expect(moduleTemplates([pinnedCommand], 'en')[0].needs ?? []).toEqual([]);
+    // The pin is still READ as a limit — it is only the FLOOR that a command does not raise.
+    expect(moduleTemplates([pinnedCommand], 'en')[0].grants).toEqual([
+      {
+        kind: 'command',
+        value: 'appointments.appointments.cancel',
+        payload: { channel: 'customer' },
+      },
+    ]);
+    // And the two together ask for the read floor once, on account of the READ.
+    const both = row({
+      grants: [
+        {
+          kind: 'command',
+          value: 'appointments.appointments.cancel',
+          payload: { channel: 'customer' },
+        },
+        {
+          kind: 'query',
+          value: 'appointments.appointments.list_for_customer',
+          payload: { customer_id: 'steps.resolve_customer.id' },
+        },
+      ],
+    });
+    expect(moduleTemplates([both], 'en')[0].needs).toEqual(['queryPin']);
+  });
+
   it('leaves out a row it cannot make a card of, and keeps the rest', () => {
     const cards = moduleTemplates(
       [
