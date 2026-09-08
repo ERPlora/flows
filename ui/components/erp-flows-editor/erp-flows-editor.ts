@@ -38,6 +38,7 @@ import {
   canPinPayload,
   pinRows,
   readPinRows,
+  pinProblems,
   setGrantPin,
   moveStep,
   partsToTemplate,
@@ -1201,11 +1202,25 @@ export class ErpFlowsEditor extends LitElement {
     const k = grantKey(grant);
     this.error = '';
     this.notice = '';
+    const pin = readPinRows(this.limitRows(grant));
+    // What `check_pin_value` refuses, this screen refuses BEFORE sending (flows#108, hub#1662).
+    // `PUT …/grants` is all-or-nothing, so one bad box does not fail its own row: it bounces the
+    // whole list with a kernel sentence written for a log. Caught here it names the row instead,
+    // in the owner's language, and the draft stays put so they can correct that box.
+    const [bad] = pinProblems(pin);
+    if (bad) {
+      const [field, problem] = bad;
+      this.error = this.t(
+        problem === 'pin_template' ? 'ui.grantLimitBadTemplate' : 'ui.grantLimitBadRoot',
+        { field },
+      );
+      return;
+    }
     this.savingLimits = k;
     try {
       const next = await this.client.flows.replaceGrants(
         this.flow.id,
-        setGrantPin(this.grants, grant, readPinRows(this.limitRows(grant))),
+        setGrantPin(this.grants, grant, pin),
       );
       this.grants = Array.isArray(next) ? next : [];
       // The draft goes. Keeping it would leave the boxes showing what was TYPED over a list that
@@ -2842,9 +2857,10 @@ export class ErpFlowsEditor extends LitElement {
             ? html` <em class="pinned">${this.t('ui.grantPinned', { limits })}</em>`
             : nothing}</span
         >
-        <!-- Only a command grant carries a payload. Offered on any other kind the hub answers
-             flow.invalid_grant_payload — and this endpoint replaces the WHOLE list, so it would
-             not lose that row, it would lose every permission on the screen. -->
+        <!-- A command's payload and a query's parameters, and nothing else (hub#1623, hub#1662).
+             Offered on any other kind the hub answers flow.invalid_grant_payload — and this
+             endpoint replaces the WHOLE list, so it would not lose that row, it would lose every
+             permission on the screen. -->
         ${canPinPayload(g.kind)
           ? html`<button
               type="button"
@@ -2872,6 +2888,10 @@ export class ErpFlowsEditor extends LitElement {
     const saving = this.savingLimits === k;
     return html`<div class="limits">
       <span class="hint">${this.t('ui.grantLimitsIntro')}</span>
+      <!-- «Only this customer» cannot be a fixed value: the permission is stored once and the
+           customer changes with every conversation, so the limit has to name what the automation
+           itself resolved (flows#108). Without this line that is unsayable from the screen. -->
+      <span class="hint">${this.t('ui.grantLimitsRef')}</span>
       ${rows.length
         ? nothing
         : html`<span class="muted">${this.t('ui.grantLimitsNone')}</span>`}

@@ -296,12 +296,39 @@ describe('the payload limits a served recipe asks with', () => {
     ]);
   });
 
-  it('drops a pin offered on a kind the hub never hands a payload to', () => {
+  // hub#1662 — a READ carries a limit too, and it is the one whatsapp_inbox needs: «the diary of
+  // the customer this conversation resolved», never everybody's. Dropping it here would publish a
+  // recipe that asks for the wide read while its own card promises the narrow one.
+  it('keeps the pin the hub serves on a query grant (hub#1662)', () => {
     const [card] = moduleTemplates(
-      [row({ grants: [{ kind: 'query', value: 'customers.list', payload: { channel: 'customer' } }] })],
+      [
+        row({
+          grants: [
+            {
+              kind: 'query',
+              value: 'appointments.appointments.list_for_customer',
+              payload: { customer_id: 'steps.resolve_customer.id' },
+            },
+          ],
+        }),
+      ],
       'en',
     );
-    expect(templateGrants(card, t)).toEqual([{ kind: 'query', value: 'customers.list' }]);
+    expect(templateGrants(card, t)).toEqual([
+      {
+        kind: 'query',
+        value: 'appointments.appointments.list_for_customer',
+        payload: { customer_id: 'steps.resolve_customer.id' },
+      },
+    ]);
+  });
+
+  it('drops a pin offered on a kind the hub never hands any values to', () => {
+    const [card] = moduleTemplates(
+      [row({ grants: [{ kind: 'notify', value: 'whatsapp', payload: { to: '+34600' } }] })],
+      'en',
+    );
+    expect(templateGrants(card, t)).toEqual([{ kind: 'notify', value: 'whatsapp' }]);
   });
 
   /**

@@ -2773,7 +2773,24 @@ function mergeGrants(live, add, revoke) {
   return out;
 }
 function canPinPayload(kind) {
-  return kind === "command";
+  return kind === "command" || kind === "query";
+}
+var PIN_ROOTS = ["input", "steps"];
+function pinValueProblem(value) {
+  if (typeof value !== "string") return "";
+  if (value.includes("{{")) return "pin_template";
+  if (isPath(value) && !PIN_ROOTS.includes(value.split(".")[0])) {
+    return "pin_root";
+  }
+  return "";
+}
+function pinProblems(pin) {
+  const out = [];
+  for (const [field, value] of Object.entries(pin)) {
+    const problem = pinValueProblem(value);
+    if (problem) out.push([field, problem]);
+  }
+  return out;
 }
 function grantPin(grant) {
   const raw = grant.payload;
@@ -4660,11 +4677,21 @@ var ErpFlowsEditor = class extends i3 {
     const k2 = grantKey(grant);
     this.error = "";
     this.notice = "";
+    const pin = readPinRows(this.limitRows(grant));
+    const [bad] = pinProblems(pin);
+    if (bad) {
+      const [field, problem] = bad;
+      this.error = this.t(
+        problem === "pin_template" ? "ui.grantLimitBadTemplate" : "ui.grantLimitBadRoot",
+        { field }
+      );
+      return;
+    }
     this.savingLimits = k2;
     try {
       const next = await this.client.flows.replaceGrants(
         this.flow.id,
-        setGrantPin(this.grants, grant, readPinRows(this.limitRows(grant)))
+        setGrantPin(this.grants, grant, pin)
       );
       this.grants = Array.isArray(next) ? next : [];
       const rest = { ...this.pinDrafts };
@@ -6120,9 +6147,10 @@ var ErpFlowsEditor = class extends i3 {
         <span class="grow"
           >${g3.kind === "command" ? g3.value : this.t("ui.grantOther", g3)}${limits ? b2` <em class="pinned">${this.t("ui.grantPinned", { limits })}</em>` : A}</span
         >
-        <!-- Only a command grant carries a payload. Offered on any other kind the hub answers
-             flow.invalid_grant_payload — and this endpoint replaces the WHOLE list, so it would
-             not lose that row, it would lose every permission on the screen. -->
+        <!-- A command's payload and a query's parameters, and nothing else (hub#1623, hub#1662).
+             Offered on any other kind the hub answers flow.invalid_grant_payload — and this
+             endpoint replaces the WHOLE list, so it would not lose that row, it would lose every
+             permission on the screen. -->
         ${canPinPayload(g3.kind) ? b2`<button
               type="button"
               class="icon-btn"
@@ -6147,6 +6175,10 @@ var ErpFlowsEditor = class extends i3 {
     const saving = this.savingLimits === k2;
     return b2`<div class="limits">
       <span class="hint">${this.t("ui.grantLimitsIntro")}</span>
+      <!-- «Only this customer» cannot be a fixed value: the permission is stored once and the
+           customer changes with every conversation, so the limit has to name what the automation
+           itself resolved (flows#108). Without this line that is unsayable from the screen. -->
+      <span class="hint">${this.t("ui.grantLimitsRef")}</span>
       ${rows.length ? A : b2`<span class="muted">${this.t("ui.grantLimitsNone")}</span>`}
       ${rows.map(
       ([field, value], i4) => b2`<div class="param-row">
@@ -10971,12 +11003,15 @@ var es_default = {
     grantAll: "Autorizar todo lo que necesita",
     grantCommandNotFound: "Este hub no tiene ning\xFAn comando llamado {command}. Revisa el nombre en el paso.",
     grantLimitAdd: "A\xF1adir un l\xEDmite",
+    grantLimitBadRoot: "\xAB{field}\xBB nombra algo que esta automatizaci\xF3n no tiene. Un l\xEDmite solo puede usar lo que la propia automatizaci\xF3n averigua \u2014escribe input.\u2026 o steps.\u2026\u2014 o un valor fijo.",
+    grantLimitBadTemplate: "\xAB{field}\xBB no se puede escribir con {{\u2026}}. Escribe el valor a secas \u2014steps.find_customer.id\u2014 para que la automatizaci\xF3n lo compare tal cual.",
     grantLimitField: "Campo",
     grantLimitRemove: "Quitar el l\xEDmite de {field}",
     grantLimitValue: "Tiene que ser",
     grantLimits: "L\xEDmites",
     grantLimitsIntro: "Fija un valor y esta automatizaci\xF3n solo podr\xE1 actuar con ese valor. Cualquier otra cosa que intente se rechaza \u2014y omitir el campo tambi\xE9n, as\xED no puede saltarse el l\xEDmite call\xE1ndose.",
     grantLimitsNone: "Sin l\xEDmites: puede hacerlo con lo que ella decida.",
+    grantLimitsRef: "Un l\xEDmite puede ser un valor fijo, o lo que esta automatizaci\xF3n averigua cada vez que se ejecuta: escribe steps.find_customer.id y solo actuar\xE1 sobre la clienta de esa conversaci\xF3n.",
     grantLimitsSave: "Guardar l\xEDmites",
     grantOne: "Autorizar",
     grantOther: "{kind}: {value}",
@@ -11889,12 +11924,15 @@ var en_default = {
     grantAll: "Allow everything it needs",
     grantCommandNotFound: "This hub has no command called {command}. Check the name in the step.",
     grantLimitAdd: "Add a limit",
+    grantLimitBadRoot: "\xAB{field}\xBB names something this automation does not have. A limit can only use what the automation itself works out \u2014 write input.\u2026 or steps.\u2026 \u2014 or a fixed value.",
+    grantLimitBadTemplate: "\xAB{field}\xBB cannot be written with {{\u2026}}. Write the value on its own \u2014 steps.find_customer.id \u2014 so the automation compares it as it is.",
     grantLimitField: "Field",
     grantLimitRemove: "Remove the limit on {field}",
     grantLimitValue: "Must be",
     grantLimits: "Limits",
     grantLimitsIntro: "Fix a value and this automation may only act with that value. Anything else it tries is refused \u2014 and so is leaving the field out, so it cannot get round the limit by staying quiet.",
     grantLimitsNone: "No limits: it may do this with whatever it decides.",
+    grantLimitsRef: "A limit can be a fixed value, or what this automation works out each time it runs: write steps.find_customer.id and it will only ever act on the customer of that conversation.",
     grantLimitsSave: "Save limits",
     grantOne: "Allow",
     grantOther: "{kind}: {value}",

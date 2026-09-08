@@ -17,6 +17,9 @@ import {
   missingGrants,
   mergeGrants,
   canPinPayload,
+  grantPin,
+  pinProblems,
+  pinValueProblem,
   setGrantPin,
   pinRows,
   readPinRows,
@@ -560,12 +563,18 @@ describe('a `command` grant can FIX part of the payload (hub#1623, flows#66)', (
     },
   ];
 
-  it('only a `command` grant can fix values — the hub refuses the WHOLE list otherwise', () => {
-    // `flow.invalid_grant_payload`: a pin on a kind that carries no payload is refused at save,
+  it('a `command` and a `query` fix values — every other kind makes the hub refuse the WHOLE list', () => {
+    // `flow.invalid_grant_payload`: a pin on a kind that is handed no values is refused at save,
     // and `PUT …/grants` is all-or-nothing, so one offered on the wrong row would lose the lot.
-    expect(canPinPayload('command')).toBe(true);
-    for (const kind of ['query', 'http', 'notify', 'recipient_query']) {
-      expect(canPinPayload(kind)).toBe(false);
+    //
+    // `query` moved into this list with hub#1662 (`GrantKind::can_pin()` = `Command | Query`): a
+    // read is handed its parameters, so «the diary OF THIS CUSTOMER» is a limit the kernel now
+    // applies. Before it did, this test named `query` on the other side — correctly, then.
+    for (const kind of ['command', 'query']) {
+      expect(canPinPayload(kind), kind).toBe(true);
+    }
+    for (const kind of ['http', 'notify', 'recipient_query']) {
+      expect(canPinPayload(kind), kind).toBe(false);
     }
   });
 
@@ -742,12 +751,157 @@ describe('a grant that FIXES part of a payload answers about the call, not about
     expect(grantAllowsCall({ kind: 'command', value: 'x', payload: {} }, {})).toBe(true);
   });
 
-  // Only a `command` grant reaches `check_command_grant`, so a `payload` sitting on any other kind
-  // fixes NOTHING in the hub. Reading it as a limit here would be this screen inventing a
-  // containment the kernel never applies.
-  it('ignores a pin on a kind the hub never hands a payload to', () => {
-    expect(grantAllowsCall({ kind: 'query', value: 'customers.list', payload: { f_phone: '+1' } }, {})).toBe(
-      true,
-    );
+  // A `command` reaches `check_command_grant` and a `query` reaches `check_query_grant`
+  // (hub#1662); every other kind is handed no values at all, so a `payload` sitting on one fixes
+  // NOTHING in the hub. Reading it as a limit here would be this screen inventing a containment
+  // the kernel never applies.
+  it('ignores a pin on a kind the hub never hands any values to', () => {
+    expect(
+      grantAllowsCall({ kind: 'http', value: 'https://api.example.com/*', payload: { q: '1' } }, {}),
+    ).toBe(true);
+    expect(
+      grantAllowsCall({ kind: 'notify', value: 'whatsapp', payload: { to: '+34' } }, {}),
+    ).toBe(true);
+  });
+});
+
+// ── A `query` grant can FIX its parameters too (flows#108, hub#1662) ───────────────────────────
+
+/**
+ * 🔴 **The defect this block exists for.**
+ *
+ * A read may be granted narrow — «the diary, but only this customer's». The hub stores and
+ * enforces that since hub#1662. This screen did not know the kind could be pinned at all, so it
+ * did not merely fail to PAINT the limit: `withPin` rebuilt every `query` row WITHOUT its
+ * `payload`, and `PUT …/grants` is a replace. Touching any permission — a different one, on
+ * another row — re-sent the read unpinned, and the hub read that as «this grant changed»: it
+ * revoked the narrow one and granted a WIDE one. The containment disappeared with nothing on
+ * screen to say so.
+ */
+describe('a `query` grant can FIX its parameters (flows#108, hub#1662)', () => {
+  const OWN = 'appointments.appointments.list_for_customer';
+
+  const live = (): Grant[] => [
+    { id: 'g1', kind: 'notify', value: 'whatsapp' },
+    { id: 'g2', kind: 'query', value: OWN, payload: { customer_id: 'steps.resolve_customer.id' } },
+    { id: 'g3', kind: 'command', value: 'tasks.task.create' },
+  ];
+
+  it('reads the limit a read carries, instead of throwing it away', () => {
+    expect(grantPin(live()[1])).toEqual({ customer_id: 'steps.resolve_customer.id' });
+  });
+
+  // 🔴 THE regression. Granting an unrelated command must not widen the read.
+  it('carries a read’s limit through a replace, so an unrelated grant cannot widen it', () => {
+    const merged = mergeGrants(live(), [{ kind: 'command', value: 'crm.note.add' }], []);
+    expect(merged).toEqual([
+      { kind: 'notify', value: 'whatsapp' },
+      { kind: 'query', value: OWN, payload: { customer_id: 'steps.resolve_customer.id' } },
+      { kind: 'command', value: 'tasks.task.create' },
+      { kind: 'command', value: 'crm.note.add' },
+    ]);
+  });
+
+  // 🔴 THE regression, on the other door: editing the limits of ANOTHER row.
+  it('leaves a read’s limit alone while another grant’s limit is being written', () => {
+    expect(
+      setGrantPin(live(), { kind: 'command', value: 'tasks.task.create' }, { source: 'whatsapp' }),
+    ).toEqual([
+      { kind: 'notify', value: 'whatsapp' },
+      { kind: 'query', value: OWN, payload: { customer_id: 'steps.resolve_customer.id' } },
+      { kind: 'command', value: 'tasks.task.create', payload: { source: 'whatsapp' } },
+    ]);
+  });
+
+  it('writes and clears the limit of the read itself', () => {
+    expect(setGrantPin(live(), { kind: 'query', value: OWN }, { customer_id: 'input.customer_id' })[1])
+      .toEqual({ kind: 'query', value: OWN, payload: { customer_id: 'input.customer_id' } });
+    expect(setGrantPin(live(), { kind: 'query', value: OWN }, {})[1]).toEqual({
+      kind: 'query',
+      value: OWN,
+    });
+  });
+
+  // `command` and `query` are two vocabularies (`Authority.pins` is keyed by the whole pair): a
+  // read and a write that happen to share a name must not inherit each other's limit.
+  it('does not let a command’s limit reach a read of the same name', () => {
+    const both: Grant[] = [
+      { kind: 'command', value: 'x', payload: { channel: 'customer' } },
+      { kind: 'query', value: 'x' },
+    ];
+    expect(setGrantPin(both, { kind: 'query', value: 'x' }, { a: 1 })).toEqual([
+      { kind: 'command', value: 'x', payload: { channel: 'customer' } },
+      { kind: 'query', value: 'x', payload: { a: 1 } },
+    ]);
+  });
+
+  // Mirror of `check_query_grant` → `check_payload_pin`: omitting the fixed parameter is refused
+  // exactly like contradicting it, because a read whose filter is optional answers about EVERYBODY
+  // when it is left out — which is the wide behaviour the limit exists to remove.
+  it('answers about the read the way the kernel’s gate does', () => {
+    const g: Grant = { kind: 'query', value: OWN, payload: { customer_id: 'c1' } };
+    expect(grantAllowsCall(g, { customer_id: 'c1', page: 1 })).toBe(true);
+    expect(grantAllowsCall(g, { customer_id: 'c2' })).toBe(false);
+    expect(grantAllowsCall(g, { page: 1 })).toBe(false);
+  });
+
+  it('round-trips a read’s limit through the rows the screen types into', () => {
+    expect(readPinRows(pinRows(live()[1]))).toEqual({ customer_id: 'steps.resolve_customer.id' });
+  });
+});
+
+// ── What a limit may be WORTH: a literal, or this run’s own value (flows#108, hub#1662) ────────
+
+/**
+ * A permission is stored ONCE and the customer changes with every conversation, so «only this
+ * customer» can only be said as a REFERENCE — `steps.resolve_customer.id`. The hub resolves it
+ * against the run at the instant of the gate and refuses what it cannot resolve.
+ *
+ * The other three shapes are refused AT SAVE by `check_pin_value`, and `PUT …/grants` is
+ * all-or-nothing: typed here they would not fail that row, they would bounce the whole screen with
+ * a kernel message in English. So the screen has to know the rule itself.
+ */
+describe('the values a limit may be worth (flows#108)', () => {
+  it('takes a literal of any JSON type', () => {
+    for (const v of ['customer', 7, true, null, { a: 1 }, ['a']]) {
+      expect(pinValueProblem(v), JSON.stringify(v)).toBe('');
+    }
+  });
+
+  it('takes a reference to what this run already resolved', () => {
+    expect(pinValueProblem('input.customer_id')).toBe('');
+    expect(pinValueProblem('steps.resolve_customer.id')).toBe('');
+  });
+
+  // A pin is a VALUE, not a sentence. Rendering `{{steps.x.id}}` would flatten a number to a
+  // string and — worse — an unresolved template renders EMPTY, so the limit would quietly stop
+  // matching anything while still reading on screen as containment.
+  it('refuses prose with a template in it, however it is written', () => {
+    expect(pinValueProblem('{{steps.resolve_customer.id}}')).toBe('pin_template');
+    expect(pinValueProblem('cust-{{steps.resolve_customer.id}}')).toBe('pin_template');
+  });
+
+  // `secret.…` would make the gate an ORACLE — «granted» exactly when the value equals the
+  // secret, and a caller that can retry reads it one guess at a time. `event.…` names something
+  // the run scope (`{ input, steps }`) does not carry, so it could only ever deny.
+  it('refuses a root this run does not carry', () => {
+    expect(pinValueProblem('secret.API_KEY')).toBe('pin_root');
+    expect(pinValueProblem('event.customer_id')).toBe('pin_root');
+  });
+
+  // The rule is about PATHS, not about dots: a literal with a dot in it is still a literal, and
+  // every pin written before references existed keeps comparing byte for byte.
+  it('does not mistake a literal that happens to hold a dot for a reference', () => {
+    expect(pinValueProblem('customer.name@example.com')).toBe('');
+    expect(pinValueProblem('input')).toBe('');
+    expect(pinValueProblem('1.5')).toBe('');
+  });
+
+  it('names the rows of a limit the hub would bounce, so the screen can say which one', () => {
+    expect(pinProblems({ customer_id: 'steps.a.id', who: '{{input.x}}', k: 'secret.S' })).toEqual([
+      ['who', 'pin_template'],
+      ['k', 'pin_root'],
+    ]);
+    expect(pinProblems({ customer_id: 'steps.a.id' })).toEqual([]);
   });
 });
