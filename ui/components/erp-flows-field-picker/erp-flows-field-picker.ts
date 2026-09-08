@@ -182,7 +182,12 @@ export class ErpFlowsFieldPicker extends LitElement {
     return '';
   }
 
-  private get matches(): EventFieldShape[] {
+  /**
+   * The fields the search box currently keeps. Named `matchingFields` and not `matches`: the DOM's
+   * `Element.matches(selectors)` answers a BOOLEAN and callers branch on it, so a getter returning
+   * an array under that name made every delegated `matches()` test true (flows#107).
+   */
+  private get matchingFields(): EventFieldShape[] {
     const fields = this.shape?.fields ?? [];
     const q = this.query.trim().toLowerCase();
     if (!q) return fields;
@@ -232,7 +237,7 @@ export class ErpFlowsFieldPicker extends LitElement {
 
   render() {
     if (!this.open) return nothing;
-    const fields = this.matches;
+    const fields = this.matchingFields;
     return html`<div
       class="scrim"
       @click=${(e: Event) => {

@@ -1,4 +1,30 @@
 {
-  "extends": "../../tsconfig.json",
-  "include": ["ui/**/*.ts"]
+  // The module's PRODUCTION typecheck — `ui/**` minus the tests.
+  //
+  // 🔴 SELF-CONTAINED on purpose (flows#107). This file used to be
+  // `{ "extends": "../../tsconfig.json" }`, and that path exists ONLY inside the development
+  // workspace: in a bare checkout of this repository — which is exactly what a CI runner has —
+  // `tsc` dies with «Failed to load tsconfig», so the check the gate is supposed to run could not
+  // even start. The values below are the same ones the workspace declares and the same ones the
+  // toolkit hands to oxc (`module-toolkit/src/vitest.module.config.mjs`), so what CI compiles is
+  // what the author compiles.
+  //
+  // `types: []` is NOT laziness: this half compiles the code that runs in a BROWSER. With Node's
+  // globals in scope a component could reach for `process` or `fs` and typecheck green, and the
+  // failure would only show up in a hub. The tests, which really are Node programs, get their
+  // globals from `tsconfig.test.json` — the split is what lets both be strict.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": []
+  },
+  "include": ["ui/**/*.ts", "types/**/*.d.ts"],
+  "exclude": ["node_modules", "dist", "ui/**/*.test.ts"]
 }
