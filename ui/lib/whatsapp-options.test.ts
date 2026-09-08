@@ -429,7 +429,10 @@ describe('writing back keeps what the editor cannot edit (flows#91)', () => {
   });
 
   it('does not choke on an interactive that is not an object at all', () => {
-    const after = setTapOptions(doc({ interactive: 'nope' }), 0, blankTapOptions('list')).steps[0]
+    // Not an object ON PURPOSE: that is the defence under test, so the string has to reach
+    // `setTapOptions` exactly as a hand-edited document would carry it.
+    const bad = 'nope' as unknown as Record<string, unknown>;
+    const after = setTapOptions(doc({ interactive: bad }), 0, blankTapOptions('list')).steps[0]
       .interactive as Record<string, unknown>;
     expect(Object.keys(after).sort()).toEqual(['action', 'body', 'type']);
   });

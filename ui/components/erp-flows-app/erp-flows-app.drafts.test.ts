@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-app';
 import type { ErpFlowsApp } from './erp-flows-app';
+import type { ErpFlowsEditor } from '../erp-flows-editor/erp-flows-editor';
 
 /**
  * **flows#4 — what the assistant proposes is a DRAFT, and a draft is not an automation.**
@@ -158,15 +159,13 @@ describe('opening a proposal', () => {
     (draftRow(el)!.querySelector('[data-act="review"]') as HTMLButtonElement).click();
     await el.updateComplete;
 
-    const editor = el.renderRoot.querySelector('erp-flows-editor') as {
-      flow?: { id: string; enabled: boolean; definition: { steps: unknown[] } };
-      draft?: { notes: string[]; gaps: { stepId: string }[] } | null;
-    };
+    const editor = el.renderRoot.querySelector('erp-flows-editor') as ErpFlowsEditor | null;
     // `id: ''` is «not a flow yet»: the editor's save CREATES instead of updating.
-    expect(editor.flow?.id).toBe('');
-    expect(editor.flow?.enabled).toBe(false);
-    expect(editor.flow?.definition.steps).toHaveLength(1);
-    expect(editor.draft?.notes[0]).toContain('next day');
+    expect(editor?.flow?.id).toBe('');
+    expect(editor?.flow?.enabled).toBe(false);
+    // `Flow.definition` crossed a wire, so the type is a bag: name the shape we assert on.
+    expect(editor?.flow?.definition.steps as unknown[]).toHaveLength(1);
+    expect(editor?.draft?.notes[0]).toContain('next day');
     expect(client.flows.create).not.toHaveBeenCalled();
   });
 
@@ -174,10 +173,8 @@ describe('opening a proposal', () => {
     const el = await mount(fakeClient());
     (draftRow(el)!.querySelector('[data-act="review"]') as HTMLButtonElement).click();
     await el.updateComplete;
-    const editor = el.renderRoot.querySelector('erp-flows-editor') as {
-      draft?: { gaps: { stepId: string; params?: Record<string, unknown> }[] };
-    };
-    expect(editor.draft?.gaps.some((g) => g.params?.name === 'priority')).toBe(true);
+    const editor = el.renderRoot.querySelector('erp-flows-editor') as ErpFlowsEditor | null;
+    expect(editor?.draft?.gaps.some((g) => g.params?.name === 'priority')).toBe(true);
   });
 
   it('checks the trigger against THIS hub before calling it good', async () => {
@@ -193,10 +190,8 @@ describe('opening a proposal', () => {
     await el.updateComplete;
     await Promise.resolve();
     await el.updateComplete;
-    const editor = el.renderRoot.querySelector('erp-flows-editor') as {
-      draft?: { gaps: { stepId: string }[] };
-    };
-    expect(editor.draft?.gaps.map((g) => g.stepId)).toContain('trigger');
+    const editor = el.renderRoot.querySelector('erp-flows-editor') as ErpFlowsEditor | null;
+    expect(editor?.draft?.gaps.map((g) => g.stepId)).toContain('trigger');
   });
 
   it('records that the proposal became a flow, once the person saved it', async () => {
