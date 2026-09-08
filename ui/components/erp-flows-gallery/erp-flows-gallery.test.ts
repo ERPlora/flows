@@ -494,8 +494,12 @@ describe('the gallery does not offer a recipe this hub could not parse (flows#92
   it('does not paint it on a hub that declares neither', async () => {
     const el = await shelf(declaring());
     expect(card(el, 'whatsapp-appointment-unattended')).toBeNull();
-    // …and the sector is not empty: the floor belongs to this card alone.
-    expect(card(el, 'whatsapp-appointment')).toBeTruthy();
+    // Its attended twin neither: both write the same two keys since whatsapp_inbox#97, and only
+    // one of them said so until flows#100. A card offered here installs and then refuses to save.
+    expect(card(el, 'whatsapp-appointment')).toBeNull();
+    // …and the sector is not empty: the floor belongs to the cards that carry it, not to the
+    // gallery. `no-show-followup` writes no gated key and stays on the shelf.
+    expect(card(el, 'no-show-followup')).toBeTruthy();
   });
 
   it('does not paint it before the hub has answered: fail-closed', async () => {

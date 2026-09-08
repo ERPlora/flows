@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
 import { schemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery } from './erp-flows-gallery';
-import { templateById, templateGrants } from '../../lib/templates';
+import { carriedPins, templateById, templateGrants } from '../../lib/templates';
 import { grantPin, type Grant } from '../../lib/flow-doc';
 import en from '../../../locales/en.json';
 import es from '../../../locales/es.json';
@@ -36,6 +36,7 @@ const LIMITED = 'whatsapp-appointment-unattended';
 /** A card that limits nothing, so «unchanged» has something to be measured against. */
 const PLAIN = 'no-show-followup';
 const CANCEL = 'appointments.appointments.cancel';
+const RESCHEDULE = 'appointments.appointments.reschedule';
 
 /**
  * A hub whose `PUT …/grants` behaves like the kernel from hub#1623: a complete replace that keeps
@@ -96,10 +97,20 @@ describe('a recipe with a limit installs LIMITED, or it does not install the per
     expect(h.replaceGrants).toHaveBeenCalledTimes(1);
     const [flowId, sent] = h.replaceGrants.mock.calls[0];
     expect(flowId).toBe('created-1');
-    // ONLY the limited one. Everything else stays a decision the owner makes on the Permissions
-    // screen — installing a recipe is not a reason to hand it the rest without being asked.
-    expect(sent.map((g: Grant) => `${g.kind} ${g.value}`)).toEqual([`command ${CANCEL}`]);
-    expect(grantPin(sent[0])).toEqual({ channel: 'customer' });
+    // ONLY the limited ones. Everything else stays a decision the owner makes on the Permissions
+    // screen — installing a recipe is not a reason to hand it the rest without being asked. Two
+    // since whatsapp_inbox#118 gave this card the move back: cancelling and moving are both
+    // pinned to `channel: customer`, and neither may install wide.
+    expect(sent.map((g: Grant) => `${g.kind} ${g.value}`)).toEqual([
+      `command ${CANCEL}`,
+      `command ${RESCHEDULE}`,
+    ]);
+    for (const grant of sent) expect(grantPin(grant), grant.value).toEqual({ channel: 'customer' });
+    // Derived from the card rather than from this list, so a limit added to it is installed here
+    // too instead of being silently left behind.
+    expect(sent.map((g: Grant) => g.value).sort()).toEqual(
+      Object.keys(carriedPins(templateById(LIMITED)!)).sort(),
+    );
   });
 
   // 🔴 The regression flows#80 would become if the limit were written and not checked. A hub from
@@ -112,6 +123,7 @@ describe('a recipe with a limit installs LIMITED, or it does not install the per
 
     expect(h.written()).toEqual([]);
     expect(h.written().some((g) => g.value === CANCEL)).toBe(false);
+    expect(h.written().some((g) => g.value === RESCHEDULE)).toBe(false);
     // And it says so: a containment that could not be applied is not something to find out later.
     expect(el.renderRoot.querySelector('ok-inline-feedback')).toBeTruthy();
   });

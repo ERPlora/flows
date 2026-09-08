@@ -139,6 +139,51 @@ describe('a guard, judged the way the kernel judges it', () => {
     expect(conditionResult({ 'input.total': { exists: true } }, scope).matched).toBe(true);
   });
 
+  /**
+   * **A list against a list, and an object against an object** (flows#100).
+   *
+   * `def.rs::json_eq` opens with `a == b`, and on `serde_json::Value` that comparison is
+   * STRUCTURAL: two empty arrays are equal in the hub. Mirrored here as `a === b` it was
+   * REFERENTIAL, so two empty arrays were never equal and `neq: []` matched whatever the list held
+   * — the preview said «this step runs» about the one guard whose whole job is to stop it.
+   *
+   * The card it breaks is «WhatsApp → appointment»: `any_slot_to_offer` is
+   * `{'steps.reply_to_customer.slots': {neq: []}}` and it exists because Meta refuses an
+   * interactive list with no rows — billed, and answered with an error the salon never sees. The
+   * hub gets it right; only the screen that tells the owner what her automation will do got it
+   * wrong, which is the harder kind to notice.
+   *
+   * Neither side falls back to text: `as_text` answers `None` for a list in the kernel too, so
+   * once the structural comparison is gone there is nothing left to save it.
+   */
+  it('compares a list and an object by their CONTENTS, the way `serde_json` does', () => {
+    const empty = { steps: { found: { slots: [] } } };
+    // The guard the WhatsApp card is built on, both ways round.
+    expect(conditionResult({ 'steps.found.slots': { neq: [] } }, empty).matched).toBe(false);
+    expect(conditionResult({ 'steps.found.slots': { eq: [] } }, empty).matched).toBe(true);
+    // …and it still says YES when there is something to offer, which is the half a guard that
+    // never matched would also have passed.
+    const full = { steps: { found: { slots: ['10:30', '11:00'] } } };
+    expect(conditionResult({ 'steps.found.slots': { neq: [] } }, full).matched).toBe(true);
+    expect(conditionResult({ 'steps.found.slots': { eq: [] } }, full).matched).toBe(false);
+    // Contents, not shape: same rows in a different order are a different list, and two different
+    // lists are still different.
+    expect(
+      conditionResult({ 'steps.found.slots': { eq: ['10:30', '11:00'] } }, full).matched,
+    ).toBe(true);
+    expect(
+      conditionResult({ 'steps.found.slots': { eq: ['11:00', '10:30'] } }, full).matched,
+    ).toBe(false);
+    // Objects the same, and by VALUE rather than by key order — `serde_json::Map` compares as a
+    // map, and a scope built from a JSON body has no order to rely on.
+    const shape = { steps: { found: { at: { day: 'thu', hour: 17 } } } };
+    expect(conditionResult({ 'steps.found.at': { eq: { day: 'thu', hour: 17 } } }, shape).matched).toBe(true);
+    expect(conditionResult({ 'steps.found.at': { eq: { hour: 17, day: 'thu' } } }, shape).matched).toBe(true);
+    expect(conditionResult({ 'steps.found.at': { eq: { day: 'fri', hour: 17 } } }, shape).matched).toBe(false);
+    // And a list is not the string that looks like it: `as_text` refuses both in the kernel.
+    expect(conditionResult({ 'steps.found.slots': { eq: '[]' } }, empty).matched).toBe(false);
+  });
+
   it('reads `in` and `contains` the way the kernel does', () => {
     expect(conditionResult({ 'input.total': { in: [1, 4250] } }, scope).matched).toBe(true);
     expect(conditionResult({ 'input.tags': { contains: 'a' } }, scope).matched).toBe(true);

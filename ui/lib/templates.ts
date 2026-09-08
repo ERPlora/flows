@@ -542,6 +542,10 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     id: 'whatsapp-appointment',
     mirrors: { module: 'whatsapp_inbox', family: 'appointment-from-whatsapp' },
     sector: 'beauty',
+    // The list the customer TAPS (`interactive`, hub#1633) and the slots the model hands over
+    // (`output`, hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it
+    // is refused whole — so the card is not offered there. See {@link FlowTemplate.needs}.
+    needs: ['interactive', 'output'],
     icon: 'calendar-number-outline',
     nameKey: 'tpl.waAppointment.name',
     summaryKey: 'tpl.waAppointment.summary',
@@ -596,9 +600,9 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     // through `withCopiedPins` onto the served twin on a hub that does.
     grantPins: {
       'appointments.appointments.cancel': { channel: 'customer' },
-      // Not covered by the module's own sidecar even after hub#1654: `appointment-from-whatsapp.grants.json`
-      // pins cancelling and leaves the move WIDE (whatsapp_inbox#118 is what pins it there). So for
-      // this operation the copy is the only carrier on every hub, new image or old.
+      // whatsapp_inbox#118 pins the move in the module's own sidecar too, so the two halves of
+      // this mirror now say the same thing — but the copy is still what reaches a hub while
+      // hub#1654 is open, because `FlowTemplateGrant` is `{kind, value}` and serde drops the rest.
       'appointments.appointments.reschedule': { channel: 'customer' },
     },
     build: (t) => ({
@@ -635,6 +639,32 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           input: {
             from: 'event.from',
             text: 'event.text',
+            wa_message_id: 'event.wa_message_id',
+            received_at: 'event.received_at',
+            reply_id: 'event.reply_id',
+            reply_title: 'event.reply_title',
+          },
+        },
+        // **The same automation, woken by a TAP** (whatsapp_inbox#111). A tapped row arrives with `text`
+        // empty and `reply_id` full, so the trigger above — which demands words — never sees it,
+        // and these two are disjoint BY CONSTRUCTION rather than by luck: no message can satisfy
+        // `text: neq ''` and `text: eq ''` at once, so nothing is ever booked twice. `text` maps from
+        // `reply_title` here, so the step reads the same field whichever way she answered, and
+        // `reply_id` carries the slot she actually chose.
+        {
+          kind: 'event',
+          event: 'hub.whatsapp.message_received',
+          filter: {
+            'event.text': { eq: '' },
+            'event.reply_id': { neq: '' },
+            'event.direction': { neq: 'outbound' },
+            'event.source': { neq: 'history' },
+          },
+          input: {
+            from: 'event.from',
+            text: 'event.reply_title',
+            reply_id: 'event.reply_id',
+            reply_title: 'event.reply_title',
             wa_message_id: 'event.wa_message_id',
             received_at: 'event.received_at',
           },
@@ -752,12 +782,29 @@ export const TEMPLATES: readonly FlowTemplate[] = [
         // words untouched (the day, the hour and the professional live only there); `rejected`, it
         // writes a new message that says the time cannot be AND what she does next — answer here
         // with another day. A «no» with nothing after it is where she stops writing.
+        //
+        // whatsapp_inbox#111 gave it the two availability commands and three more turns, and that
+        // is not a contradiction of «no tools»: they only ANSWER — nothing here writes — and they
+        // are what turn a refusal into hours she can tap instead of a paragraph she has to read
+        // and retype. It offers nothing on a day the proposing step already ruled out.
         {
           id: 'reply_to_customer',
           kind: 'ai',
           prompt: t('tpl.waAppointment.replyPrompt'),
+          tools: {
+            commands: ['appointments.availability.day_opening', 'appointments.availability.slots'],
+          },
           policy: 'manual',
-          max_iters: 1,
+          max_iters: 4,
+          // What the step hands on BESIDES its words (hub#1639): the slots it is offering, whole,
+          // so the row she taps comes home as `2026-09-08T10:30|staff:12|service:3` and nothing
+          // has to be parsed back out of the prose.
+          output: {
+            slots: {
+              type: 'options',
+              describe: t('tpl.waAppointment.slotsDescribe'),
+            },
+          },
         },
         // whatsapp_inbox#58, first half: once the salon has decided, the customer hears about it —
         // on WhatsApp, in the words the step above wrote FOR them. Same recipient resolution as the
@@ -774,6 +821,40 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           },
           template: '',
           vars: { text: '{{steps.reply_to_customer.text}}' },
+        },
+        // 🔴 The guard, and it is not decoration: `slots` is empty whenever the step above booked,
+        // cancelled, moved or answered something else, and a `list` with no rows is refused by
+        // Meta — paid for, and answered with an error the salon never sees.
+        {
+          id: 'any_slot_to_offer',
+          kind: 'condition',
+          when: { 'steps.reply_to_customer.slots': { neq: [] } },
+        },
+        // The hours as a list she TAPS instead of a paragraph she has to answer (hub#1633). The
+        // rows are the step's own output, so what comes back is the slot itself and not «the
+        // second one» — which is exactly where the bookings used to get lost.
+        {
+          id: 'offer_slots',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: {
+            query: 'whatsapp_inbox.conversations.list',
+            params: { f_wa_contact_id: 'input.from' },
+            field: 'contact_phone',
+          },
+          interactive: {
+            type: 'list',
+            body: { text: t('tpl.waAppointment.offerBody') },
+            action: {
+              button: t('tpl.waAppointment.offerButton'),
+              sections: [
+                {
+                  title: t('tpl.waAppointment.offerSection'),
+                  rows: 'steps.reply_to_customer.slots',
+                },
+              ],
+            },
+          },
         },
       ],
     }),
@@ -808,23 +889,15 @@ export const TEMPLATES: readonly FlowTemplate[] = [
    */
   {
     id: 'whatsapp-appointment-unattended',
+    // No `pins` staged for the twin any more (flows#103 closed by whatsapp_inbox#118): moving was
+    // cut from this family only because `reschedule` carried nothing that said whose appointment it
+    // was, appointments#142 gave it `channel` + `customer_id`, and the recipe now RUNS the move
+    // itself. The limit therefore lives in `grantPins` below, which is where the catalogue guards
+    // watch it — a pin left staged here would leave this copy's own permission wide while reading
+    // like a containment. `withCopiedPins` carries both sets, so the served card keeps the pin.
     mirrors: {
       module: 'whatsapp_inbox',
       family: 'appointment-from-whatsapp-unattended',
-      // 🔴 flows#103 — waiting for the operation the recipe is about to grow (whatsapp_inbox#118).
-      //
-      // This copy CANNOT move an appointment: it mirrors the family as published, and moving was
-      // cut from it (see `book_appointment` below) precisely because `reschedule` carried nothing
-      // that said whose appointment it was. appointments#142 gave it `channel` + `customer_id` and
-      // the same `customer_identity_refusal` cancelling already had, so the operation can be opened
-      // — and the served card will ask for it WIDE, because while hub#1654 is open the `payload`
-      // the module fixes in `appointment-from-whatsapp-unattended.grants.json` never leaves the hub.
-      //
-      // Named here, the limit is already on the shelf when that card arrives; until then
-      // `withCopiedPins` finds no grant to put it on. The other order — recipe first, limit after —
-      // is a release of the fleet booking, cancelling AND moving unattended with `channel`
-      // defaulting to `staff`: no ownership check on the move at all.
-      pins: { 'appointments.appointments.reschedule': { channel: 'customer' } },
     },
     sector: 'beauty',
     // The list she TAPS (`interactive`, hub#1633) and the slots the model hands over (`output`,
@@ -870,6 +943,9 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       // approve it», and this family has no tray — it books and cancels unattended. Read on this
       // card that line promised a human in the loop who is not there.
       'appointments.appointments.cancel': 'tpl.grant.appointmentsCancelAsCustomer',
+      // Its OWN sentence too, for the same reason: the shared one promises a tray this family
+      // does not have.
+      'appointments.appointments.reschedule': 'tpl.grant.appointmentsRescheduleAsCustomer',
     },
     // 🔴 The one permission on this card that is NOT allowed to be as wide as its name (flows#80).
     //
@@ -884,7 +960,15 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     // flow resolved from the phone the message came from (`find_customer`), and the salon's
     // cancellation policy applies. The recipe keeps doing the thing it was installed for and loses
     // the thing nobody asked for. Its source half is whatsapp_inbox#100.
-    grantPins: { 'appointments.appointments.cancel': { channel: 'customer' } },
+    //
+    // Moving is pinned the same way and for the same reason, and it is the ONLY thing that made it
+    // shippable here (whatsapp_inbox#118): until appointments#142 gave `reschedule` a `channel`
+    // and a `customer_id`, nothing downstream could tell whose appointment it had been handed, so
+    // this family deliberately went without it — see the booking step below.
+    grantPins: {
+      'appointments.appointments.cancel': { channel: 'customer' },
+      'appointments.appointments.reschedule': { channel: 'customer' },
+    },
     build: (t) => ({
       schema_version: SCHEMA_VERSION,
       triggers: [
@@ -987,17 +1071,16 @@ export const TEMPLATES: readonly FlowTemplate[] = [
         // calls), same «decide first what they are asking for» branch that cancels instead of
         // booking when that is what the message says.
         //
-        // 🔴 ONE tool fewer than the twin, on purpose: this family CANNOT MOVE an appointment
-        // (13 grants, not 14 — whatsapp_inbox#74's scope cut). Cancelling can be bound to the
-        // customer who is asking — `channel: "customer"` makes the handler compare the
-        // appointment's `customer_id` with the one passed — but `appointments.appointments.reschedule`
-        // has no such field (`additionalProperties: false` over `appointment_id`,
-        // `start_datetime`, `duration_minutes`) and its handler never checks whose appointment it
-        // is. `customers.list` searches by name, `list_for_customer` takes any `customer_id`: with
-        // `policy: "auto"` the only thing between a customer and a stranger's hour is a paragraph
-        // of prompt, which is exactly what hub#1623 says is NOT a control. The twin is `manual`,
-        // so a person sees the move before it happens. Reopening this is appointments#142 (give
-        // `reschedule` its `channel` + `customer_id`) and then whatsapp_inbox#103, in that order.
+        // 🔴 It MOVES an appointment now, and the fourteenth permission is the whole story
+        // (whatsapp_inbox#118). whatsapp_inbox#74 had cut the move out of this family precisely
+        // because `appointments.appointments.reschedule` carried no `channel` and no
+        // `customer_id`: its handler never checked whose appointment it had been handed, and with
+        // `policy: "auto"` the only thing between a customer and a stranger's hour would have been
+        // a paragraph of prompt — which is exactly what hub#1623 says is NOT a control.
+        // appointments#142 gave the command both fields, so the grant above pins
+        // `channel: "customer"` and the handler compares the appointment's own `customer_id` with
+        // the one `find_customer` resolved from the phone the message came from. The tool is safe
+        // here for the same reason cancelling already was, and for no other.
         {
           id: 'book_appointment',
           kind: 'ai',
@@ -1015,6 +1098,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
               'appointments.availability.check',
               'appointments.appointments.create',
               'appointments.appointments.cancel',
+              'appointments.appointments.reschedule',
             ],
           },
           policy: 'auto',
@@ -1119,6 +1203,10 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     id: 'whatsapp-reservation',
     mirrors: { module: 'whatsapp_inbox', family: 'reservation-from-whatsapp' },
     sector: 'food',
+    // The list the guest TAPS (`interactive`, hub#1633) and the times the model hands over
+    // (`output`, hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it
+    // is refused whole — so the card is not offered there. See {@link FlowTemplate.needs}.
+    needs: ['interactive', 'output'],
     icon: 'restaurant-outline',
     nameKey: 'tpl.waReservation.name',
     summaryKey: 'tpl.waReservation.summary',
@@ -1166,6 +1254,33 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           input: {
             from: 'event.from',
             text: 'event.text',
+            wa_message_id: 'event.wa_message_id',
+            received_at: 'event.received_at',
+            reply_id: 'event.reply_id',
+            reply_title: 'event.reply_title',
+          },
+        },
+        // **The same automation, woken by a TAP** (whatsapp_inbox#113). A tapped row arrives with
+        // `text` empty and `reply_id` full, so the trigger above — which demands words — never
+        // sees it, and these two are disjoint BY CONSTRUCTION rather than by luck: no message can
+        // satisfy `text: neq ''` and `text: eq ''` at once, so no table is ever booked twice.
+        // `text` maps from `reply_title` here, so the step reads the same field whichever way they
+        // answered, and `reply_id` carries the time they actually chose — with the party size in
+        // it, because what is free at 21:00 for two is not what is free at 21:00 for eight.
+        {
+          kind: 'event',
+          event: 'hub.whatsapp.message_received',
+          filter: {
+            'event.text': { eq: '' },
+            'event.reply_id': { neq: '' },
+            'event.direction': { neq: 'outbound' },
+            'event.source': { neq: 'history' },
+          },
+          input: {
+            from: 'event.from',
+            text: 'event.reply_title',
+            reply_id: 'event.reply_id',
+            reply_title: 'event.reply_title',
             wa_message_id: 'event.wa_message_id',
             received_at: 'event.received_at',
           },
@@ -1225,12 +1340,30 @@ export const TEMPLATES: readonly FlowTemplate[] = [
         // No tools at all, and one iteration: it may only put the outcome of the step before it
         // into words — the booking words when nothing was refused, and a real «that table cannot
         // be, tell me another day» when it was.
+        //
+        // whatsapp_inbox#113 gave it the two reads and three turns, and that is not a
+        // contradiction of «no tools»: `count_for` and `on_date` only ANSWER — nothing here writes
+        // — and they are what turn a refusal into windows the guest taps instead of a paragraph
+        // they have to read and retype. It offers nothing on a day the restaurant is closed, and
+        // nothing on a day the booking step already ruled out.
         {
           id: 'reply_to_customer',
           kind: 'ai',
           prompt: t('tpl.waReservation.replyPrompt'),
+          tools: {
+            queries: ['reservations.slots.count_for', 'reservations.blocked_dates.on_date'],
+          },
           policy: 'manual',
-          max_iters: 1,
+          max_iters: 3,
+          // What the step hands on BESIDES its words (hub#1639): the windows it is offering,
+          // whole, so the row they tap comes home as `2026-09-08T21:00|party:4` and nothing has to
+          // be parsed back out of the prose.
+          output: {
+            slots: {
+              type: 'options',
+              describe: t('tpl.waReservation.slotsDescribe'),
+            },
+          },
         },
         // What that step wrote, sent as it is.
         {
@@ -1244,6 +1377,40 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           },
           template: '',
           vars: { text: '{{steps.reply_to_customer.text}}' },
+        },
+        // 🔴 The guard, and it is not decoration: `slots` is empty whenever the step above booked,
+        // put them on the waiting list or answered something else, and a `list` with no rows is
+        // refused by Meta — paid for, and answered with an error the restaurant never sees.
+        {
+          id: 'any_time_to_offer',
+          kind: 'condition',
+          when: { 'steps.reply_to_customer.slots': { neq: [] } },
+        },
+        // The free windows as a list they TAP instead of a paragraph they have to answer
+        // (hub#1633). The rows are the step's own output, so what comes back is the window itself
+        // — `2026-09-08T21:00|party:4`, the party size included — and not «the second one».
+        {
+          id: 'offer_times',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: {
+            query: 'whatsapp_inbox.conversations.list',
+            params: { f_wa_contact_id: 'input.from' },
+            field: 'contact_phone',
+          },
+          interactive: {
+            type: 'list',
+            body: { text: t('tpl.waReservation.offerBody') },
+            action: {
+              button: t('tpl.waReservation.offerButton'),
+              sections: [
+                {
+                  title: t('tpl.waReservation.offerSection'),
+                  rows: 'steps.reply_to_customer.slots',
+                },
+              ],
+            },
+          },
         },
       ],
     }),
@@ -1277,6 +1444,10 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     id: 'whatsapp-reservation-unattended',
     mirrors: { module: 'whatsapp_inbox', family: 'reservation-from-whatsapp-unattended' },
     sector: 'food',
+    // The list the guest TAPS (`interactive`, hub#1633) and the times the model hands over
+    // (`output`, hub#1639). Both shipped in `v1.1.16`; below it this document does not degrade, it
+    // is refused whole — so the card is not offered there. See {@link FlowTemplate.needs}.
+    needs: ['interactive', 'output'],
     // A bookmark against the twin's table setting: this one is already held.
     icon: 'bookmark-outline',
     nameKey: 'tpl.waReservationUnattended.name',
@@ -1332,6 +1503,33 @@ export const TEMPLATES: readonly FlowTemplate[] = [
             text: 'event.text',
             wa_message_id: 'event.wa_message_id',
             received_at: 'event.received_at',
+            reply_id: 'event.reply_id',
+            reply_title: 'event.reply_title',
+          },
+        },
+        // **The same automation, woken by a TAP** (whatsapp_inbox#113). A tapped row arrives with
+        // `text` empty and `reply_id` full, so the trigger above — which demands words — never
+        // sees it, and these two are disjoint BY CONSTRUCTION rather than by luck: no message can
+        // satisfy `text: neq ''` and `text: eq ''` at once, so no table is ever booked twice.
+        // `text` maps from `reply_title` here, so the step reads the same field whichever way they
+        // answered, and `reply_id` carries the time they actually chose — with the party size in
+        // it, because what is free at 21:00 for two is not what is free at 21:00 for eight.
+        {
+          kind: 'event',
+          event: 'hub.whatsapp.message_received',
+          filter: {
+            'event.text': { eq: '' },
+            'event.reply_id': { neq: '' },
+            'event.direction': { neq: 'outbound' },
+            'event.source': { neq: 'history' },
+          },
+          input: {
+            from: 'event.from',
+            text: 'event.reply_title',
+            reply_id: 'event.reply_id',
+            reply_title: 'event.reply_title',
+            wa_message_id: 'event.wa_message_id',
+            received_at: 'event.received_at',
           },
         },
       ],
@@ -1383,6 +1581,15 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           },
           policy: 'auto',
           max_iters: 10,
+          // What the step hands on BESIDES its words (hub#1639): the windows it is offering,
+          // whole, so the row they tap comes home as `2026-09-08T21:00|party:4` — the party size
+          // included, because a window that is free for two is not free for eight.
+          output: {
+            slots: {
+              type: 'options',
+              describe: t('tpl.waReservationUnattended.slotsDescribe'),
+            },
+          },
         },
         // What the booking step wrote, sent as it is: with no approval in the middle this is the
         // guest's ONLY notice that the table exists.
@@ -1397,6 +1604,40 @@ export const TEMPLATES: readonly FlowTemplate[] = [
           },
           template: '',
           vars: { text: '{{steps.book_table.text}}' },
+        },
+        // 🔴 The guard, and it is not decoration: `slots` is empty whenever the step above booked,
+        // put them on the waiting list or answered something else, and a `list` with no rows is
+        // refused by Meta — paid for, and answered with an error the restaurant never sees.
+        {
+          id: 'any_time_to_offer',
+          kind: 'condition',
+          when: { 'steps.book_table.slots': { neq: [] } },
+        },
+        // The free windows as a list they TAP instead of a paragraph they have to answer
+        // (hub#1633). The rows are the step's own output, so what comes back is the window itself
+        // — `2026-09-08T21:00|party:4`, the party size included — and not «the second one».
+        {
+          id: 'offer_times',
+          kind: 'notify',
+          channel: 'whatsapp',
+          to: {
+            query: 'whatsapp_inbox.conversations.list',
+            params: { f_wa_contact_id: 'input.from' },
+            field: 'contact_phone',
+          },
+          interactive: {
+            type: 'list',
+            body: { text: t('tpl.waReservationUnattended.offerBody') },
+            action: {
+              button: t('tpl.waReservationUnattended.offerButton'),
+              sections: [
+                {
+                  title: t('tpl.waReservationUnattended.offerSection'),
+                  rows: 'steps.book_table.slots',
+                },
+              ],
+            },
+          },
         },
       ],
     }),
