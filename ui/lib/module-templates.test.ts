@@ -239,6 +239,42 @@ describe('the gallery catalogue, once the hub brings the modules’ own recipes'
     expect(merged.aliases).toEqual({});
   });
 
+  /**
+   * **The addresses this screen used to answer on keep answering** (flows#101).
+   *
+   * `whatsapp-appointment` is not an id of ours to retire quietly: `whatsapp_inbox` builds
+   * `?template=whatsapp-appointment` in its own settings screen (`ui/lib/whatsapp-uses.ts`) and
+   * ships it in a release of its own, so the two repositories cannot change it on the same day.
+   * The other three were live ids of this gallery for weeks and can be sitting in a bookmark.
+   *
+   * Until this issue the forwarding fell out of the hand copy: {@link mergeTemplates} matched the
+   * copy's `mirrors` against the served card's `source` and wrote the alias from it. With the copy
+   * deleted there is no such row to read, so the four addresses have to be named here — which is
+   * also the only place left that still says these ids ever existed.
+   */
+  it('forwards a retired id to the recipe that replaced it with no copy left to read it from', () => {
+    const served = moduleTemplates([row()], 'en');
+    const merged = mergeTemplates([], served);
+    expect(merged.aliases['whatsapp-appointment']).toBe(served[0].id);
+  });
+
+  it('forwards every id it retired, not only the one another repository publishes', () => {
+    const retired = {
+      'whatsapp-appointment': 'appointment-from-whatsapp',
+      'whatsapp-appointment-unattended': 'appointment-from-whatsapp-unattended',
+      'whatsapp-reservation': 'reservation-from-whatsapp',
+      'whatsapp-reservation-unattended': 'reservation-from-whatsapp-unattended',
+    };
+    for (const [id, family] of Object.entries(retired)) {
+      const served = moduleTemplates([row({ family })], 'en');
+      expect(mergeTemplates([], served).aliases[id], id).toBe(served[0].id);
+    }
+  });
+
+  it('forwards nothing while the hub serves nothing: there is no card to land on', () => {
+    expect(mergeTemplates(TEMPLATES, []).aliases).toEqual({});
+  });
+
   it('never lets a served card and a house card share an id', () => {
     const served = moduleTemplates([row()], 'en');
     const ids = mergeTemplates(TEMPLATES, served).cards.map((c: FlowTemplate) => c.id);
