@@ -739,9 +739,18 @@ export class ErpFlowsGallery extends LitElement {
     );
   }
 
-  /** Expands one template's panel. Public so the shell (and the tests) can drive it. */
+  /**
+   * Expands one template's panel. Public so the shell (and the tests) can drive it.
+   *
+   * 🔴 **The comparison goes through {@link landsOn}, both sides** (flows#101). What a shortcut
+   * leaves in `picked` is the id the OWNER's link named, which since the WhatsApp copies were
+   * retired is routinely a retired id — while the card on screen, and the id its own button hands
+   * back, is the served one it forwards to. Compared raw, those two never match: the salon arrives
+   * from Settings → WhatsApp with the card open, taps its heading to shut it, and the first tap
+   * does nothing at all, because it re-picks the same card under its other name.
+   */
   open(id: string): void {
-    this.picked = this.picked === id ? null : id;
+    this.picked = this.landsOn(this.picked) === this.landsOn(id) ? null : id;
     this.error = '';
   }
 

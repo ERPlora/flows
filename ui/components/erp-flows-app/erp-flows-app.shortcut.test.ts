@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import './erp-flows-app';
 import type { ErpFlowsApp } from './erp-flows-app';
 import { QUERY_GRANT_PIN_CORE } from '../../lib/ai-draft';
+import { moduleTemplateId } from '../../lib/module-templates';
 
 /**
  * **A shortcut that names a card wins over whatever this screen was doing** (flows#58).
@@ -24,7 +25,17 @@ import { QUERY_GRANT_PIN_CORE } from '../../lib/ai-draft';
  * event is dispatched on it.
  */
 
+/**
+ * **The address `whatsapp_inbox` publishes, and the card it now lands on** (flows#56 → flows#101).
+ *
+ * `whatsapp-appointment` is what the app's own settings screen builds — it is a published address,
+ * so it does not change. What changed is the card behind it: the hand copy of that recipe is gone
+ * and the app serves the recipe itself, so the id is forwarded to the SERVED card
+ * (`mergeTemplates`'s aliases). Driving this file through the retired id on purpose: it is the
+ * only address the outside world ever taps, and this is where it meets the editor.
+ */
 const LINKED = 'whatsapp-appointment';
+const OPENS = moduleTemplateId('whatsapp_inbox', 'appointment-from-whatsapp');
 
 const doc = (trigger: unknown, steps: unknown[] = []) => ({
   schema_version: 1,
@@ -91,6 +102,41 @@ function fakeClient() {
         },
       })),
       approvals: vi.fn(async () => []),
+      // The recipe the shortcut names, served by the app that publishes the shortcut (flows#101).
+      // Before it was a hand copy in `templates.ts`; with the copies gone, a hub that serves
+      // nothing has no card for that address and every test below would go red about a shortcut
+      // that landed on the plain gallery — which is not what any of them is asking.
+      templates: vi.fn(async () => [
+        {
+          module: 'whatsapp_inbox',
+          family: 'appointment-from-whatsapp',
+          documents: {
+            en: {
+              schema_version: 1,
+              name: 'WhatsApp → appointment',
+              triggers: [{ kind: 'event', event: 'whatsapp_inbox.message.received' }],
+              steps: [
+                { id: 'ask', kind: 'notify', channel: 'whatsapp', interactive: { rows: [] } },
+                { id: 'read', kind: 'ai', output: { slots: 'x' } },
+                {
+                  id: 'book',
+                  kind: 'command',
+                  command: 'appointments.appointments.create',
+                  params: {},
+                },
+              ],
+            },
+          },
+          grants: [
+            { kind: 'command', value: 'appointments.appointments.create' },
+            {
+              kind: 'query',
+              value: 'appointments.appointments.list_for_customer',
+              payload: { customer_id: 'steps.resolve_customer.id' },
+            },
+          ],
+        },
+      ]),
     },
     events: {
       shape: vi.fn(async (name: string) => ({ event_name: name, declared_by: ['x'], samples: 0, fields: [] })),
@@ -129,7 +175,9 @@ const gallery = (el: ErpFlowsApp): Element | null => el.renderRoot.querySelector
 const editor = (el: ErpFlowsApp): Element | null => el.renderRoot.querySelector('erp-flows-editor');
 const guide = (el: ErpFlowsApp): Element | null => el.renderRoot.querySelector('erp-flows-guide');
 const openCard = (el: ErpFlowsApp): Element | null =>
-  gallery(el)?.shadowRoot?.querySelector(`#panel-${LINKED}`) ?? null;
+  // By attribute and not by `#panel-<id>`: a served id carries a colon and a slash, and neither
+  // can be written in an id selector without escaping every one of them.
+  gallery(el)?.shadowRoot?.querySelector(`[data-template="${OPENS}"] .panel`) ?? null;
 
 async function click(el: ErpFlowsApp, target: Element | null | undefined): Promise<void> {
   expect(target, 'the control is not on the screen at all').toBeTruthy();

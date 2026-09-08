@@ -5,7 +5,8 @@ import { join, resolve } from 'node:path';
 import './erp-flows-gallery';
 import { QUERY_GRANT_PIN_CORE, schemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery, templateFromSearch } from './erp-flows-gallery';
-import { TEMPLATES } from '../../lib/templates';
+import { TEMPLATES, mergeTemplates } from '../../lib/templates';
+import { moduleTemplateId, moduleTemplates } from '../../lib/module-templates';
 
 /**
  * **The hub these tests are about: one on a current core** (flows#92).
@@ -47,9 +48,31 @@ const CURRENT_CORE = schemaFacts(
 const t = (key: string): string => key;
 
 /** A hub that knows every event a template asks about, so nothing is hidden. */
+/** The recipe `whatsapp_inbox` serves, which is where the shortcut lands since flows#101. */
+const SERVED_ROW = {
+  module: 'whatsapp_inbox',
+  family: 'appointment-from-whatsapp',
+  documents: {
+    en: {
+      schema_version: 1,
+      name: 'WhatsApp → appointment',
+      triggers: [{ kind: 'event', event: 'whatsapp_inbox.message.received' }],
+      steps: [
+        { id: 'ask', kind: 'notify', channel: 'whatsapp', interactive: { rows: [] } },
+        { id: 'read', kind: 'ai', output: { slots: 'x' } },
+        { id: 'book', kind: 'command', command: 'appointments.appointments.create', params: {} },
+      ],
+    },
+  },
+  grants: [{ kind: 'command', value: 'appointments.appointments.create' }],
+};
+
 function hub(shape?: (name: string) => unknown) {
   return {
-    flows: { create: vi.fn(async (flow: unknown) => ({ id: 'created-1', ...(flow as object) })) },
+    flows: {
+      create: vi.fn(async (flow: unknown) => ({ id: 'created-1', ...(flow as object) })),
+      templates: vi.fn(async () => [SERVED_ROW]),
+    },
     events: {
       shape: vi.fn(async (name: string) =>
         shape ? shape(name) : { event_name: name, declared_by: ['x'], samples: 0, fields: [] },
@@ -85,19 +108,36 @@ async function settle(el: ErpFlowsGallery): Promise<void> {
 }
 
 const panel = (el: ErpFlowsGallery, id: string): Element | null =>
-  el.renderRoot.querySelector(`#panel-${id}`);
+  // By attribute and not `#panel-<id>`: a served id carries a colon and a slash, neither of which
+  // can be written in an id selector without escaping every one of them.
+  el.renderRoot.querySelector(`[data-template="${id}"] .panel`);
 const card = (el: ErpFlowsGallery, id: string): HTMLElement | null =>
   el.renderRoot.querySelector(`[data-template="${id}"]`);
 const cards = (el: ErpFlowsGallery): number => el.renderRoot.querySelectorAll('[data-template]').length;
 const openPanels = (el: ErpFlowsGallery): number => el.renderRoot.querySelectorAll('.panel').length;
 
 /** The card the WhatsApp shortcut names, and one that is on no hub anywhere. */
-const LINKED = 'whatsapp-appointment';
+/**
+ * **The address the app publishes, and the card it opens** (flows#56 → flows#101).
+ *
+ * `whatsapp-appointment` is built by `whatsapp_inbox`'s own settings screen, so it is a published
+ * address and does not change. The card behind it does: the hand copy is gone and the app serves
+ * the recipe itself, so the shortcut is forwarded to the served card. Everything below asks with
+ * the address the outside world taps and looks for the card the owner actually gets.
+ */
+const ASKED = 'whatsapp-appointment';
+const LINKED = moduleTemplateId('whatsapp_inbox', 'appointment-from-whatsapp');
 const MADE_UP = 'a-template-that-never-existed';
+
+/** The catalogue as the gallery holds it: what is written here plus what the hub served. */
+const onScreen = () => mergeTemplates(TEMPLATES, moduleTemplates([SERVED_ROW], 'en'));
 
 describe('`?template=<id>` says which card the owner asked for (flows#56)', () => {
   it('reads the id the shortcut put in the address bar', () => {
-    expect(templateFromSearch(`?template=${LINKED}`)).toBe(LINKED);
+    // Handed back UNCHANGED, retired or not: forwarding is `landsOn`'s job, and answering the
+    // replacement here would be the second place that decides it.
+    expect(templateFromSearch(`?template=${ASKED}`, onScreen())).toBe(ASKED);
+    expect(templateFromSearch(`?template=${LINKED}`, onScreen())).toBe(LINKED);
   });
 
   it('answers «no card» to an id this gallery does not have — an old link is not an error', () => {
@@ -130,7 +170,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
   });
 
   it('opens the card the shortcut named, ready to read and switch on', async () => {
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const el = await mount();
     expect(panel(el, LINKED), 'the card the owner asked for is still shut').toBeTruthy();
     expect(
@@ -140,7 +180,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
   });
 
   it('opens ONLY that one: the gallery is a decision, not a comparison table', async () => {
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const el = await mount();
     expect(openPanels(el)).toBe(1);
   });
@@ -164,9 +204,13 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
    * would have got anyway — plus the line that names the app to install.
    */
   it('falls back to the plain gallery when the card is hidden on this hub', async () => {
-    landOn(`?template=${LINKED}`);
+    // A WRITTEN card on purpose, and it has to be one: a card the hub SERVES carries no witnesses
+    // (the hub applied every floor before answering), so it is never the one the module probe
+    // hides — pointed at it, this test would go green without hiding anything at all.
+    const HIDDEN = 'no-show-followup';
+    landOn(`?template=${HIDDEN}`);
     const el = await mount(hub((name) => (name.startsWith('appointments.') ? notFound() : { event_name: name, declared_by: ['x'], samples: 0, fields: [] })));
-    expect(card(el, LINKED), 'a card whose module is missing was put back on screen').toBeNull();
+    expect(card(el, HIDDEN), 'a card whose module is missing was put back on screen').toBeNull();
     expect(openPanels(el)).toBe(0);
     expect(cards(el), 'the gallery went blank instead of hiding one card').toBeGreaterThan(1);
     expect(el.renderRoot.querySelector('[data-missing-modules]')).toBeTruthy();
@@ -184,7 +228,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
     ) {
       scrolled.push(this.dataset?.template ?? '');
     };
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     await mount();
     expect(scrolled).toEqual([LINKED]);
   });
@@ -192,7 +236,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
   /** A shell without `scrollIntoView` is a gallery that scrolls badly, never one that fails to open. */
   it('still opens the card where nothing can be scrolled', async () => {
     delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const el = await mount();
     expect(panel(el, LINKED)).toBeTruthy();
   });
@@ -206,7 +250,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
   it('answers a shortcut that arrives while the gallery is already on screen', async () => {
     const el = await mount();
     expect(openPanels(el)).toBe(0);
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     window.dispatchEvent(new PopStateEvent('popstate'));
     await settle(el);
     expect(panel(el, LINKED)).toBeTruthy();
@@ -215,7 +259,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
   it('stops listening once it is off the screen', async () => {
     const el = await mount();
     el.remove();
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     window.dispatchEvent(new PopStateEvent('popstate'));
     await settle(el);
     expect(panel(el, LINKED), 'a detached gallery reacted to a navigation').toBeNull();
@@ -227,7 +271,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
    * impossible to close.
    */
   it('lets the owner close the card the shortcut opened', async () => {
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const el = await mount();
     card(el, LINKED)?.querySelector('button.pick')?.dispatchEvent(
       new MouseEvent('click', { bubbles: true, composed: true }),
@@ -253,7 +297,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
    * next one (the test above pins that a plain re-render never re-opens it).
    */
   it('opens the card again when the owner comes back through the same shortcut', async () => {
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const el = await mount();
     el.open(LINKED);
     await settle(el);
@@ -271,7 +315,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
     ) {
       scrolled.push(this.dataset?.template ?? '');
     };
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const el = await mount();
     el.open(LINKED);
     await settle(el);
@@ -293,7 +337,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
     ) {
       scrolled.push(this.dataset?.template ?? '');
     };
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const el = await mount();
     window.dispatchEvent(new PopStateEvent('popstate'));
     await settle(el);
@@ -310,7 +354,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
    * blames the wrong automation.
    */
   it('does not carry an old failure over to the card the next shortcut opens', async () => {
-    landOn(`?template=${LINKED}`);
+    landOn(`?template=${ASKED}`);
     const broken = hub();
     broken.flows.create = vi.fn(async () => {
       throw new Error('command no encontrado: appointments.appointments.create');
@@ -377,13 +421,28 @@ describe('the module that emits the shortcut and the gallery that reads it agree
     expect(emitter!.source).toContain('?template=');
   });
 
+  /**
+   * 🔴 Against the catalogue the gallery actually holds — written cards PLUS what the hub served
+   * (flows#101). Every id this emitter offers today is a retired one: the recipes it points at are
+   * the ones it serves itself now, and they are reachable only through the aliases the served rows
+   * create. Asked of the written cards alone this guard would report that `whatsapp_inbox` links
+   * to a card that does not exist, which is exactly backwards — the link works, and it works
+   * *because* the app serves the recipe.
+   */
   it.skipIf(!emitter)(`only offers cards this gallery has (${where})`, () => {
     const source = emitter!.source;
     const uses = source.slice(source.indexOf('WHATSAPP_USES'));
     const ids = [...uses.matchAll(/^\s{4}id: '([^']+)',$/gm)].map((m) => m[1]);
     expect(ids.length, 'the emitter offers no use at all — this guard is reading the wrong thing').toBeGreaterThan(0);
+    const catalogue = onScreen();
     for (const id of ids) {
-      expect(templateFromSearch(`?template=${id}`), `${id} is offered but this gallery has no such card`).toBe(id);
+      expect(templateFromSearch(`?template=${id}`, catalogue), `${id} is offered but this gallery has no such card`).toBe(id);
+      // …and it names a card that is really on the shelf, not merely an id the reader accepted.
+      const lands = catalogue.aliases[id] ?? id;
+      expect(
+        catalogue.cards.some((c) => c.id === lands),
+        `${id} is accepted but forwards to ${lands}, which is on no shelf`,
+      ).toBe(true);
     }
   });
 });

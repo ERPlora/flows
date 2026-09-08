@@ -7,6 +7,7 @@ import {
   templateCommands,
   templateGrants,
 } from './templates';
+import { moduleTemplates } from './module-templates';
 import { dailyCron } from './plain-language';
 import type { FlowDoc } from './flow-doc';
 import en from '../../locales/en.json';
@@ -21,6 +22,44 @@ const t = (key: string): string => {
 };
 
 const tpl = (id: string) => templateById(id)!;
+
+/**
+ * **A card as an installed app serves it** (flows#101).
+ *
+ * The two cases at the bottom of this file need a card that DOES several things and that asks for
+ * more than it does. That used to be the `whatsapp-appointment` hand copy; it is gone, and the
+ * recipe it copied is served by `whatsapp_inbox` itself. The grants below are the ones that
+ * module publishes in `flows/appointment-from-whatsapp.grants.json`, trimmed to the four KINDS
+ * that make the point — a card is identified by what it can DO, never by what it may read.
+ */
+const servedCard = () =>
+  moduleTemplates(
+    [
+      {
+        module: 'whatsapp_inbox',
+        family: 'appointment-from-whatsapp',
+        documents: {
+          en: {
+            schema_version: 1,
+            name: 'WhatsApp → appointment',
+            triggers: [{ kind: 'event', event: 'whatsapp_inbox.message.received' }],
+            steps: [
+              { id: 'find', kind: 'command', command: 'customers.create', params: {} },
+              { id: 'book', kind: 'command', command: 'appointments.appointments.create', params: {} },
+            ],
+          },
+        },
+        grants: [
+          { kind: 'notify', value: 'whatsapp' },
+          { kind: 'recipient_query', value: 'whatsapp_inbox.conversations.list#contact_phone' },
+          { kind: 'query', value: 'customers.list' },
+          { kind: 'command', value: 'customers.create' },
+          { kind: 'command', value: 'appointments.appointments.create' },
+        ],
+      },
+    ],
+    'en',
+  )[0];
 
 /**
  * A flow as the hub hands it back, built from a template's own document.
@@ -370,15 +409,16 @@ describe('a template this hub already runs', () => {
     }
     expect(templateCommands(tpl('no-show-followup'), t)).toEqual(['tasks.tasks.create']);
     // The two WhatsApp appointment families are the reason this is a SET and not one name: they
-    // ask for the same thirteen.
-    expect(templateCommands(tpl('whatsapp-appointment'), t).length).toBeGreaterThan(1);
+    // ask for the same thirteen. They are served by the app now (flows#101), and a SERVED card has
+    // to be readable by exactly the same door — it is the one this gallery mostly shows.
+    expect(templateCommands(servedCard(), t).length).toBeGreaterThan(1);
   });
 
   it('does not take what a card may READ for something it can DO', () => {
     // The WhatsApp cards ask for four kinds of grant — `notify`, `recipient_query`, `query` and
     // `command`. Only the last is what the automation DOES, and only the last identifies it: a hub
     // whose flow merely holds the appointment LOOKUP has not built this automation.
-    const template = tpl('whatsapp-appointment');
+    const template = servedCard();
     const grants = templateGrants(template, t);
     const reads = grants.filter((grant) => grant.kind !== 'command').map((grant) => grant.value);
     expect(reads.length, 'this card must carry non-command grants or the case proves nothing').toBeGreaterThan(0);
