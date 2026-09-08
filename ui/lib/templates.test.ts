@@ -18,6 +18,7 @@ import { conditionResult } from './simulate';
 import { QUERY_GRANT_PIN_CORE, schemaFacts } from './ai-draft';
 import type { SchemaFacts } from './ai-draft';
 import type { Condition, FlowDoc } from './flow-doc';
+import type { FlowTemplate } from './templates';
 import {
   MAX_ITERS_CAP,
   canPinPayload,
@@ -25,6 +26,7 @@ import {
   grantPin,
   isSpineKind,
   readDoc,
+  requiredGrants,
 } from './flow-doc';
 import en from '../../locales/en.json';
 import es from '../../locales/es.json';
@@ -147,8 +149,15 @@ describe('the template catalogue', () => {
       ).toBe(true);
       disjointPairs += 1;
     }
-    // …and the exception is reachable, so the rule above is not a rule about an empty set.
-    expect(disjointPairs).toBeGreaterThan(0);
+    // 🔴 …and the exception is no longer reachable FROM HERE, which is stated rather than left to
+    // be discovered (flows#101). The four cards that woke two ways were copies of recipes
+    // `whatsapp_inbox` publishes and they went with the copies; the pair itself is asserted where
+    // the document is authored — `whatsapp_inbox/tests/flow_templates.test.py` refuses an overlap
+    // that reads as disjoint. The rule above stays, because it is what the next card is measured
+    // against; this line is what turns «no disjoint pair» into a fact about today's catalogue
+    // instead of a branch nobody notices has stopped running. A card that grows a second way in
+    // turns it red on purpose: say so here, deliberately.
+    expect(disjointPairs, 'a card written here grew a second way in').toBe(0);
   });
 
   it('gives every step a distinct id, because one step reads another by id', () => {
@@ -292,10 +301,14 @@ describe('what a template needs from this hub', () => {
    * `parse_step` walks an allowlist per step kind, so a key it does not know is not ignored and
    * does not degrade: the hub answers `flow.invalid_definition` for the WHOLE document and the
    * recipe dies at save. {@link FlowTemplate.needs} is what keeps such a card from being offered
-   * where it cannot be parsed — and it is hand-written next to a document that is a MIRROR of what
-   * another module publishes, so it goes stale exactly when the mirror is re-synced and the source
-   * has grown a key. That is how three of these four cards ended up writing `interactive` and
-   * `output` while only one of them declared them (flows#100).
+   * where it cannot be parsed.
+   *
+   * 🔴 **The rule is checked over the SERVED cards as well as the written ones** (flows#101). It
+   * used to be hand-written beside a document that was a MIRROR of what another module publishes,
+   * which is how three of those four copies ended up writing `interactive` and `output` while only
+   * one declared them (flows#100). The copies are gone and the recipes now arrive from the module,
+   * so no card written here carries a floor at all — and a rule anchored on `TEMPLATES` alone
+   * would be an empty loop that goes green for ever, over the exact population it exists to watch.
    *
    * Derived from the document rather than listed here, and anchored BOTH ways: a card that writes
    * a gated key without declaring it is offered to a hub that refuses it whole, and a card that
@@ -306,8 +319,48 @@ describe('what a template needs from this hub', () => {
    */
   const GATED_STEP_KEYS = ['interactive', 'output'] as const;
 
+  /**
+   * Recipes as an app serves them, covering each floor and its absence.
+   *
+   * Written out as rows and put through {@link moduleTemplates}, so what is checked is the card the
+   * gallery really paints — deriving `needs` here as well would be the rule marking its own work.
+   */
+  const servedRow = (family: string, steps: unknown[], grants: unknown[]) => ({
+    module: 'whatsapp_inbox',
+    family,
+    documents: {
+      en: { schema_version: 1, name: family, triggers: [{ kind: 'event', event: 'e' }], steps },
+    },
+    grants,
+  });
+
+  const READ = 'appointments.appointments.list_for_customer';
+  const SERVED: readonly FlowTemplate[] = moduleTemplates(
+    [
+      servedRow('asks', [{ id: 's', kind: 'notify', channel: 'whatsapp', interactive: { rows: [] } }], []),
+      servedRow('reads-out', [{ id: 's', kind: 'ai', output: { slots: 'x' } }], []),
+      servedRow(
+        'both-and-pinned',
+        [
+          { id: 'a', kind: 'notify', channel: 'whatsapp', interactive: { rows: [] } },
+          { id: 'b', kind: 'ai', output: { slots: 'x' } },
+        ],
+        [{ kind: 'query', value: READ, payload: { customer_id: 'steps.resolve_customer.id' } }],
+      ),
+      servedRow(
+        'plain',
+        [{ id: 's', kind: 'command', command: 'customers.create', params: {} }],
+        [{ kind: 'query', value: READ }],
+      ),
+    ],
+    'en',
+  );
+
+  /** Every card this gallery can offer: the ones written here and the ones an app serves. */
+  const EVERY_CARD: readonly FlowTemplate[] = [...TEMPLATES, ...SERVED];
+
   it('declares every gated step key its document writes, and none that it does not', () => {
-    for (const template of TEMPLATES) {
+    for (const template of EVERY_CARD) {
       const doc = buildTemplate(template, t);
       const written = GATED_STEP_KEYS.filter((key) =>
         doc.steps.some((step) => Object.prototype.hasOwnProperty.call(step, key)),
@@ -335,8 +388,26 @@ describe('what a template needs from this hub', () => {
    * - A card that declares it without pinning anything is hidden from hubs that run it perfectly
    *   well, for a containment it does not actually carry.
    */
-  it('declares the read limit exactly when it carries one', () => {
+  /**
+   * 🔴 **A card written here asks for exactly what its document justifies** (flows#101).
+   *
+   * `templateGrants` used to lay a declared `grantPins` layer on top of the derived permissions,
+   * for the four WhatsApp hand copies: `FlowTemplateGrant` could not carry a payload, so the copy
+   * declared the limit its original fixes. hub#1654 carries it now and the copies are gone, so the
+   * layer went with them — and this is what says so, in both directions. A pin laid on here again
+   * turns it red, and so does a permission quietly dropped or invented on the way out.
+   */
+  it('installs a written card exactly as its document derives it, nothing pinned on the way out', () => {
+    expect(TEMPLATES.length, 'no card to measure: this test proves nothing').toBeGreaterThan(0);
     for (const template of TEMPLATES) {
+      expect(templateGrants(template, t), template.id).toEqual(
+        requiredGrants(buildTemplate(template, t)),
+      );
+    }
+  });
+
+  it('declares the read limit exactly when it carries one', () => {
+    for (const template of EVERY_CARD) {
       const pinsARead = templateGrants(template, t).some(
         (grant) => grant.kind === 'query' && Object.keys(grantPin(grant)).length > 0,
       );
@@ -345,26 +416,33 @@ describe('what a template needs from this hub', () => {
   });
 
   it('has a card that pins a read at all, so the rule above is not vacuous', () => {
-    const pinners = TEMPLATES.filter((tpl) =>
+    const pinners = EVERY_CARD.filter((tpl) =>
       templateGrants(tpl, t).some(
         (grant) => grant.kind === 'query' && Object.keys(grantPin(grant)).length > 0,
       ),
     );
     expect(pinners.map((tpl) => tpl.id)).toEqual([
-      'whatsapp-appointment',
-      'whatsapp-appointment-unattended',
+      'module:whatsapp_inbox/both-and-pinned',
     ]);
   });
 
-  // The control above only means something if a gated key is actually reachable from this
-  // catalogue: with none written anywhere it would be green on an empty set for ever.
+  // The control above only means something if a gated key is actually reachable: over an empty set
+  // both rules are green for ever, which is exactly what they looked like the moment the four
+  // copies that carried them were deleted.
   it('has cards that write a gated key at all, so the rule above is not vacuous', () => {
     for (const key of GATED_STEP_KEYS) {
-      const writers = TEMPLATES.filter((tpl) =>
+      const writers = EVERY_CARD.filter((tpl) =>
         buildTemplate(tpl, t).steps.some((step) => Object.prototype.hasOwnProperty.call(step, key)),
       );
       expect(writers.length, `no card writes \`${key}\``).toBeGreaterThan(0);
     }
+  });
+
+  // …and the negative of both, in the same population: a card that carries neither must come out
+  // asking for nothing, or «declares exactly what it writes» is satisfied by declaring everything.
+  it('leaves a card that carries neither asking for nothing', () => {
+    const plain = SERVED.find((tpl) => tpl.id === 'module:whatsapp_inbox/plain')!;
+    expect(plain.needs ?? []).toEqual([]);
   });
 
   it('reports the modules this hub is missing, by name', () => {
@@ -793,21 +871,28 @@ describe('the gallery can see that a card would double up on a trigger (whatsapp
 });
 
 /**
- * **A recipe an older core cannot even parse is not offered to it** (flows#92).
+ * **A recipe an older core cannot even parse is not offered to it** (flows#92, flows#101).
  *
- * The unattended card's document carries `interactive` (hub#1633) and `output` (hub#1639), and a
- * core below `v1.1.16` does not degrade on them: `parse_step` walks an allowlist per step kind and
- * answers `flow.invalid_definition` for the WHOLE document, so the recipe dies at save. The
- * gallery has to know that BEFORE it offers the card.
+ * The cards this floor protects are the ones an app SERVES: a WhatsApp document carries
+ * `interactive` (hub#1633) and `output` (hub#1639), and a core below `v1.1.16` does not degrade on
+ * them — `parse_step` walks an allowlist per step kind and answers `flow.invalid_definition` for
+ * the WHOLE document, so the recipe dies at save. The gallery has to know that BEFORE it offers
+ * the card. The floor for a pinned READ (`queryPin`, `v1.1.17`) is the same rule about a different
+ * refusal: the document parses and `check_grants` refuses the pin, and `PUT …/grants` being
+ * all-or-nothing the owner ends up with no permissions at all.
  *
- * 🔴 And the floor is the CARD's, never the module's. Raising `flows`' own
- * `min_erplora_version` would put this floor on the twenty other cards that do not need it, and
- * take the gallery away from hubs using it perfectly well today.
+ * 🔴 And the floor is the CARD's, never the module's. Raising `flows`' own `min_erplora_version`
+ * would put this floor on the twenty cards that do not need it, and take the gallery away from
+ * hubs using it perfectly well today.
+ *
+ * The door is {@link runnableHere} and not {@link availableTemplates}: a served card does not live
+ * in a sector, so the sector list never sees it. Same two checks either way, which is what stops a
+ * card from being judged by one rule under its app's heading and another in the sector list.
  *
  * The probe is the same one the editor uses for the control (flows#75) and it is **fail-closed**,
- * unlike the module probe two describes above: «not asked yet» there costs a card that flickers
- * in, and here it would cost an automation that installs broken. Measured on the real schemas:
- * `v1.1.15` declares neither key and `v1.1.16` declares both.
+ * unlike the module probe: «not asked yet» there costs a card that flickers in, and here it would
+ * cost an automation that installs broken. Measured on the real schemas: `v1.1.15` declares neither
+ * key and `v1.1.16` declares both.
  */
 describe('the floor of a card is the card’s, not the module’s (flows#92)', () => {
   const everything: Record<string, boolean> = Object.fromEntries(
@@ -825,28 +910,82 @@ describe('the floor of a card is the card’s, not the module’s (flows#92)', (
       coreVersion,
     );
 
-  /** Everything the two appointment cards need: both step keys AND a core that stores their pin. */
+  /** Everything a WhatsApp card needs: both step keys AND a core that stores its read's limit. */
   const currentHub = () => hubDeclaring(['interactive', 'output'], QUERY_GRANT_PIN_CORE);
 
-  const beautyOn = (facts?: SchemaFacts): string[] =>
-    availableTemplates('beauty', everything, facts).map((tpl) => tpl.id);
+  /** The recipe `whatsapp_inbox` serves, as `GET /api/hub/flows/templates` hands it over. */
+  const served = (): FlowTemplate =>
+    moduleTemplates(
+      [
+        {
+          module: 'whatsapp_inbox',
+          family: 'appointment-from-whatsapp',
+          documents: {
+            en: {
+              schema_version: 1,
+              name: 'WhatsApp → appointment',
+              triggers: [{ kind: 'event', event: 'whatsapp_inbox.message.received' }],
+              steps: [
+                { id: 'ask', kind: 'notify', channel: 'whatsapp', interactive: { rows: [] } },
+                { id: 'read', kind: 'ai', output: { slots: 'x' } },
+              ],
+            },
+          },
+          grants: [
+            {
+              kind: 'query',
+              value: 'appointments.appointments.list_for_customer',
+              payload: { customer_id: 'steps.resolve_customer.id' },
+            },
+          ],
+        },
+      ],
+      'en',
+    )[0]!;
+
+  /** A served recipe with no floor at all: plain steps, and every permission wide. */
+  const plainServed = (): FlowTemplate =>
+    moduleTemplates(
+      [
+        {
+          module: 'inventory',
+          family: 'restock-when-low',
+          documents: {
+            en: {
+              schema_version: 1,
+              name: 'Order more when stock runs low',
+              triggers: [{ kind: 'event', event: 'inventory.stock.low' }],
+              steps: [{ id: 'draft', kind: 'command', command: 'purchases.orders.draft', params: {} }],
+            },
+          },
+          grants: [{ kind: 'command', value: 'purchases.orders.draft' }],
+        },
+      ],
+      'en',
+    )[0]!;
+
+  const offered = (card: FlowTemplate, facts?: SchemaFacts): boolean =>
+    runnableHere(card, everything, facts);
+
+  // 🔴 THE control. Every «hidden» below is an absence, and an absence proves nothing about a card
+  // that asked for nothing: without this line the whole describe passes on a floor that vanished.
+  it('asks for all three floors in the first place', () => {
+    expect(served().needs).toEqual(['interactive', 'output', 'queryPin']);
+    expect(plainServed().needs ?? []).toEqual([]);
+  });
 
   it('offers it on a hub that declares both keys and can store its limits', () => {
-    expect(beautyOn(currentHub())).toContain('whatsapp-appointment-unattended');
+    expect(offered(served(), currentHub())).toBe(true);
   });
 
   it('hides it on a hub that declares neither, which is every hub on v1.1.15', () => {
-    expect(beautyOn(hubDeclaring([]))).not.toContain('whatsapp-appointment-unattended');
+    expect(offered(served(), hubDeclaring([]))).toBe(false);
   });
 
   it('hides it on a hub that declares only half of what the document carries', () => {
     // A build between the two kernel merges. Fail-closed means BOTH or nothing.
-    expect(beautyOn(hubDeclaring(['interactive'], QUERY_GRANT_PIN_CORE))).not.toContain(
-      'whatsapp-appointment-unattended',
-    );
-    expect(beautyOn(hubDeclaring(['output'], QUERY_GRANT_PIN_CORE))).not.toContain(
-      'whatsapp-appointment-unattended',
-    );
+    expect(offered(served(), hubDeclaring(['interactive'], QUERY_GRANT_PIN_CORE))).toBe(false);
+    expect(offered(served(), hubDeclaring(['output'], QUERY_GRANT_PIN_CORE))).toBe(false);
   });
 
   /**
@@ -858,44 +997,37 @@ describe('the floor of a card is the card’s, not the module’s (flows#92)', (
    * about: they would get NO permissions, and an automation that stops at its first step with the
    * card still saying it was installed.
    */
-  it('hides both appointment cards on a v1.1.16 hub, which parses them but cannot hold the limit', () => {
-    const shown = beautyOn(hubDeclaring(['interactive', 'output'], '1.1.16'));
-    expect(shown).not.toContain('whatsapp-appointment');
-    expect(shown).not.toContain('whatsapp-appointment-unattended');
+  it('hides it on a v1.1.16 hub, which parses it but cannot hold the limit', () => {
+    expect(offered(served(), hubDeclaring(['interactive', 'output'], '1.1.16'))).toBe(false);
   });
 
-  it('hides them while the hub has not said which release it is', () => {
+  it('hides it while the hub has not said which release it is', () => {
     // Same fail-closed rule as the step keys, and the reason the version is read from the same
     // response: «not answered yet» must not read as «current».
-    const shown = beautyOn(hubDeclaring(['interactive', 'output']));
-    expect(shown).not.toContain('whatsapp-appointment');
-    expect(shown).not.toContain('whatsapp-appointment-unattended');
-  });
-
-  it('offers them again on the release that can hold the limit', () => {
-    expect(beautyOn(currentHub())).toContain('whatsapp-appointment');
+    expect(offered(served(), hubDeclaring(['interactive', 'output']))).toBe(false);
   });
 
   it('hides it while the hub has not answered yet: this probe is fail-closed', () => {
     // The opposite of the module probe, and on purpose: an unanswered module probe costs a card
     // that appears a second late; an unanswered kernel probe would cost an automation that
     // installs and then refuses to parse.
-    expect(beautyOn()).not.toContain('whatsapp-appointment-unattended');
+    expect(offered(served())).toBe(false);
   });
 
-  // Derived from `needs` rather than from a list of ids: four cards carry the floor now, not one
-  // (flows#100), and an id list here would have gone on claiming the other three were offered on a
-  // `v1.1.15` hub — where they are refused whole at save.
-  it('keeps offering every OTHER card of the sector on that same old hub', () => {
-    const shown = beautyOn(hubDeclaring([]));
-    const gated = templatesOf('beauty').filter((tpl) => (tpl.needs ?? []).length > 0);
-    const others = templatesOf('beauty')
-      .filter((tpl) => (tpl.needs ?? []).length === 0)
-      .map((tpl) => tpl.id);
-    expect(gated.length, 'no beauty card carries a floor: this test proves nothing').toBeGreaterThan(
-      0,
-    );
-    expect(shown.sort()).toEqual(others.sort());
-    expect(shown.length).toBeGreaterThan(0);
+  // The other half, and the one that keeps «fail-closed» from turning into «show nothing»: a card
+  // that carries no floor is still offered on that same old hub, served or written.
+  it('keeps offering every card that carries no floor on that same old hub', () => {
+    const old = hubDeclaring([]);
+    expect(offered(plainServed(), old)).toBe(true);
+    const shown = availableTemplates('beauty', everything, old).map((tpl) => tpl.id);
+    expect(shown.sort()).toEqual(templatesOf('beauty').map((tpl) => tpl.id).sort());
+    expect(shown.length, 'the beauty sector is empty: this test proves nothing').toBeGreaterThan(0);
+  });
+
+  // …and no card written in this catalogue carries one, which is why the sector list above is
+  // whole on a `v1.1.15` hub. Stated rather than assumed: the day one does, that line starts
+  // lying and this is what says so.
+  it('has no written card carrying a floor of its own', () => {
+    expect(TEMPLATES.filter((tpl) => (tpl.needs ?? []).length).map((tpl) => tpl.id)).toEqual([]);
   });
 });

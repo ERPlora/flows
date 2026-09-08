@@ -28,7 +28,7 @@
  * honest place for them.
  */
 import type { FlowDoc, Grant, Step } from './flow-doc';
-import { canPinPayload, grantPin, requiredGrants, setGrantPin } from './flow-doc';
+import { grantPin, requiredGrants } from './flow-doc';
 import type { Translator } from './plain-language';
 import type { SchemaFacts } from './ai-draft';
 import { schemaFacts } from './ai-draft';
@@ -123,20 +123,6 @@ export interface FlowTemplate {
   witnesses: readonly TemplateWitness[];
   /** Why each command is needed, keyed by command name. Shown BEFORE the flow exists. */
   grantReasons: Readonly<Record<string, string>>;
-  /**
-   * The payload fields a command's permission FIXES, keyed by command name (hub#1623, flows#80).
-   *
-   * A card's permissions are *derived* from its document, and a limit does not live in the
-   * document — it lives in the permission. So without a place to say it here, a recipe written to
-   * act only within some boundary would install with the boundary missing: the gallery would
-   * promise the contained automation and hand over the wide one.
-   *
-   * `command` only, and only fields the command's own schema declares. Every key named here has to
-   * arrive with exactly this value or the hub refuses the call — **omitting it is refused just the
-   * same**, which is what makes a pin hold against a schema that defaults the field to the wide
-   * value.
-   */
-  grantPins?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   /**
    * **Step keys this card's document carries that an older core refuses OUTRIGHT** (flows#92).
    *
@@ -874,41 +860,20 @@ export function buildTemplate(template: FlowTemplate, t: Translator): FlowDoc {
  * where the typo lives, and a grant naming a command that does not exist reads as authorisation on
  * screen right up until the automation silently does nothing.
  */
-/**
- * The permission a declared limit lands on, found by the operation it names (flows#111).
- *
- * The kind is READ OUT of the permissions the card derived instead of assumed, because a limit is
- * not only a command's any more: `channel: "customer"` lands on a `command` and
- * `customer_id: "steps.…"` on a `query`, and both are values the hub is handed to judge
- * ({@link canPinPayload}). Assuming `command` does not fail loudly — {@link setGrantPin} matches on
- * `kind` AND `value`, so the pin lands on nothing at all and the read installs WIDE while the
- * source above still reads like a containment.
- *
- * The fallback keeps that old behaviour for an operation the card does not use — it lands on
- * nothing — because the catalogue guard already refuses that case at build time, and inventing a
- * row here would ask the hub for a permission the document never justified.
- */
-function pinTarget(grants: readonly Grant[], operation: string): Pick<Grant, 'kind' | 'value'> {
-  const found = grants.find((grant) => grant.value === operation && canPinPayload(grant.kind));
-  return found ? { kind: found.kind, value: found.value } : { kind: 'command', value: operation };
-}
-
 export function templateGrants(template: FlowTemplate, t: Translator): Grant[] {
   // flows#98 — a served card asks for what its module DECLARED in `<family>.grants.json`, which is
   // the list `erplora validate` checked against the recipe. Deriving them again here would be a
   // second opinion about somebody else's automation, and a narrower declared list — a module that
   // deliberately does not ask for something its document could reach — would be widened by us.
   if (template.grants) return template.grants.map((grant) => ({ ...grant }));
-  const derived = requiredGrants(buildTemplate(template, t));
-  // flows#80 — the limits the card declares, laid onto the permissions it derived. `setGrantPin`
-  // and not a hand-rolled merge on purpose: it is the same function the Permissions screen writes
-  // pins with, so a limit shown here and a limit typed there cannot drift into different shapes.
-  // A pin naming an operation this card does not use lands on nothing; the catalogue test above
-  // refuses that at build time rather than letting it read as a containment that fixes nothing.
-  return Object.entries(template.grantPins ?? {}).reduce(
-    (grants, [operation, pin]) => setGrantPin(grants, pinTarget(grants, operation), pin),
-    derived,
-  );
+  // 🔴 A card written HERE asks for exactly what its own document justifies, and nothing is laid
+  // on top (flows#101). There used to be a `grantPins` layer for the four WhatsApp hand copies:
+  // `FlowTemplateGrant` could not carry a payload, so a copy declared the limit its original fixes
+  // and the merge put it onto the served card. hub#1654 (`v1.1.17`) carries it, hub#1662 does the
+  // same for a read, and the copies are gone — so a written pin would today be a second opinion
+  // about somebody else's containment, and the only thing keeping it honest was a guard that has
+  // no card left to run over.
+  return requiredGrants(buildTemplate(template, t));
 }
 
 /**

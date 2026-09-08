@@ -79,12 +79,12 @@ function documentFor(documents: Record<string, unknown>, locale: string): unknow
  * **`payload` is read when the hub sends it** (hub#1623/#1654). A `<family>.grants.json` may FIX
  * payload fields on a `command` — `whatsapp_inbox` fixes `channel: "customer"` on
  * `appointments.appointments.cancel` so a recipe that books unattended cannot cancel a stranger's
- * hour on the salon's behalf. Today `FlowTemplateGrant` is `{kind, value}` and the limit never
- * leaves the hub, so this reads nothing and {@link mergeTemplates} carries the retired copy's pin
- * instead; reading it here is what makes the pin arrive on its own the day hub#1654 lands, with no
- * second release of this module. Since hub#1662 a `query` grant carries one too — «the diary of
- * THIS customer» — and it arrives by the same door. A pin on a kind the hub hands no values to
- * fixes nothing ({@link canPinPayload}) and is dropped rather than shown as a limit that holds.
+ * hour on the salon's behalf. `FlowTemplateGrant` carries it since hub#1654 (`v1.1.17`), and since
+ * hub#1662 a `query` grant carries one too — «the diary of THIS customer» — by the same door. This
+ * is now the ONLY way a limit reaches the gallery: until flows#101 the four WhatsApp hand copies
+ * declared their pins here and the merge laid them onto the served card, and those copies are gone.
+ * A pin on a kind the hub hands no values to fixes nothing ({@link canPinPayload}) and is dropped
+ * rather than shown as a limit that holds.
  */
 function declaredGrants(raw: unknown): Grant[] {
   if (!Array.isArray(raw)) return [];
@@ -114,6 +114,23 @@ function neededBy(doc: FlowDoc): TemplateNeed[] {
       (step) => !!step && typeof step === 'object' && (step as Step)[need as keyof Step] !== undefined,
     ),
   );
+}
+
+/**
+ * **The floor a PINNED READ puts on the hub, which no document can be read off** (flows#101).
+ *
+ * `neededBy` derives what the DOCUMENT carries, and a limit does not live in the document — it
+ * lives in the permission. A core below `v1.1.17` has no `GrantKind::can_pin(Query)`, so
+ * `check_grants` refuses the pin, and `PUT …/grants` is all-or-nothing: the owner ends up with NO
+ * permissions and an automation that stops at its first step while the card says it installed.
+ *
+ * It used to be declared by hand on the two `whatsapp-appointment*` copies of `templates.ts`
+ * (`needs: [… , 'queryPin']`). Those copies are gone, so the floor is derived here instead — from
+ * the grants as {@link declaredGrants} left them, which is after a pin on a kind the hub holds no
+ * values for has already been dropped.
+ */
+function pinsAQuery(grants: readonly Grant[]): boolean {
+  return grants.some((grant) => grant.kind === 'query' && Object.keys(grantPin(grant)).length > 0);
 }
 
 /** A document nothing can be built from is not a card: an automation with no steps does nothing. */
@@ -147,7 +164,11 @@ export function moduleTemplates(rows: unknown, locale: string | undefined): Flow
     const id = moduleTemplateId(module, family);
     if (seen.has(id)) continue;
     seen.add(id);
-    const needs = neededBy(doc);
+    const grants = declaredGrants(row.grants);
+    const needs: TemplateNeed[] = [
+      ...neededBy(doc),
+      ...(pinsAQuery(grants) ? (['queryPin'] as const) : []),
+    ];
     out.push({
       id,
       source: { module, family },
@@ -159,7 +180,7 @@ export function moduleTemplates(rows: unknown, locale: string | undefined): Flow
       // card the hub has just said this business can run.
       witnesses: [],
       grantReasons: {},
-      grants: declaredGrants(row.grants),
+      grants,
       ...(needs.length ? { needs } : {}),
       enabledOnCreate: false,
       build: () => readDoc(JSON.parse(JSON.stringify(doc)) as unknown),

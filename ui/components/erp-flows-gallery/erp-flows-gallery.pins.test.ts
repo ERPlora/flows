@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
 import { QUERY_GRANT_PIN_CORE, schemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery } from './erp-flows-gallery';
-import { carriedPins, templateById, templateGrants } from '../../lib/templates';
+import { templateById, templateGrants } from '../../lib/templates';
+import { moduleTemplateId, moduleTemplates } from '../../lib/module-templates';
 import { grantPin, type Grant } from '../../lib/flow-doc';
 import en from '../../../locales/en.json';
 import es from '../../../locales/es.json';
@@ -25,7 +26,6 @@ const CURRENT_CORE = schemaFacts(
   QUERY_GRANT_PIN_CORE,
 );
 
-
 const t = (key: string, params?: Record<string, unknown>): string => {
   let cur: unknown = en;
   for (const part of key.split('.')) {
@@ -37,8 +37,23 @@ const t = (key: string, params?: Record<string, unknown>): string => {
     : found;
 };
 
-/** The card flows#80 is about: it cancels appointments, and only ever as the customer. */
-const LIMITED = 'whatsapp-appointment-unattended';
+/**
+ * **The limited card is one the HUB SERVES, not one written here** (flows#101).
+ *
+ * It used to be `whatsapp-appointment-unattended`, a hand copy of a recipe `whatsapp_inbox`
+ * publishes itself, and that copy is gone: the hub serves the module's own `flows/` folder since
+ * `v1.1.17` and carries each permission's payload limit with it (hub#1654). So the limits this
+ * screen has to install now arrive over the wire, and a test anchored on a card written in this
+ * repository would be measuring a path production no longer takes.
+ *
+ * The row below is what `GET /api/hub/flows/templates` answers for the family, with the permissions
+ * copied from `whatsapp_inbox/flows/appointment-from-whatsapp-unattended.grants.json` as published
+ * on its `main`: three limited (the two writes say WHO, the read says WHOSE) among unlimited ones,
+ * which is what makes «only the limited ones are installed» a claim with a negative in it.
+ */
+const MODULE = 'whatsapp_inbox';
+const FAMILY = 'appointment-from-whatsapp-unattended';
+const LIMITED = moduleTemplateId(MODULE, FAMILY);
 /** A card that limits nothing, so «unchanged» has something to be measured against. */
 const PLAIN = 'no-show-followup';
 const CANCEL = 'appointments.appointments.cancel';
@@ -51,6 +66,33 @@ const PINS: Record<string, Record<string, unknown>> = {
   [RESCHEDULE]: { channel: 'customer' },
   [READ]: { customer_id: 'steps.resolve_customer.id' },
 };
+
+const servedDocument = () => ({
+  schema_version: 1,
+  name: 'Book an appointment from WhatsApp, unattended',
+  triggers: [{ kind: 'event', event: 'whatsapp_inbox.message.received' }],
+  steps: [
+    { id: 'resolve_customer', kind: 'command', command: 'customers.create', params: {} },
+    { id: 'book', kind: 'command', command: 'appointments.appointments.create', params: {} },
+  ],
+});
+
+/** One row of `GET /api/hub/flows/templates`, as the module publishes it. */
+const servedRow = () => ({
+  module: MODULE,
+  family: FAMILY,
+  documents: { en: servedDocument() },
+  grants: [
+    { kind: 'command', value: 'customers.create' },
+    { kind: 'command', value: 'appointments.appointments.create' },
+    { kind: 'query', value: READ, payload: { customer_id: 'steps.resolve_customer.id' } },
+    { kind: 'command', value: CANCEL, payload: { channel: 'customer' } },
+    { kind: 'command', value: RESCHEDULE, payload: { channel: 'customer' } },
+  ],
+});
+
+/** The same card the gallery paints, built the way the gallery builds it. */
+const servedCard = () => moduleTemplates([servedRow()], 'en')[0]!;
 
 /**
  * A hub whose `PUT …/grants` behaves like the kernel from hub#1623: a complete replace that keeps
@@ -70,6 +112,8 @@ function hub(over: { keepsPins?: boolean; noGrantsSurface?: boolean; failWrite?:
     client: {
       flows: {
         create: vi.fn(async (flow: unknown) => ({ id: 'created-1', ...(flow as object) })),
+        list: vi.fn(async () => []),
+        templates: vi.fn(async () => [servedRow()]),
         ...(noGrantsSurface ? {} : { replaceGrants }),
       },
       events: {
@@ -86,14 +130,22 @@ function hub(over: { keepsPins?: boolean; noGrantsSurface?: boolean; failWrite?:
   };
 }
 
-async function install(client: unknown, id: string): Promise<ErpFlowsGallery> {
+async function mount(client: unknown, translate = t): Promise<ErpFlowsGallery> {
   const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
   el.facts = CURRENT_CORE;
   el.client = client as never;
-  el.t = t;
+  el.t = translate;
   document.body.appendChild(el);
   await el.updateComplete;
-  for (let i = 0; i < 6; i += 1) await Promise.resolve();
+  // Twelve and not six: the served recipes are a round trip of their own, and a card that has not
+  // landed yet is a card `open()` cannot find — the test would pass on an empty panel.
+  for (let i = 0; i < 12; i += 1) await Promise.resolve();
+  await el.updateComplete;
+  return el;
+}
+
+async function install(client: unknown, id: string): Promise<ErpFlowsGallery> {
+  const el = await mount(client);
   el.open(id);
   await el.updateComplete;
   await el.use();
@@ -122,10 +174,13 @@ describe('a recipe with a limit installs LIMITED, or it does not install the per
     // Each one with the limit IT declares, not a shared one: asserting «they all fix `channel`»
     // would have gone green on a read pinned to the wrong field, or to nothing that names a person.
     for (const grant of sent) expect(grantPin(grant), grant.value).toEqual(PINS[grant.value]);
-    // Derived from the card rather than from this list, so a limit added to it is installed here
-    // too instead of being silently left behind.
+    // Derived from the card rather than from this list, so a limit the module adds to the family
+    // is installed here too instead of being silently left behind.
     expect(sent.map((g: Grant) => g.value).sort()).toEqual(
-      Object.keys(carriedPins(templateById(LIMITED)!)).sort(),
+      templateGrants(servedCard(), t)
+        .filter((g) => Object.keys(grantPin(g)).length > 0)
+        .map((g) => g.value)
+        .sort(),
     );
   });
 
@@ -146,13 +201,7 @@ describe('a recipe with a limit installs LIMITED, or it does not install the per
 
   it('does not move the owner along as though the recipe had installed as promised', async () => {
     const h = hub({ keepsPins: false });
-    const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
-  el.facts = CURRENT_CORE;
-    el.client = h.client as never;
-    el.t = t;
-    document.body.appendChild(el);
-    await el.updateComplete;
-    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    const el = await mount(h.client);
     const seen: CustomEvent[] = [];
     el.addEventListener('flows-template-used', (e) => seen.push(e as CustomEvent));
     el.open(LIMITED);
@@ -173,6 +222,9 @@ describe('a recipe with a limit installs LIMITED, or it does not install the per
     const h = hub();
     await install(h.client, PLAIN);
 
+    // The control: without it this test passes just as well on a card that never opened.
+    expect(h.client.flows.create, 'the plain card never installed — nothing was measured')
+      .toHaveBeenCalledTimes(1);
     expect(templateGrants(templateById(PLAIN)!, t).every((g) => !Object.keys(grantPin(g)).length))
       .toBe(true);
     expect(h.replaceGrants).not.toHaveBeenCalled();
@@ -180,13 +232,7 @@ describe('a recipe with a limit installs LIMITED, or it does not install the per
 
   it('says so on a core whose flows surface predates grants at all', async () => {
     const h = hub({ noGrantsSurface: true });
-    const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
-  el.facts = CURRENT_CORE;
-    el.client = h.client as never;
-    el.t = t;
-    document.body.appendChild(el);
-    await el.updateComplete;
-    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    const el = await mount(h.client);
     const seen: CustomEvent[] = [];
     el.addEventListener('flows-template-used', (e) => seen.push(e as CustomEvent));
     el.open(LIMITED);
@@ -234,13 +280,7 @@ describe('a recipe with a limit installs LIMITED, or it does not install the per
       ['es', es, /no (le )?conced|sin conced/i, /actualic|actualiz/i],
     ] as const) {
       const h = hub({ keepsPins: false });
-      const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
-  el.facts = CURRENT_CORE;
-      el.client = h.client as never;
-      el.t = localised(dict);
-      document.body.appendChild(el);
-      await el.updateComplete;
-      for (let i = 0; i < 6; i += 1) await Promise.resolve();
+      const el = await mount(h.client, localised(dict));
       el.open(LIMITED);
       await el.updateComplete;
       await el.use();
@@ -262,13 +302,7 @@ describe('the card SAYS the limit, in the panel the owner reads before installin
   beforeEach(() => document.body.replaceChildren());
 
   const panel = async (id: string, translate = t): Promise<ErpFlowsGallery> => {
-    const el = document.createElement('erp-flows-gallery') as ErpFlowsGallery;
-  el.facts = CURRENT_CORE;
-    el.client = hub().client as never;
-    el.t = translate;
-    document.body.appendChild(el);
-    await el.updateComplete;
-    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    const el = await mount(hub().client, translate);
     el.open(id);
     await el.updateComplete;
     return el;

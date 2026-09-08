@@ -40,8 +40,23 @@ const t = (key: string, params?: Record<string, unknown>): string => {
     : found;
 };
 
-/** The card in this catalogue that mirrors a family the module publishes. */
-const MIRROR = TEMPLATES.find((tpl) => tpl.mirrors)!;
+/**
+ * **The ids this gallery used to answer on, and the family that took each one over** (flows#101).
+ *
+ * They were hand copies of recipes `whatsapp_inbox` publishes itself, and they are gone: a hub on
+ * `v1.1.17` serves the module's own `flows/` folder. The ids are the part that could not go with
+ * them — `whatsapp_inbox` builds `?template=whatsapp-appointment` in its own settings screen, and
+ * the other three were live addresses of this gallery for weeks, so they can be sitting in a
+ * bookmark. Written out here rather than read from the catalogue on purpose: this is the contract
+ * with the outside, and a test that derived it from the same table production reads would go green
+ * on an id quietly dropped from both.
+ */
+const RETIRED = [
+  { id: 'whatsapp-appointment', family: 'appointment-from-whatsapp' },
+  { id: 'whatsapp-appointment-unattended', family: 'appointment-from-whatsapp-unattended' },
+  { id: 'whatsapp-reservation', family: 'reservation-from-whatsapp' },
+  { id: 'whatsapp-reservation-unattended', family: 'reservation-from-whatsapp-unattended' },
+] as const;
 
 /** A row exactly as `list_templates` serves it (`crates/server/src/flows_api.rs`). */
 const servedRow = (over: Record<string, unknown> = {}) => ({
@@ -154,21 +169,33 @@ describe('the gallery offers what the installed apps bring (flows#98)', () => {
     }
   });
 
-  it('drops the hand copy of the family the module now serves', async () => {
-    const el = await mount(hub({ rows: [servedRow({ ...MIRROR.mirrors })] }));
-    expect(card(el, MIRROR.id), 'two cards for one automation').toBeFalsy();
-    expect(card(el, moduleTemplateId(MIRROR.mirrors!.module, MIRROR.mirrors!.family))).toBeTruthy();
+  it('has no written copy left of a family the app serves itself', async () => {
+    const el = await mount(hub({ rows: RETIRED.map((r) => servedRow({ family: r.family })) }));
+    for (const r of RETIRED) {
+      expect(card(el, r.id), `${r.id} is still written here beside the recipe it copies`).toBeFalsy();
+      // The control in the same loop: without a card for the family, «no copy» is «no gallery».
+      expect(
+        card(el, moduleTemplateId('whatsapp_inbox', r.family)),
+        `${r.family} never reached the screen — the line above proved nothing`,
+      ).toBeTruthy();
+    }
   });
 
   /**
    * `?template=whatsapp-appointment` is an address `whatsapp_inbox` publishes from its own settings
    * screen. Retiring the card it names without forwarding turns that link into an empty gallery.
    */
-  it('sends the retired card’s shortcut to the recipe that replaced it', async () => {
-    window.history.replaceState({}, '', `/?template=${MIRROR.id}`);
-    const el = await mount(hub({ rows: [servedRow({ ...MIRROR.mirrors })] }));
-    const replacement = moduleTemplateId(MIRROR.mirrors!.module, MIRROR.mirrors!.family);
-    expect(el.renderRoot.querySelector(`[data-template="${replacement}"] .panel`)).toBeTruthy();
+  it('sends each retired card’s shortcut to the recipe that replaced it', async () => {
+    for (const r of RETIRED) {
+      document.body.replaceChildren();
+      window.history.replaceState({}, '', `/?template=${r.id}`);
+      const el = await mount(hub({ rows: [servedRow({ family: r.family })] }));
+      const replacement = moduleTemplateId('whatsapp_inbox', r.family);
+      expect(
+        el.renderRoot.querySelector(`[data-template="${replacement}"] .panel`),
+        `${r.id} lands on the whole gallery instead of on the recipe that replaced it`,
+      ).toBeTruthy();
+    }
   });
 
   it('creates the flow with the document the module published', async () => {
@@ -251,7 +278,9 @@ describe('a hub that cannot serve them still has a gallery (flows#98)', () => {
       }),
     );
     expect(text(el)).toContain(t('ui.tplModulesUnavailable'));
-    expect(card(el, MIRROR.id), 'the hand copy is the only way in on this hub').toBeTruthy();
+    // A hub that answered nothing is a hub with the written gallery it always had — the refusal
+    // costs the recipes the apps bring, and not one card of this module's own.
+    for (const tpl of TEMPLATES) expect(card(el, tpl.id), tpl.id).toBeTruthy();
   });
 
   it('says nothing at all when the hub simply brings no recipes', async () => {
@@ -347,12 +376,31 @@ describe('the recipes whatsapp_inbox really publishes reach the gallery (flows#9
     },
   );
 
-  it.skipIf(!PUBLISHED)('retires every hand copy the module now serves itself', async () => {
+  /**
+   * 🔴 **The forwarding addresses still point at a recipe the module really publishes** (flows#101).
+   *
+   * Two ways this breaks, and neither is visible from one repository alone: a copy written back
+   * into `templates.ts` (two cards for one automation again), or the module renaming the family
+   * underneath, which turns `?template=whatsapp-appointment` — a link `whatsapp_inbox` ships in a
+   * release of its own — into a gallery that opens on nothing. Read from the neighbour's
+   * `origin/main`, so it is the published families that answer, not a list kept here.
+   */
+  it.skipIf(!PUBLISHED)('forwards every retired id to a family the module still publishes', async () => {
+    const families = new Set(PUBLISHED!.map((r) => r.family as string));
     const el = await mount(hub({ rows: PUBLISHED! }));
-    const copies = TEMPLATES.filter((tpl) => tpl.mirrors);
-    expect(copies.length, 'no hand copies to retire — the premise of flows#98 is gone').toBeGreaterThan(0);
-    for (const copy of copies) {
-      expect(card(el, copy.id), `${copy.id} is still on screen beside the recipe it copies`).toBeFalsy();
+    for (const r of RETIRED) {
+      expect(
+        families.has(r.family),
+        `${r.id} forwards to ${r.family}, which the module no longer publishes`,
+      ).toBe(true);
+      expect(
+        card(el, r.id),
+        `${r.id} is written in this catalogue again, beside the recipe it copies`,
+      ).toBeFalsy();
+      expect(
+        card(el, moduleTemplateId(SOURCE_MODULE, r.family)),
+        `${r.family} never reached the screen — the line above proved nothing`,
+      ).toBeTruthy();
     }
   });
 
