@@ -1990,6 +1990,49 @@ describe('a card installs the permission it PROMISED, not the wide one next to i
     );
   });
 
+  /**
+   * **A pin that REFERENCES a step has to name a step the card runs** (flows#111).
+   *
+   * The sibling of the rule below, on the other half of the pin: that one checks what the limit
+   * lands ON, this one checks what it POINTS AT. Until flows#111 every pin in this catalogue was a
+   * literal (`channel: "customer"`) and there was nothing to point at; a reference is new, and it
+   * fails in a way a literal cannot.
+   *
+   * The hub resolves `steps.<id>.<field>` against the run and, finding no such step, refuses the
+   * call with `flow.grant_payload_denied` — fail-closed, so the automation is not dangerous. It is
+   * DEAD: it installs, it is switched on, and it refuses every single call from the first message
+   * onwards, with nothing on the card to say why. A rename of a step is all it takes, and
+   * `erplora validate` does not catch it either — the toolkit judges the pin's ROOT, not whether
+   * the step exists (module-toolkit#235).
+   */
+  it('never points a limit at a step its own document does not run', () => {
+    for (const template of TEMPLATES) {
+      if (template.grants) continue; // a SERVED card's document is the module's, not ours
+      const ids = new Set(buildTemplate(template, t).steps.map((step) => step.id));
+      for (const [operation, pin] of Object.entries(carriedPins(template))) {
+        for (const [field, value] of Object.entries(pin)) {
+          if (typeof value !== 'string' || !value.startsWith('steps.')) continue;
+          const step = value.split('.')[1];
+          expect(
+            ids,
+            `${template.id} pins ${operation}.${field} to \`${value}\`, and it runs no step \`${step}\``,
+          ).toContain(step);
+        }
+      }
+    }
+  });
+
+  // The control that stops the rule above from being green on an empty set: with no reference
+  // anywhere in the catalogue it would never look at anything, for ever.
+  it('has a card whose limit points at a step at all, so the rule above is not vacuous', () => {
+    const pointing = TEMPLATES.filter((tpl) =>
+      Object.values(carriedPins(tpl)).some((pin) =>
+        Object.values(pin).some((v) => typeof v === 'string' && v.startsWith('steps.')),
+      ),
+    ).map((tpl) => tpl.id);
+    expect(pointing).toEqual(['whatsapp-appointment', 'whatsapp-appointment-unattended']);
+  });
+
   // A universal rule for the catalogue, not a check on one card: a pin naming a command the card
   // never runs would sit in the source reading like a containment and fix NOTHING, because there
   // is no grant for it to land on.
