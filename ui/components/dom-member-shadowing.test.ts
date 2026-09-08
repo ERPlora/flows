@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readdirSync } from 'node:fs';
 
 import './erp-flows-app/erp-flows-app';
 import './erp-flows-approvals/erp-flows-approvals';
@@ -25,9 +26,10 @@ import './erp-flows-value/erp-flows-value';
  *   Every `matches()` returns a boolean and callers branch on it; an array is truthy always, so a
  *   delegated `if (el.matches('button'))` matched everything.
  *
- * This runs over the registered tag, not over a list written by hand, so a component added
- * tomorrow is covered without touching this file — and it names the member it found, because
- * «a class member clashes» is not something anybody can act on.
+ * `TAGS` is written by hand, so the last test anchors it to the directories on disk: a component
+ * added tomorrow makes that test fail until it is imported and listed here, and only then does
+ * the walk below cover it. And the walk names the member it found, because «a class member
+ * clashes» is not something anybody can act on.
  */
 const TAGS = [
   'erp-flows-app',
@@ -82,5 +84,16 @@ describe('a component never takes a name the DOM already uses (flows#107)', () =
     }
     const clashes = ownMemberNames(Shadowing).filter((n) => dom.has(n));
     expect(clashes).toContain('remove');
+  });
+
+  it('the list above is every component directory on disk', () => {
+    // A hand-written list only guards what it names. Each component lives in `ui/components/<tag>/`,
+    // so the directories ARE the list of tags: one that is on disk and not above is a component
+    // nobody walks — and this is the test that says so, with its name, instead of a silent green.
+    const onDisk = readdirSync(__dirname, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('erp-flows-'))
+      .map((entry) => entry.name)
+      .sort();
+    expect(onDisk).toEqual([...TAGS].sort());
   });
 });
