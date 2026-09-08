@@ -184,17 +184,34 @@ describe('the gallery offers what the installed apps bring (flows#98)', () => {
   /**
    * `?template=whatsapp-appointment` is an address `whatsapp_inbox` publishes from its own settings
    * screen. Retiring the card it names without forwarding turns that link into an empty gallery.
+   *
+   * 🔴 Every family the app ships is served **at the same time** here, because that is the only
+   * shape the salon ever sees: `whatsapp_inbox` ships four, and the hub answers with all of them
+   * at once. Forwarding each shortcut against a hub serving ONLY its own family would pass while
+   * the alias ignored the family entirely and sent all four addresses to whichever card was read
+   * last — «book by WhatsApp» opening the TABLE booking recipe.
    */
   it('sends each retired card’s shortcut to the recipe that replaced it', async () => {
+    const everyFamily = RETIRED.map((r) => servedRow({ family: r.family }));
     for (const r of RETIRED) {
       document.body.replaceChildren();
       window.history.replaceState({}, '', `/?template=${r.id}`);
-      const el = await mount(hub({ rows: [servedRow({ family: r.family })] }));
+      const el = await mount(hub({ rows: everyFamily }));
       const replacement = moduleTemplateId('whatsapp_inbox', r.family);
       expect(
         el.renderRoot.querySelector(`[data-template="${replacement}"] .panel`),
         `${r.id} lands on the whole gallery instead of on the recipe that replaced it`,
       ).toBeTruthy();
+      // The control: it opened THAT one and not simply every card of the app.
+      const others = RETIRED.filter((o) => o.family !== r.family).map((o) =>
+        moduleTemplateId('whatsapp_inbox', o.family),
+      );
+      for (const other of others) {
+        expect(
+          el.renderRoot.querySelector(`[data-template="${other}"] .panel`),
+          `${r.id} opened ${other} as well — the shortcut is not naming one recipe`,
+        ).toBeFalsy();
+      }
     }
   });
 
