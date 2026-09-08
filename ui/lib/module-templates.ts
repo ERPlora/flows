@@ -82,8 +82,9 @@ function documentFor(documents: Record<string, unknown>, locale: string): unknow
  * hour on the salon's behalf. Today `FlowTemplateGrant` is `{kind, value}` and the limit never
  * leaves the hub, so this reads nothing and {@link mergeTemplates} carries the retired copy's pin
  * instead; reading it here is what makes the pin arrive on its own the day hub#1654 lands, with no
- * second release of this module. A pin on a kind the hub never hands a payload to fixes nothing
- * ({@link canPinPayload}) and is dropped rather than shown as a limit that holds.
+ * second release of this module. Since hub#1662 a `query` grant carries one too — «the diary of
+ * THIS customer» — and it arrives by the same door. A pin on a kind the hub hands no values to
+ * fixes nothing ({@link canPinPayload}) and is dropped rather than shown as a limit that holds.
  */
 function declaredGrants(raw: unknown): Grant[] {
   if (!Array.isArray(raw)) return [];

@@ -598,18 +598,70 @@ export function mergeGrants(live: Grant[], add: Grant[], revoke: Grant[]): Grant
   return out;
 }
 
-// ── The values a `command` grant FIXES (hub#1623, flows#66) ───────────────────────────────────
+// ── The values a grant FIXES (hub#1623 for a write, hub#1662 for a read) ──────────────────────
 
 /**
- * Can a grant of this kind fix payload values?
+ * Can a grant of this kind fix values?
  *
- * `command` and nothing else, because `check_command_grant` is the only gate the hub ever hands a
- * payload to. A pin anywhere else is refused with `flow.invalid_grant_payload` — and `PUT …/grants`
- * is all-or-nothing, so one offered on the wrong row would not fail that row: it would lose the
- * whole screen's worth of permissions.
+ * Mirror of `GrantKind::can_pin()`: a `command`'s payload (`check_command_grant`, hub#1623) and a
+ * `query`'s parameters (`check_query_grant`, hub#1662). Those are the two gates the hub is ever
+ * handed values to judge; a pin anywhere else is refused with `flow.invalid_grant_payload` — and
+ * `PUT …/grants` is all-or-nothing, so one offered on the wrong row would not fail that row: it
+ * would lose the whole screen's worth of permissions.
+ *
+ * A read is on this list because a read is not harmless: `list_for_customer` without its
+ * `customer_id` fixed answers about EVERY customer, and the recipe's whole promise is that the
+ * automation only ever sees the one who is writing.
  */
 export function canPinPayload(kind: string): boolean {
-  return kind === 'command';
+  return kind === 'command' || kind === 'query';
+}
+
+/**
+ * The roots a pin may REFERENCE — mirror of `grants.rs::PIN_ROOTS`.
+ *
+ * A permission is stored once and the customer changes with every conversation, so «only this
+ * customer» can only be said by naming what the run resolved. The scope the executor builds is
+ * `{ input, steps }`, and those two are all of it.
+ */
+export const PIN_ROOTS = ['input', 'steps'] as const;
+
+/** Why the hub would refuse a pin value — `''` when it would take it. Codes, never prose. */
+export type PinProblem = '' | 'pin_template' | 'pin_root';
+
+/**
+ * Would `check_pin_value` take this? Mirror of `grants.rs`, so the screen can say WHICH row is
+ * wrong instead of letting the hub bounce the whole list with a message written for a kernel log.
+ *
+ * - A non-string is a literal, compared as it stands: a number, a bool, an object, an array.
+ * - `{{…}}` is refused because a pin is a VALUE, not a sentence: rendering it flattens a number to
+ *   a string and, worse, an unresolved template renders EMPTY — the limit would quietly stop
+ *   matching anything while still reading on screen as containment.
+ * - A path rooted anywhere but {@link PIN_ROOTS} is refused: `secret.…` would make the gate an
+ *   ORACLE (granted exactly when a value equals the secret, and a caller that can retry reads it
+ *   one guess at a time), and `event.…` names something the run scope does not carry, so it could
+ *   only ever deny — a permission that authorises nothing.
+ *
+ * Anything that is not a PATH is a literal, dots included: `customer.name@example.com` is an
+ * address, and every pin written before references existed keeps comparing byte for byte.
+ */
+export function pinValueProblem(value: unknown): PinProblem {
+  if (typeof value !== 'string') return '';
+  if (value.includes('{{')) return 'pin_template';
+  if (isPath(value) && !(PIN_ROOTS as readonly string[]).includes(value.split('.')[0])) {
+    return 'pin_root';
+  }
+  return '';
+}
+
+/** Every field of a pin the hub would refuse, in the order they were written. */
+export function pinProblems(pin: Record<string, unknown>): [string, PinProblem][] {
+  const out: [string, PinProblem][] = [];
+  for (const [field, value] of Object.entries(pin)) {
+    const problem = pinValueProblem(value);
+    if (problem) out.push([field, problem]);
+  }
+  return out;
 }
 
 /** The fields this grant fixes, as one shape for every reader: `{}` when it fixes none. */
@@ -634,8 +686,9 @@ export function grantPin(grant: Grant): Record<string, unknown> {
  *   `channel` to `"staff"` — so «leave it out» is precisely how a payload written by a model would
  *   land back on the wide behaviour. A pin that only checked the values it was SENT would read as
  *   containment on screen and hold nothing.
- * - **Only a `command` grant is ever handed a payload**, so a `payload` on any other kind fixes
- *   nothing in the hub ({@link canPinPayload}) and must not be read as a limit here either.
+ * - **Only a `command` and a `query` are ever handed values** (hub#1662), so a `payload` on any
+ *   other kind fixes nothing in the hub ({@link canPinPayload}) and must not be read as a limit
+ *   here either.
  */
 export function grantAllowsCall(grant: Grant, payload: Record<string, unknown>): boolean {
   return Object.entries(grantPin(grant)).every(
