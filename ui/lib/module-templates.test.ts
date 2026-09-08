@@ -373,6 +373,33 @@ describe('the gallery catalogue, once the hub brings the modules’ own recipes'
     }
   });
 
+  /**
+   * **The direction the tests above leave open** (flows#101, review of flows#113). Every entry the
+   * table in THIS file names is checked to be forwarded — but an entry the production table names
+   * and this file does not is never looked at. Measured: aliasing `whatsapp-answer`, a card still on
+   * screen, to the served appointment recipe left the whole suite green. In production that entry
+   * hijacks the live card: `landsOn` forwards its id, so tapping «Answer» opens the appointment
+   * recipe and «Use» installs it.
+   *
+   * An address is forwarded only once the card behind it is GONE. With every family the app
+   * publishes served at once, the aliases the merge writes are exactly the retired ids, and not one
+   * of them is a card this catalogue still paints.
+   */
+  it('never forwards the id of a card that is still on screen', () => {
+    const served = moduleTemplates(
+      Object.values(RETIRED).map((family) => row({ family })),
+      'en',
+    );
+    const merged = mergeTemplates(TEMPLATES, served);
+    for (const id of Object.keys(merged.aliases)) {
+      expect(
+        merged.cards.find((c) => c.id === id),
+        `${id} is forwarded away while its own card is still in the catalogue`,
+      ).toBeUndefined();
+    }
+    expect(Object.keys(merged.aliases).sort()).toEqual(Object.keys(RETIRED).sort());
+  });
+
   it('forwards nothing while the hub serves nothing: there is no card to land on', () => {
     expect(mergeTemplates(TEMPLATES, []).aliases).toEqual({});
   });
