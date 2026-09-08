@@ -350,6 +350,29 @@ describe('the gallery catalogue, once the hub brings the modules’ own recipes'
     }
   });
 
+  /**
+   * The other half of the match, and the half nothing was anchoring (flows#101).
+   *
+   * Every id in `RETIRED_IDS` names a module AND a family, and the test above only ever varies the
+   * family: every card it serves comes from `whatsapp_inbox`, which is also the module all four
+   * entries name. So the module half never decides anything, and dropping it left the whole suite
+   * green — a guard tested in one direction only.
+   *
+   * It decides in production. The family names are generic English — `reservation-from-whatsapp`,
+   * `appointment-from-whatsapp` — and nothing reserves them for `whatsapp_inbox`: any module may
+   * publish a family under that name. Matched on the family alone, that module's card would inherit
+   * the retired address, and the salon arriving from Settings → WhatsApp on a link built by
+   * `whatsapp_inbox` would land on a STRANGER's recipe and install it.
+   */
+  it('never forwards a retired id to another module that happens to reuse the family name', () => {
+    for (const [id, family] of Object.entries(RETIRED)) {
+      const served = moduleTemplates([row({ module: 'bookings', family })], 'en');
+      // The card is served and usable — it is only the retired address that is not its to take.
+      expect(served[0].source, id).toEqual({ module: 'bookings', family });
+      expect(mergeTemplates([], served).aliases[id], id).toBeUndefined();
+    }
+  });
+
   it('forwards nothing while the hub serves nothing: there is no card to land on', () => {
     expect(mergeTemplates(TEMPLATES, []).aliases).toEqual({});
   });
