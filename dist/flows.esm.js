@@ -8679,9 +8679,10 @@ function moduleTemplates(rows, locale) {
 }
 
 // ui/components/erp-flows-gallery/erp-flows-gallery.ts
-function templateFromSearch(search) {
+function templateFromSearch(search, catalogue = { cards: TEMPLATES, aliases: {} }) {
   const id = new URLSearchParams(search).get("template") ?? "";
-  return templateById(id) ? id : "";
+  if (!id) return "";
+  return catalogue.aliases[id] || templateById(id, catalogue.cards) ? id : "";
 }
 function namesTemplate(search) {
   return (new URLSearchParams(search).get("template") ?? "") !== "";
@@ -8934,14 +8935,22 @@ var ErpFlowsGallery = class extends i3 {
     this.followShortcut();
     this.load();
   }
-  /** Everything this screen asks the hub when it opens, asked once per client. */
+  /**
+   * Everything this screen asks the hub when it opens, asked once per client.
+   *
+   * The three go out together; only the last question waits, and on purpose (flows#101). «Which
+   * flows are worth asking about» is answered by the catalogue, and half the catalogue arrives in
+   * {@link loadModuleTemplates} — so asking before it lands is asking about the written cards
+   * alone, and every flow built from a recipe an app served comes back unasked, its card reading
+   * «absent» over an automation that is already running. Waiting costs nothing this screen was not
+   * already waiting for: the cards themselves cannot be painted until that same answer arrives.
+   */
   load() {
     const client = this.client;
     if (!client || client === this.asked) return;
     this.asked = client;
     void this.probe();
-    void this.loadExisting();
-    void this.loadModuleTemplates();
+    void this.loadExisting(this.loadModuleTemplates());
   }
   /**
    * Asks the hub what its installed modules bring (`GET /api/hub/flows/templates`, hub#1645).
@@ -8964,6 +8973,7 @@ var ErpFlowsGallery = class extends i3 {
       const rows = await ask.call(client.flows);
       this.served = moduleTemplates(rows, client.locale);
       this.modules = "ok";
+      if (!this.picked) this.followShortcut();
     } catch {
       this.served = [];
       this.modules = "unavailable";
@@ -9013,7 +9023,7 @@ var ErpFlowsGallery = class extends i3 {
   followShortcut() {
     let id = "";
     try {
-      id = templateFromSearch(window.location.search);
+      id = templateFromSearch(window.location.search, this.catalogue);
     } catch {
       return;
     }
@@ -9075,7 +9085,7 @@ var ErpFlowsGallery = class extends i3 {
    * warning into an error message, because that reads as «the gallery is broken» for a feature the
    * owner did not ask for.
    */
-  async loadExisting() {
+  async loadExisting(served) {
     const client = this.client;
     if (!client?.flows?.list) return;
     let flows;
@@ -9089,6 +9099,7 @@ var ErpFlowsGallery = class extends i3 {
       // Carried through on purpose: a paused flow does not fire, so it is not a collision.
       definition: flow.definition ?? {}
     }));
+    await served;
     await this.loadGrants(flows);
   }
   /**
@@ -9101,11 +9112,24 @@ var ErpFlowsGallery = class extends i3 {
    * card on every visit. Swallowed on failure, one flow at a time: an unanswered flow stays
    * `undefined` — «not asked» — and its card keeps the invitation it had before this existed,
    * which is the behaviour to fall back to and never an error on the catalogue.
+   *
+   * 🔴 **Asked of the catalogue ON SCREEN, not of the written one** (flows#101). A flow built from
+   * a card an app serves matches nothing in `TEMPLATES`, so it was never asked about, came back
+   * with no commands, and its card read «absent» — the gallery inviting the owner to build a
+   * SECOND copy of the automation it is looking at. It goes unnoticed today only because every
+   * served recipe the fleet has happens to have a hand copy here waiting on the same event; the
+   * day those copies go (flows#101) it is every WhatsApp card, and it is already true for any app
+   * that serves a recipe this file never copied.
+   *
+   * Asked ONCE per candidate, which is why {@link load} makes this wait for the served recipes
+   * instead of asking twice — before and after they land. The saving this whole function exists
+   * for is measured in round trips; paying for every answer twice on every visit would undo it,
+   * and the screen would look exactly the same either way.
    */
   async loadGrants(flows) {
     const read = this.client?.flows?.grants;
     if (typeof read !== "function") return;
-    const candidates = flowsWorthAsking(flows, this.t);
+    const candidates = flowsWorthAsking(flows, this.t, this.catalogue.cards);
     if (!candidates.length) return;
     const held = await Promise.all(
       candidates.map(async (flow) => {
