@@ -525,15 +525,22 @@ const SOURCES: readonly MirrorSource[] = [
     // did not touch the files hashes the same), and the pin would stop saying WHICH change it
     // mirrors, which is the one job it has. `git log -1 <file>` on the source's `main` is the
     // answer, and it is what the third test names in its own remedy.
-    commit: '6737f5a5e649ed6561e26a453f91858e5db0d93d',
+    //
+    // And moved twice more, which is this re-sync (flows#100). whatsapp_inbox#111 (`7f75b9a`) gave
+    // the family the TAP: a second trigger for the row a customer touches, `reply_to_customer`
+    // grew the two availability reads and an `output.slots`, and a guarded `notify` sends the
+    // hours as a list instead of a paragraph she has to retype. Then whatsapp_inbox#118
+    // (`d736923`) pinned `channel: "customer"` on the move in the module's own `grants.json` —
+    // the permissions did not change, the prompt did.
+    commit: 'd73692362c0e8ebc708189ac4789630fbaa8ecc4',
     files: {
       en: 'flows/appointment-from-whatsapp.en.flow.json',
       es: 'flows/appointment-from-whatsapp.es.flow.json',
       grants: 'flows/appointment-from-whatsapp.grants.json',
     },
     digest: {
-      en: '4f2407b2267d31ea1d0c791a571769d6181f560c88d9e4c50d32644d02f0c369',
-      es: '6314b92900d7d37781e7fd20e6f2bcda53881796d7e537a7db6fbc9d00c7e319',
+      en: '65bee040625b030e1f6c206c34d065124362d0cfe88e8356bc3ef4fb8f480e6f',
+      es: '83148f8b20d8e322e52e6e7f5ee0b8e95529bbef90832c8525dda29107daee5b',
     },
   },
   {
@@ -577,15 +584,24 @@ const SOURCES: readonly MirrorSource[] = [
     // 🔴 This is the pin whose drift the gallery was living with for a day: the source landed and
     // the card kept handing out «reply with the service, the day and the hour». The guard below
     // named it, in red, with this very sha — which is the one job it has.
-    commit: '8460f33a3db9196ff8e2138c3d51df7dcc190111',
+    //
+    // 🔴 And moved by whatsapp_inbox#118 (`d736923`) — flows#100 — which REVERSES the paragraph
+    // above: this family MOVES an appointment now, and its grants go 13 → 14. What made it
+    // shippable is not a change of mind but appointments#142, which gave
+    // `appointments.appointments.reschedule` the `channel` and the `customer_id` it had no way to
+    // be bound by; pinned to `customer`, the handler compares the appointment's own `customer_id`
+    // with the one the flow resolved from the phone the message came from. The `grants.json`
+    // pins the move there too, and this file's copy pins it here, for the hubs hub#1654 has not
+    // reached yet.
+    commit: 'd73692362c0e8ebc708189ac4789630fbaa8ecc4',
     files: {
       en: 'flows/appointment-from-whatsapp-unattended.en.flow.json',
       es: 'flows/appointment-from-whatsapp-unattended.es.flow.json',
       grants: 'flows/appointment-from-whatsapp-unattended.grants.json',
     },
     digest: {
-      en: '25f539ad1d30a480112a0bba0e867a0794fafcae178f962f3a91796a60ba87d3',
-      es: 'd7a9aed8d4e51f22f7dc96c10981dbc59eb3c31c233a1de5b3dfd8ec4da28c3f',
+      en: '7abf72abd9b13cbc4e74ed17167f6cacd3d70055d0302732a256d60afd8ca5f1',
+      es: 'ce46c35ce497552bd076e58a925090e411e1efe5d6806576301511c01b794a70',
     },
   },
   {
@@ -613,15 +629,24 @@ const SOURCES: readonly MirrorSource[] = [
     // answer «somebody from the restaurant will take care of it» instead, and the module's battery
     // pins that with `unowned_table_problems`. It reopens with ERPlora/reservations#50 — the twin
     // of appointments#140, and the same shape as appointments#142 for `reschedule`.
-    commit: '6737f5a5e649ed6561e26a453f91858e5db0d93d',
+    //
+    // Moved by whatsapp_inbox#113 (squashed as `74e87af`) — flows#100 — which brings the TAP to
+    // the table families: a second trigger for the row the guest touches, `reply_to_customer` with
+    // the two reads it needs to know what is really free and an `output.slots`, and a guarded
+    // `notify` that sends the windows as a list. 🔴 A row here carries the party size as well as
+    // the time (`2026-09-08T21:00|party:4`): what is free at nine for two is not what is free at
+    // nine for eight, so the number of people is part of the question and never part of the list.
+    // The permissions did not move — `grants.json` is still on `6a8e1d7`, which is the shape of
+    // this change: a different way of asking, not a wider one.
+    commit: '74e87afb1c713e1f1976591a72e29b156d05fe97',
     files: {
       en: 'flows/reservation-from-whatsapp.en.flow.json',
       es: 'flows/reservation-from-whatsapp.es.flow.json',
       grants: 'flows/reservation-from-whatsapp.grants.json',
     },
     digest: {
-      en: '607670f78eda3396b25b28b72702916bf732fa026454502957b5fe50144a1a46',
-      es: 'ceb3f5ab6669efa2b6de866e0e76467da6ce374b5a93a460699094f906e9c5df',
+      en: '02b060dfe1cf9c4fe7522c41b507f72c2216d5a39db04f103f6fba0bba991836',
+      es: '7053eb16b00a0f63e7df5f9e8bfa1e838c0506cfce6086432addc4ba664809c6',
     },
   },
   {
@@ -636,15 +661,21 @@ const SOURCES: readonly MirrorSource[] = [
     // sentence, not the salon's — «You never choose the hour or how many people are coming. They
     // do.» — because the harm has one more field here: an hour nobody asked for seats people while
     // the kitchen is shut, and a party size nobody said seats four at a table for two.
-    commit: '6737f5a5e649ed6561e26a453f91858e5db0d93d',
+    //
+    // Moved by the same whatsapp_inbox#113 (`74e87af`) as its twin — flows#100. Here the slots
+    // hang off the BOOKING step, because there is no `reply_to_customer` to hang them off: the
+    // step that books is also the one that writes, so it is the one that declares what it is
+    // offering. Same rule as the twin, and it matters more with nobody watching — the row carries
+    // the party size, so a tap can never seat four at a table for two.
+    commit: '74e87afb1c713e1f1976591a72e29b156d05fe97',
     files: {
       en: 'flows/reservation-from-whatsapp-unattended.en.flow.json',
       es: 'flows/reservation-from-whatsapp-unattended.es.flow.json',
       grants: 'flows/reservation-from-whatsapp-unattended.grants.json',
     },
     digest: {
-      en: '9b69f8cfc1346522bccca9a3e1981b2055378963cf5973825acba0a8730c7907',
-      es: '2060f14bdd40ac51db49ecc97b9fee5002e3d14a883190e04d26f2ab3ea0e19c',
+      en: '3b50e111443c0939d1d5cd056d3e4121ec30c1c34d4d9fa2523e9a1b2acdf92b',
+      es: '03ccdf40e78ebde334beb1007cd8fc218a6e0cb173a03e2e97ac19729f785ab4',
     },
   },
 ] as const;
