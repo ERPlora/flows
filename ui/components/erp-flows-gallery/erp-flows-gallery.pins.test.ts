@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-gallery';
 import { schemaFacts } from '../../lib/ai-draft';
 import { ErpFlowsGallery } from './erp-flows-gallery';
-import { templateById, templateGrants } from '../../lib/templates';
+import { carriedPins, templateById, templateGrants } from '../../lib/templates';
 import { grantPin, type Grant } from '../../lib/flow-doc';
 import en from '../../../locales/en.json';
 import es from '../../../locales/es.json';
