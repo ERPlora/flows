@@ -780,7 +780,12 @@ export class ErpFlowsApp extends LitElement {
     }
   }
 
-  private async remove(flow: Flow): Promise<void> {
+  /**
+   * Deletes ONE automation. Named `removeFlow` and not `remove` on purpose: `remove` is
+   * `ChildNode.remove()`, which the DOM calls to detach this element — taking that name made
+   * every ordinary detach run the deletion with no flow (flows#107).
+   */
+  private async removeFlow(flow: Flow): Promise<void> {
     if (!this.client) return;
     this.confirmDelete = '';
     try {
@@ -998,7 +1003,7 @@ export class ErpFlowsApp extends LitElement {
                  destructive action as pale text next to an outlined «leave it» — the button you
                  must read before pressing, looking like the disabled one. These carry their own
                  colour out of the OutfitKit tokens and look the same in both modes. -->
-            <button type="button" class="danger" data-act="delete-yes" @click=${() => void this.remove(flow)}>
+            <button type="button" class="danger" data-act="delete-yes" @click=${() => void this.removeFlow(flow)}>
               ${this.t('ui.deleteYes')}
             </button>
             <button

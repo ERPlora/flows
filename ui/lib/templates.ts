@@ -173,6 +173,17 @@ export interface FlowTemplate {
   /** Always `false`, and typed as `false` so a template cannot be born running. */
   enabledOnCreate?: false;
   /** The document, in the owner's language. */
+  /**
+   * The document this card installs.
+   *
+   * 🔴 Every implementation writes `build: (t): FlowDoc => ({…})` with the return type SPELLED OUT,
+   * and that is not decoration (flows#107). Through the nested arrow the contextual type is lost,
+   * so TypeScript infers the `triggers` array by unifying its elements instead of checking each one
+   * against `Trigger` — and a card woken two ways (words AND a tap, which is every WhatsApp card)
+   * gains a normalised `'event.reply_id'?: undefined` that no `Condition` can hold. The four cards
+   * that had a trigger pair were the four that did not compile. Drop the annotation and they break
+   * again, silently, on the next card that grows a second trigger.
+   */
   build(t: Translator): FlowDoc;
 }
 
@@ -198,7 +209,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       { event: 'tasks.task.created', module: 'tasks' },
     ],
     grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       triggers: [{ kind: 'event', event: 'customer.created' }],
       steps: [
@@ -227,7 +238,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       { event: 'customer.created', module: 'customers' },
     ],
     grantReasons: { 'customers.notes.add': 'tpl.grant.customersNote' },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       triggers: [{ kind: 'event', event: 'sale.completed' }],
       steps: [
@@ -272,7 +283,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       { event: 'tasks.task.created', module: 'tasks' },
     ],
     grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       triggers: [{ kind: 'event', event: 'staff.member.created' }],
       steps: [
@@ -306,7 +317,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       { event: 'tasks.task.created', module: 'tasks' },
     ],
     grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       triggers: [
         {
@@ -370,7 +381,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       { event: 'tasks.task.created', module: 'tasks' },
     ],
     grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       triggers: [{ kind: 'event', event: 'cash_register.session_closed' }],
       steps: [
@@ -418,7 +429,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       { event: 'tasks.task.created', module: 'tasks' },
     ],
     grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       triggers: [{ kind: 'event', event: 'verifactu.record.rejected' }],
       steps: [
@@ -452,7 +463,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     blanks: [{ labelKey: 'tpl.weekReview.blankWhen', hintKey: 'tpl.weekReview.blankWhenHint' }],
     witnesses: [{ event: 'tasks.task.created', module: 'tasks' }],
     grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       // 18:00 on day 5 — Friday. Five-field cron, drawn as a clock by the editor: nobody types it.
       triggers: [{ kind: 'cron', cron: '0 18 * * 5' }],
@@ -477,7 +488,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
     blanks: [{ labelKey: 'tpl.morning.blankTime', hintKey: 'tpl.morning.blankTimeHint' }],
     witnesses: [{ event: 'tasks.task.created', module: 'tasks' }],
     grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       // 09:00 every day. The kernel reads five-field cron; the editor shows it as a clock.
       triggers: [{ kind: 'cron', cron: '0 9 * * *' }],
@@ -497,7 +508,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       { event: 'tasks.task.created', module: 'tasks' },
     ],
     grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       triggers: [{ kind: 'event', event: 'appointments.appointment.no_show' }],
       steps: [
@@ -605,7 +616,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       // hub#1654 is open, because `FlowTemplateGrant` is `{kind, value}` and serde drops the rest.
       'appointments.appointments.reschedule': { channel: 'customer' },
     },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       triggers: [
         {
@@ -969,7 +980,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       'appointments.appointments.cancel': { channel: 'customer' },
       'appointments.appointments.reschedule': { channel: 'customer' },
     },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       triggers: [
         {
@@ -1235,7 +1246,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       'reservations.reservations.create': 'tpl.grant.reservationsCreate',
       'reservations.waitlist.create': 'tpl.grant.reservationsWaitlistCreate',
     },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       triggers: [
         {
@@ -1482,7 +1493,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       'reservations.reservations.create': 'tpl.grant.reservationsCreate',
       'reservations.waitlist.create': 'tpl.grant.reservationsWaitlistCreate',
     },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       triggers: [
         {
@@ -1656,7 +1667,7 @@ export const TEMPLATES: readonly FlowTemplate[] = [
       { event: 'tasks.task.created', module: 'tasks' },
     ],
     grantReasons: { 'tasks.tasks.create': 'tpl.grant.tasksCreate' },
-    build: (t) => ({
+    build: (t): FlowDoc => ({
       schema_version: SCHEMA_VERSION,
       triggers: [{ kind: 'event', event: 'reservations.reservation.created' }],
       steps: [

@@ -1750,16 +1750,34 @@ export class ErpFlowsEditor extends LitElement {
    * `template` forces `{{…}}` even for a lone field: `url` is a string in the schema, so the
    * type-preserving rule that is right everywhere else is wrong there.
    */
-  private renderValue(opts: {
-    field: string;
-    label: string;
-    value: unknown;
-    template?: boolean;
-    secrets?: boolean;
-    onChange: (value: unknown) => void;
-  }) {
-    const write = (parts: ValuePart[]): void =>
-      opts.onChange(opts.template ? partsToTemplate(parts) : partsToValue(parts));
+  private renderValue(
+    opts:
+      | {
+          field: string;
+          label: string;
+          value: unknown;
+          // `template: true` is what makes the written value a STRING, so the callback is handed
+          // one — the schema field behind these boxes (`url`, `prompt`) is `string`, and typing
+          // the callback `unknown` was how `{ url }` stopped fitting `Partial<Step>` (flows#107).
+          template: true;
+          secrets?: boolean;
+          onChange: (value: string) => void;
+        }
+      | {
+          field: string;
+          label: string;
+          value: unknown;
+          // Without it the value keeps its own type — a number stays a number — so the callback
+          // gets `unknown` and the caller has to say what it accepts.
+          template?: false;
+          secrets?: boolean;
+          onChange: (value: unknown) => void;
+        },
+  ) {
+    const write = (parts: ValuePart[]): void => {
+      if (opts.template) opts.onChange(partsToTemplate(parts));
+      else opts.onChange(partsToValue(parts));
+    };
     return html`<div class="value-row">
       <erp-flows-value
         data-field=${opts.field}
@@ -2853,7 +2871,7 @@ export class ErpFlowsEditor extends LitElement {
       <div class="grant">
         <ok-status-pill tone="success" label=${this.t('ui.grantsGranted')}></ok-status-pill>
         <span class="grow"
-          >${g.kind === 'command' ? g.value : this.t('ui.grantOther', g)}${limits
+          >${g.kind === 'command' ? g.value : this.t('ui.grantOther', { kind: g.kind, value: g.value })}${limits
             ? html` <em class="pinned">${this.t('ui.grantPinned', { limits })}</em>`
             : nothing}</span
         >

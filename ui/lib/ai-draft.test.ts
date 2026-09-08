@@ -6,7 +6,7 @@ import {
   schemaFacts,
   DRAFT_STEP_KINDS,
 } from './ai-draft';
-import type { FlowDoc } from './flow-doc';
+import type { AiTools, FlowDoc } from './flow-doc';
 import en from '../../locales/en.json';
 import es from '../../locales/es.json';
 
@@ -201,7 +201,14 @@ describe('a proposal that does not meet the contract is refused, not half-saved'
 
   it('refuses `tools` written as an ARRAY — the shape hub#786 lost a day to', () => {
     const doc = goodDoc();
-    doc.steps.push({ id: 's3', kind: 'ai', prompt: 'summarise', tools: ['sales.list'] });
+    // Wrong shape ON PURPOSE — an array where the kernel parses an object. The cast is the only
+    // way to hand it to `contractProblems`, which is exactly what this test checks it rejects.
+    doc.steps.push({
+      id: 's3',
+      kind: 'ai',
+      prompt: 'summarise',
+      tools: ['sales.list'] as unknown as AiTools,
+    });
     const problems = contractProblems(doc, schemaFacts(liveSchema));
     expect(problems.map((p) => p.key)).toContain('draft.errToolsShape');
   });
@@ -232,7 +239,7 @@ describe('a proposal that does not meet the contract is refused, not half-saved'
       steps: [
         { id: 'a', kind: 'nope' as never },
         { id: 'a', kind: 'condition', when: { 'input.x': { between: 1 } as never } },
-        { id: 'b', kind: 'ai', prompt: 'x', tools: [] },
+        { id: 'b', kind: 'ai', prompt: 'x', tools: [] as unknown as AiTools }, // wrong shape on purpose
       ],
     };
     const problems = contractProblems(broken, schemaFacts(liveSchema));

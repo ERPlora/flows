@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-editor';
 import type { ErpFlowsEditor } from './erp-flows-editor';
+import type { Grant } from '../../lib/flow-doc';
 
 const SHAPE = {
   event_name: 'sale.completed',
@@ -882,7 +883,9 @@ describe('a new automation is born OFF, exactly as the gallery promises (flows#3
       client,
     );
     // Everything granted…
-    el.grants = [{ kind: 'command', value: 'one' }] as never;
+    // `grants` is @state private: the loader fills it. Reaching it ON PURPOSE is what lets this
+    // test start from «everything granted» without a second round trip.
+    (el as unknown as { grants: Grant[] }).grants = [{ kind: 'command', value: 'one' }];
     // …and the owner has looked at what it would do (the Probar tab).
     el.tab = 'test';
     await el.updateComplete;

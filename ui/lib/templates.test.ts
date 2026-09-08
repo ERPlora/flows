@@ -20,7 +20,7 @@ import {
 import { conditionResult } from './simulate';
 import { schemaFacts } from './ai-draft';
 import type { SchemaFacts } from './ai-draft';
-import type { FlowDoc } from './flow-doc';
+import type { Condition, FlowDoc } from './flow-doc';
 import { MAX_ITERS_CAP, grantAllowsCall, grantPin, isSpineKind, readDoc } from './flow-doc';
 import en from '../../locales/en.json';
 import es from '../../locales/es.json';
@@ -402,7 +402,10 @@ describe('the everyday automations of flows#18', () => {
   // comparison below stays a whole-object `toEqual`, so a clause that appears on any of these
   // cards without being written here is still a failure. `undefined` means «this card filters
   // nothing», which is an assertion too — three of the four run on every event of their kind.
-  it.each([
+  // Named tuple, so the table is ONE type: left to inference the rows collapse into a union of two
+  // tuple shapes (one with a filter, one with `undefined`) and the three-argument callback below
+  // stops being assignable to it.
+  const startsOn: [id: string, event: string, filter: Condition | undefined, why: string][] = [
     ['new-staff-checklist', 'staff.member.created', undefined, 'R0 #7 — somebody joins → the checklist'],
     [
       'whatsapp-answer',
@@ -419,7 +422,8 @@ describe('the everyday automations of flows#18', () => {
       undefined,
       'R0 #6 — the AEAT said no → somebody finds out without opening a screen',
     ],
-  ])('%s starts on %s', (id, event, filter) => {
+  ];
+  it.each(startsOn)('%s starts on %s', (id, event, filter) => {
     const template = byId(id);
     expect(template, id).toBeTruthy();
     const doc = buildTemplate(template!, t);

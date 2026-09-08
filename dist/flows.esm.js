@@ -2422,7 +2422,12 @@ var ErpFlowsFieldPicker = class extends i3 {
     if (field.type === "object") return this.t("ui.pickFieldSkipObject");
     return "";
   }
-  get matches() {
+  /**
+   * The fields the search box currently keeps. Named `matchingFields` and not `matches`: the DOM's
+   * `Element.matches(selectors)` answers a BOOLEAN and callers branch on it, so a getter returning
+   * an array under that name made every delegated `matches()` test true (flows#107).
+   */
+  get matchingFields() {
     const fields = this.shape?.fields ?? [];
     const q = this.query.trim().toLowerCase();
     if (!q) return fields;
@@ -2464,7 +2469,7 @@ var ErpFlowsFieldPicker = class extends i3 {
   }
   render() {
     if (!this.open) return A;
-    const fields = this.matches;
+    const fields = this.matchingFields;
     return b2`<div
       class="scrim"
       @click=${(e4) => {
@@ -5146,7 +5151,10 @@ var ErpFlowsEditor = class extends i3 {
    * type-preserving rule that is right everywhere else is wrong there.
    */
   renderValue(opts) {
-    const write = (parts) => opts.onChange(opts.template ? partsToTemplate(parts) : partsToValue(parts));
+    const write = (parts) => {
+      if (opts.template) opts.onChange(partsToTemplate(parts));
+      else opts.onChange(partsToValue(parts));
+    };
     return b2`<div class="value-row">
       <erp-flows-value
         data-field=${opts.field}
@@ -6145,7 +6153,7 @@ var ErpFlowsEditor = class extends i3 {
       <div class="grant">
         <ok-status-pill tone="success" label=${this.t("ui.grantsGranted")}></ok-status-pill>
         <span class="grow"
-          >${g3.kind === "command" ? g3.value : this.t("ui.grantOther", g3)}${limits ? b2` <em class="pinned">${this.t("ui.grantPinned", { limits })}</em>` : A}</span
+          >${g3.kind === "command" ? g3.value : this.t("ui.grantOther", { kind: g3.kind, value: g3.value })}${limits ? b2` <em class="pinned">${this.t("ui.grantPinned", { limits })}</em>` : A}</span
         >
         <!-- A command's payload and a query's parameters, and nothing else (hub#1623, hub#1662).
              Offered on any other kind the hub answers flow.invalid_grant_payload — and this
@@ -13081,7 +13089,12 @@ var ErpFlowsApp = class extends i3 {
       this.repairing = "";
     }
   }
-  async remove(flow) {
+  /**
+   * Deletes ONE automation. Named `removeFlow` and not `remove` on purpose: `remove` is
+   * `ChildNode.remove()`, which the DOM calls to detach this element — taking that name made
+   * every ordinary detach run the deletion with no flow (flows#107).
+   */
+  async removeFlow(flow) {
     if (!this.client) return;
     this.confirmDelete = "";
     try {
@@ -13279,7 +13292,7 @@ var ErpFlowsApp = class extends i3 {
                  destructive action as pale text next to an outlined «leave it» — the button you
                  must read before pressing, looking like the disabled one. These carry their own
                  colour out of the OutfitKit tokens and look the same in both modes. -->
-            <button type="button" class="danger" data-act="delete-yes" @click=${() => void this.remove(flow)}>
+            <button type="button" class="danger" data-act="delete-yes" @click=${() => void this.removeFlow(flow)}>
               ${this.t("ui.deleteYes")}
             </button>
             <button

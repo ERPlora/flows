@@ -60,7 +60,7 @@ function hub(flows: Record<string, unknown>[] = [], over: Record<string, unknown
     flows: {
       create: vi.fn(async (flow: unknown) => ({ id: 'created-1', ...(flow as object) })),
       list: vi.fn(async () => flows),
-      grants: vi.fn(async () => [{ kind: 'command', value: 'tasks.tasks.create' }]),
+      grants: vi.fn(async (_id: string) => [{ kind: 'command', value: 'tasks.tasks.create' }]),
       ...(over.flows as object),
     },
     events: {
@@ -124,7 +124,7 @@ describe('a card whose automation this hub already has', () => {
 
   it('says «Unfinished» about the one that was created and never granted anything', async () => {
     const client = hub([installedFlow({ enabled: false })], {
-      flows: { list: vi.fn(async () => [installedFlow({ enabled: false })]), grants: vi.fn(async () => []) },
+      flows: { list: vi.fn(async () => [installedFlow({ enabled: false })]), grants: vi.fn(async (_id: string) => []) },
     });
     const el = await mount(client);
     const badge = card(el, 'no-show-followup')?.querySelector('ok-status-pill');
@@ -165,7 +165,7 @@ describe('a card whose automation this hub already has', () => {
 
   it('sends the half-built one straight to Permissions, which is what it is missing', async () => {
     const client = hub([installedFlow({ enabled: false })], {
-      flows: { list: vi.fn(async () => [installedFlow({ enabled: false })]), grants: vi.fn(async () => []) },
+      flows: { list: vi.fn(async () => [installedFlow({ enabled: false })]), grants: vi.fn(async (_id: string) => []) },
     });
     const el = await mount(client);
     el.open('no-show-followup');

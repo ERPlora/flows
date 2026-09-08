@@ -8,6 +8,7 @@ import {
   templateGrants,
 } from './templates';
 import { dailyCron } from './plain-language';
+import type { FlowDoc } from './flow-doc';
 import en from '../../locales/en.json';
 
 /** The translator, reduced to the lookup a document needs. */
@@ -107,10 +108,12 @@ const morningCheck = (over: Record<string, unknown> = {}) => ({
 });
 
 /** A document the kernel runs on demand — no event, no schedule. */
-const manualDoc = {
-  ...(buildTemplate(tpl('friday-week-review'), t) as unknown as Record<string, unknown>),
+const manualFlowDoc: FlowDoc = {
+  ...buildTemplate(tpl('friday-week-review'), t),
   triggers: [{ kind: 'manual' }],
 };
+/** The same object as it reaches `Flow.definition`, which crossed a wire and is a bag of unknowns. */
+const manualDoc = manualFlowDoc as unknown as Record<string, unknown>;
 
 /**
  * **«Do I already have this one?», asked of the hub's own flows** (flows#60).
@@ -352,7 +355,7 @@ describe('a template this hub already runs', () => {
   it('does not answer for a card whose trigger is neither an event nor a schedule', () => {
     // `manual` and `at` are trigger kinds the kernel runs and this catalogue does not use. Nothing
     // recognises them, and `absent` stays the honest answer until something does.
-    const template = { ...tpl('friday-week-review'), build: () => manualDoc };
+    const template = { ...tpl('friday-week-review'), build: () => manualFlowDoc };
     const flow = { id: 'f1', name: 'By hand', enabled: true, definition: manualDoc, commands: ['tasks.tasks.create'] };
     expect(templateInstallation(template, t, [flow])).toEqual({ state: 'absent' });
   });
