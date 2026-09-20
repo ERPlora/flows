@@ -415,7 +415,15 @@ describe('what the tap comes home as, in the list of things to check', () => {
 
   it('offers «the option they tapped» to a later check, before anyone has tapped', async () => {
     const el = await mountOn(true);
-    expect(pickerPaths(el)).toEqual(['text', 'reply_id', 'reply_title']);
+    // …and, since hub#1951, WHICH question it answers: the raw `wamid` and — the only one a
+    // condition can actually be written against — the step that asked it.
+    expect(pickerPaths(el)).toEqual([
+      'text',
+      'reply_id',
+      'reply_title',
+      'reply_to',
+      'reply_to_step',
+    ]);
   });
 
   it('does not offer them on a hub that could never have sent the options', async () => {

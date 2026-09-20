@@ -407,13 +407,18 @@ export function humaniseField(path: string): string {
  *
  * {@link humaniseField} stays the rule for everything else, and deliberately: a translated
  * dictionary of every field of every module would be wrong for exactly the fields nobody thought
- * of. But it turns `reply_id` into «Reply id», and these two are not somebody's column — they are
- * what the kernel promises a tap comes home as (hub#1633), the same argument that gives an event
- * a hand-written phrase in `event-phrasing.ts` instead of a composed one.
+ * of. But it turns `reply_id` into «Reply id», and these are not somebody's column — they are
+ * what the kernel promises a tap comes home as (hub#1633, hub#1673, hub#1951), the same argument
+ * that gives an event a hand-written phrase in `event-phrasing.ts` instead of a composed one.
+ *
+ * `reply_to_step` earns its phrase twice over: mechanically it reads «Reply to step», which says
+ * the opposite of what it means — it is not a step being replied to, it is the step that ASKED.
  */
 const FIELD_PHRASES: Readonly<Record<string, string>> = {
   reply_id: 'ui.fieldReplyId',
   reply_title: 'ui.fieldReplyTitle',
+  reply_to: 'ui.fieldReplyTo',
+  reply_to_step: 'ui.fieldReplyToStep',
 };
 
 export function fieldPhrase(path: string, t: Translator): string {
