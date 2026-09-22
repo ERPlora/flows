@@ -383,6 +383,8 @@
     "field": "Dato",
     "fieldReplyId": "La opción que tocó",
     "fieldReplyTitle": "Lo que decía la opción",
+    "fieldReplyTo": "El mensaje al que contesta",
+    "fieldReplyToStep": "El paso que hizo la pregunta",
     "filterAt": "Una fecha",
     "filterCron": "El reloj",
     "filterEvent": "Algo que pasa",

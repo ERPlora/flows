@@ -191,7 +191,13 @@ describe('the fields a tap comes home in (flows#75)', () => {
    */
   it('offers the tap fields on the WhatsApp event even before anyone has tapped', () => {
     const merged = mergeContractFields(shape([{ path: 'text' }]), true)!;
-    expect(merged.fields.map((f) => f.path)).toEqual(['text', 'reply_id', 'reply_title']);
+    expect(merged.fields.map((f) => f.path)).toEqual([
+      'text',
+      'reply_id',
+      'reply_title',
+      'reply_to',
+      'reply_to_step',
+    ]);
     // `seen_in: 0` is not a detail: it is what makes the picker say «not always there», which is
     // the truth an owner needs — a message nobody tapped brings them empty.
     expect(merged.fields.find((f) => f.path === 'reply_id')!.seen_in).toBe(0);
@@ -203,8 +209,29 @@ describe('the fields a tap comes home in (flows#75)', () => {
     // a silence, it does not correct the hub.
     expect(merged.fields.filter((f) => f.path === 'reply_id')).toHaveLength(1);
     expect(merged.fields.find((f) => f.path === 'reply_id')!.seen_in).toBe(2);
-    // …while the one it has still never seen is added, so the pair is always pickable together.
-    expect(merged.fields.map((f) => f.path)).toEqual(['reply_id', 'reply_title']);
+    // …while the ones it has still never seen are added, so they stay pickable together.
+    expect(merged.fields.map((f) => f.path)).toEqual([
+      'reply_id',
+      'reply_title',
+      'reply_to',
+      'reply_to_step',
+    ]);
+  });
+
+  /**
+   * **hub#1951 — the two halves of «which question is this answering» are pickable too.**
+   *
+   * Same chicken and egg as `reply_id`, and one turn worse: `reply_to` and `reply_to_step` only
+   * appear in observed traffic once somebody has already tapped an option of a question this
+   * hub sent, which is precisely the automation being built. Without them in this list, the
+   * owner cannot write «if they answer my confirm-appointment step» at all.
+   */
+  it('offers which question a tap answers, and the step that asked it', () => {
+    const merged = mergeContractFields(shape([{ path: 'text' }]), true)!;
+    const paths = merged.fields.map((f) => f.path);
+    expect(paths).toContain('reply_to');
+    expect(paths).toContain('reply_to_step');
+    expect(merged.fields.find((f) => f.path === 'reply_to_step')!.seen_in).toBe(0);
   });
 
   it('adds nothing on a hub that cannot send options in the first place', () => {

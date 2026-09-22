@@ -144,10 +144,17 @@ export function groupByFamily(options: readonly TriggerOption[], t: Translator):
 export const WHATSAPP_MESSAGE_EVENT = 'hub.whatsapp.message_received';
 
 /**
- * What the payload carries when the customer tapped one of the options a `notify` offered
- * (hub#1633): the id that was set on screen, and the words that were on it.
+ * What the payload carries when the customer tapped one of the options a `notify` offered: the id
+ * that was set on screen and the words that were on it (hub#1633), plus **which question is being
+ * answered** — the raw `wamid` Meta sends back (hub#1673) and, the only one a recipe can actually
+ * write a condition against, the step that asked it (hub#1951).
+ *
+ * The last one is the one that makes the other three usable. Two questions from the same approved
+ * template offer the same «Sí», so `reply_id` tells them apart in no way at all; the `wamid` does,
+ * but the recipe has nothing to compare it with — the hub answers that instead, with the name the
+ * author wrote on their own step.
  */
-export const TAP_REPLY_FIELDS = ['reply_id', 'reply_title'] as const;
+export const TAP_REPLY_FIELDS = ['reply_id', 'reply_title', 'reply_to', 'reply_to_step'] as const;
 
 /**
  * **The fields the CONTRACT guarantees, added to the ones this hub has actually seen.**

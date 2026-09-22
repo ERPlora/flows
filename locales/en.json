@@ -383,6 +383,8 @@
     "field": "Field",
     "fieldReplyId": "The option they tapped",
     "fieldReplyTitle": "What the option said",
+    "fieldReplyTo": "The message they are answering",
+    "fieldReplyToStep": "The step that asked the question",
     "filterAt": "A date",
     "filterCron": "The clock",
     "filterEvent": "Something happening",
