@@ -3853,6 +3853,31 @@ function questionSteps(flows, open) {
   }
   return out;
 }
+function sendsReplyToFlow(shape) {
+  return !!shape?.fields?.some((f3) => f3.path === "reply_to_flow" && f3.seen_in > 0);
+}
+var REPLY_STEP = "input.reply_to_step";
+var REPLY_FLOW = "input.reply_to_flow";
+function ambiguousReplyGuards(definition, flows) {
+  const steps = obj2(definition)?.steps;
+  if (!Array.isArray(steps)) return [];
+  const askers = /* @__PURE__ */ new Map();
+  for (const q of questionSteps(flows, null)) {
+    if (!q.flowId) continue;
+    const set = askers.get(q.stepId) ?? /* @__PURE__ */ new Set();
+    set.add(q.flowId);
+    askers.set(q.stepId, set);
+  }
+  const out = [];
+  for (const raw of steps) {
+    const step = obj2(raw);
+    const when = obj2(step?.when);
+    if (!step || step.kind !== "condition" || !when || REPLY_FLOW in when) continue;
+    const asked = str(obj2(when[REPLY_STEP])?.eq);
+    if (asked && (askers.get(asked)?.size ?? 0) > 1) out.push(str(step.id));
+  }
+  return out;
+}
 
 // ui/components/erp-flows-editor/erp-flows-editor.ts
 var TABS = ["editor", "test", "permissions", "history"];
@@ -5828,7 +5853,7 @@ var ErpFlowsEditor = class extends i3 {
    * on it would stop matching every answer; so without that evidence only the step is compared.
    */
   get hubSendsReplyToFlow() {
-    return !!this.shape?.fields.some((f3) => f3.path === "reply_to_flow" && f3.seen_in > 0);
+    return sendsReplyToFlow(this.shape);
   }
   renderGuardPanel(step, index) {
     const rows = guardRows(step.when);
@@ -5836,6 +5861,7 @@ var ErpFlowsEditor = class extends i3 {
     const pairsFlow = rows.some((r6) => r6.path === REPLY_STEP_PATH && r6.op === "eq");
     const isFlowHalf = (r6) => pairsFlow && r6.path === REPLY_FLOW_PATH && r6.op === "eq";
     const flowHalf = rows.find(isFlowHalf)?.value ?? "";
+    const ambiguous = this.hubSendsReplyToFlow && this.hubFlows.status === "ready" && ambiguousReplyGuards({ steps: [step] }, this.hubFlows.flows).length > 0;
     const pickQuestion = (i4, key2) => {
       const { flowId, stepId } = parseQuestionKey(key2);
       const op = rows[i4].op;
@@ -5892,11 +5918,13 @@ var ErpFlowsEditor = class extends i3 {
           </div>
           <div class="field">
             <label>${this.t("ui.value")}</label>
-            ${row.path === REPLY_STEP_PATH && (row.op === "eq" || row.op === "neq") ? this.renderReplyStepSelect(
+            ${row.path === REPLY_STEP_PATH && (row.op === "eq" || row.op === "neq") ? b2`${this.renderReplyStepSelect(
         row.value,
         row.op === "eq" ? flowHalf : "",
         (key2) => pickQuestion(i4, key2)
-      ) : b2`<input
+      )}${ambiguous && row.op === "eq" ? b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-field="reply-step-ambiguous"
+                        >${this.t("ui.replyStepAmbiguous")}</ok-inline-feedback
+                      >` : A}` : b2`<input
                   type="text"
                   data-field="guard-value"
                   .value=${row.value}
@@ -9793,6 +9821,9 @@ var es_default = {
     checkupEchoBody: "Se mont\xF3 antes de que lo corrigi\xE9ramos, as\xED que tambi\xE9n salta con lo que escribes t\xFA desde tu m\xF3vil y con conversaciones de hace meses. Actual\xEDzala y solo saltar\xE1 con lo que escriba un cliente ahora. No cambia nada m\xE1s de ella.",
     checkupEchoFix: "Actualizarla",
     checkupEchoTitle: "Esta automatizaci\xF3n tambi\xE9n salta con tus propios mensajes",
+    checkupReplyTitle: "La respuesta de un cliente puede contar para dos automatizaciones",
+    checkupReplyBody: "Comprueba la respuesta a una pregunta que tambi\xE9n hace otra automatizaci\xF3n, as\xED que un \xABS\xED\xBB a una cuenta para las dos. \xC1brela y vuelve a elegir la pregunta.",
+    checkupReplyFix: "Elegir la pregunta",
     checkupFixed: "\xAB{name}\xBB ya solo salta con lo que escribe un cliente.",
     checkupNotFixed: "No hemos podido actualizar esta automatizaci\xF3n: el hub la ha guardado sin el cambio. Vuelve a intentarlo en un momento y avisa a soporte si sigue pasando.",
     close: "Cerrar",
@@ -10097,6 +10128,7 @@ var es_default = {
     fieldReplyToFlow: "La automatizaci\xF3n que hizo la pregunta",
     replyStepChoose: "Elige la pregunta",
     replyStepOption: "{flow} \u2014 \xAB{text}\xBB",
+    replyStepAmbiguous: "Dos automatizaciones hacen esta misma pregunta. Vuelve a elegirla para que la respuesta cuente solo para la que quieres.",
     replyStepNoText: "mensaje sin texto",
     replyStepMissing: "Una pregunta que ya no existe \u2014 elige otra",
     replyStepLoading: "Cargando tus mensajes de WhatsApp\u2026",
@@ -10725,6 +10757,9 @@ var en_default = {
     checkupEchoBody: "It was set up before we corrected it, so it also reacts to the replies you send from your own phone and to conversations from months ago. Update it and it will only react to what a customer writes now. Nothing else about it changes.",
     checkupEchoFix: "Update it",
     checkupEchoTitle: "This automation also runs on your own messages",
+    checkupReplyTitle: "A customer\u2019s answer may count for two automations",
+    checkupReplyBody: "It checks the answer to a question that another automation also asks, so a \xABYes\xBB to one counts for both. Open it and choose the question again.",
+    checkupReplyFix: "Choose the question",
     checkupFixed: "\u201C{name}\u201D now only reacts to what a customer writes.",
     checkupNotFixed: "We could not update this automation: the hub saved it without the change. Try again in a moment, and tell support if it keeps happening.",
     close: "Close",
@@ -11029,6 +11064,7 @@ var en_default = {
     fieldReplyToFlow: "The automation that asked the question",
     replyStepChoose: "Choose the question",
     replyStepOption: "{flow} \u2014 \xAB{text}\xBB",
+    replyStepAmbiguous: "Two automations ask this same question. Choose it again so the answer only counts for the one you mean.",
     replyStepNoText: "message without text",
     replyStepMissing: "A question that no longer exists \u2014 choose another",
     replyStepLoading: "Loading your WhatsApp messages\u2026",
@@ -11596,6 +11632,7 @@ var ErpFlowsApp = class extends i3 {
     this.reviewing = null;
     this.draftReview = null;
     this.repairing = "";
+    this.replyToFlowSeen = false;
     /** The contract THIS hub serves, read from `GET /api/hub/flows/schema` — never bundled. */
     this.facts = schemaFacts(void 0);
     this.onLocaleChange = () => this.requestUpdate();
@@ -11965,6 +12002,7 @@ var ErpFlowsApp = class extends i3 {
       this.setGateFromError(e4);
       return;
     }
+    await this.askReplyToFlow();
     await this.countApprovals();
     await this.countDead();
     await this.loadTray();
@@ -12200,6 +12238,21 @@ var ErpFlowsApp = class extends i3 {
       this.error = e4?.message || this.t("ui.errGeneric");
     } finally {
       this.repairing = "";
+    }
+  }
+  /**
+   * **Can picking the question again fix an old check?** (flows#125) — asked only when some
+   * automation carries a check that cannot tell two automations apart, so a hub with none pays no
+   * round trip. Without evidence the hub sends `reply_to_flow`, picking again saves the step only
+   * and the warning could never leave the row: it is not shown.
+   */
+  async askReplyToFlow() {
+    if (this.replyToFlowSeen || !this.client) return;
+    if (!this.flows.some((f3) => ambiguousReplyGuards(f3.definition, this.flows).length > 0)) return;
+    try {
+      this.replyToFlowSeen = sendsReplyToFlow(await this.client.events.shape(WHATSAPP_MESSAGE_EVENT2));
+    } catch {
+      this.replyToFlowSeen = false;
     }
   }
   /**
@@ -12444,6 +12497,26 @@ var ErpFlowsApp = class extends i3 {
           </button>
         </div>`
     )}
+      <!-- flows#125: a check saved before flows#124 names the step, not the automation, and two
+           automations ask with that step. Only the owner knows which one she meant, so the button
+           opens the automation to pick it again instead of saving anything. -->
+      ${this.replyToFlowSeen && ambiguousReplyGuards(flow.definition, this.flows).length > 0 ? b2`<div class="checkup" data-checkup="reply_step_ambiguous">
+            <span class="said">
+              <strong>${this.t("ui.checkupReplyTitle")}</strong>
+              ${this.t("ui.checkupReplyBody")}
+            </span>
+            <button
+              type="button"
+              data-act="checkup-fix"
+              @click=${() => {
+      this.editing = flow;
+      this.isNew = false;
+      this.editorTab = "editor";
+    }}
+            >
+              ${this.t("ui.checkupReplyFix")}
+            </button>
+          </div>` : A}
     </div>`;
   }
   /** «Cuando se reserva una cita» — never the raw event name. */
@@ -12684,4 +12757,7 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsApp.prototype, "repairing", 2);
+__decorateClass([
+  r5()
+], ErpFlowsApp.prototype, "replyToFlowSeen", 2);
 define("erp-flows-app", ErpFlowsApp);
