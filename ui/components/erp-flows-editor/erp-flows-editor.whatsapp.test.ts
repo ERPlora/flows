@@ -1152,6 +1152,17 @@ describe('picking the question ties the answer to its automation (flows#124)', (
     expect(guard(el)).toEqual({ 'input.reply_to_step': { eq: 'mine' } });
   });
 
+  it('switching to a question with no automation id drops the old id instead of keeping a stale one', async () => {
+    const own = { id: 'mine', kind: 'notify', channel: 'whatsapp', vars: { text: '¿Vienes?' } };
+    const el = await mountGuard({
+      id: undefined,
+      when: { 'input.reply_to_step': { eq: 'confirm' }, 'input.reply_to_flow': { eq: 'f-dye' } },
+      extraSteps: [own],
+    });
+    await choose(el, '¿Vienes?');
+    expect(guard(el)).toEqual({ 'input.reply_to_step': { eq: 'mine' } });
+  });
+
   it('on a hub never seen sending the automation, saves only the step (an older core would never match)', async () => {
     const el = await mountGuard({ id: 'f-tap', when: { 'input.reply_to_step': { eq: '' } }, shape: OLD_CORE });
     await choose(el, 'Confirmar tinte');
