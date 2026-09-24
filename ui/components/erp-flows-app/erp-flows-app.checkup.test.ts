@@ -355,4 +355,41 @@ describe('an old check that cannot tell which automation asked (flows#125)', () 
     const { client } = await mountWith([...TWINS]);
     expect(client.events.shape).not.toHaveBeenCalledWith(WHATSAPP_MESSAGE_EVENT);
   });
+
+  it('says nothing on a hub that cannot describe the event: the check could still be right', async () => {
+    const client = fakeClient([...TWINS, tap(OLD)] as never);
+    client.events.shape = vi.fn(async () => {
+      throw new Error('boom');
+    }) as never;
+    const el = await mount(client);
+    expect(rowOf(el, 'f-tap')).toBeTruthy();
+    expect(ambiguity(el)).toBeFalsy();
+  });
+
+  // The whole point of the button: once she picked the question and came back, the row is clean.
+  it('the warning leaves the row when she comes back from the editor with the question picked', async () => {
+    const { el, client } = await mountWith([...TWINS, tap(OLD)]);
+    await click(el, ambiguity(el)!.querySelector('[data-act="checkup-fix"]'));
+    const editor = el.renderRoot.querySelector('erp-flows-editor')!;
+    // What the hub holds after the editor saved the pair (flows#124).
+    client.flows.list = vi.fn(async () => [...TWINS, tap({ ...OLD, 'input.reply_to_flow': { eq: 'f-dye' } })]) as never;
+    editor.dispatchEvent(new CustomEvent('flows-back', { bubbles: true, composed: true }));
+    await settle(el);
+    await settle(el);
+    expect(rowOf(el, 'f-tap'), 'the list is back on screen').toBeTruthy();
+    expect(ambiguity(el)).toBeFalsy();
+  });
+
+  // The other half: coming back without picking keeps the warning — the row was not cleaned
+  // merely because the editor was opened.
+  it('the warning stays when she comes back without picking', async () => {
+    const { el } = await mountWith([...TWINS, tap(OLD)]);
+    await click(el, ambiguity(el)!.querySelector('[data-act="checkup-fix"]'));
+    const editor = el.renderRoot.querySelector('erp-flows-editor')!;
+    editor.dispatchEvent(new CustomEvent('flows-back', { bubbles: true, composed: true }));
+    await settle(el);
+    await settle(el);
+    expect(rowOf(el, 'f-tap')).toBeTruthy();
+    expect(ambiguity(el)).toBeTruthy();
+  });
 });
