@@ -385,6 +385,7 @@
     "fieldReplyTitle": "Lo que decía la opción",
     "fieldReplyTo": "El mensaje al que contesta",
     "fieldReplyToStep": "El paso que hizo la pregunta",
+    "fieldReplyToFlow": "La automatización que hizo la pregunta",
     "replyStepChoose": "Elige la pregunta",
     "replyStepOption": "{flow} — «{text}»",
     "replyStepNoText": "mensaje sin texto",

@@ -2272,7 +2272,8 @@ var FIELD_PHRASES = {
   reply_id: "ui.fieldReplyId",
   reply_title: "ui.fieldReplyTitle",
   reply_to: "ui.fieldReplyTo",
-  reply_to_step: "ui.fieldReplyToStep"
+  reply_to_step: "ui.fieldReplyToStep",
+  reply_to_flow: "ui.fieldReplyToFlow"
 };
 function fieldPhrase(path, t3) {
   const key2 = FIELD_PHRASES[path];
@@ -3831,7 +3832,7 @@ function textOf2(step) {
   const body = obj2(obj2(step.interactive)?.body);
   return str(body?.text) || str(obj2(step.vars)?.text) || str(step.template);
 }
-function fromSteps(steps, flowName) {
+function fromSteps(steps, flowId, flowName) {
   if (!Array.isArray(steps)) return [];
   const out = [];
   for (const raw of steps) {
@@ -3839,16 +3840,16 @@ function fromSteps(steps, flowName) {
     if (!step || step.kind !== "notify" || step.channel !== "whatsapp") continue;
     const stepId = str(step.id);
     if (!stepId) continue;
-    out.push({ stepId, flowName, text: textOf2(step) });
+    out.push({ stepId, flowId, flowName, text: textOf2(step) });
   }
   return out;
 }
 function questionSteps(flows, open) {
   const out = [];
-  if (open) out.push(...fromSteps(open.doc.steps, open.name));
+  if (open) out.push(...fromSteps(open.doc.steps, open.id ?? "", open.name));
   for (const flow of flows) {
     if (open?.id && flow.id === open.id) continue;
-    out.push(...fromSteps(obj2(flow.definition)?.steps, str(flow.name)));
+    out.push(...fromSteps(obj2(flow.definition)?.steps, str(flow.id), str(flow.name)));
   }
   return out;
 }
@@ -3901,6 +3902,15 @@ function eventOption(value, label, current) {
   return b2`<option value=${value} title=${value} ?selected=${value === current}>${label}</option>`;
 }
 var REPLY_STEP_PATH = "input.reply_to_step";
+var REPLY_FLOW_PATH = "input.reply_to_flow";
+function questionKey(flowId, stepId) {
+  return stepId === "" ? "" : JSON.stringify([flowId, stepId]);
+}
+function parseQuestionKey(key2) {
+  if (key2 === "") return { flowId: "", stepId: "" };
+  const [flowId, stepId] = JSON.parse(key2);
+  return { flowId, stepId };
+}
 function rowsToWhen(rows) {
   const out = {};
   for (const row of rows) {
@@ -5812,13 +5822,37 @@ var ErpFlowsEditor = class extends i3 {
       </div>
     </div>`;
   }
+  /**
+   * Whether this hub puts `reply_to_flow` in its WhatsApp event (hub#1962) — known only because it
+   * was SEEN there. An older core leaves the field out, a missing field equals nothing, and a check
+   * on it would stop matching every answer; so without that evidence only the step is compared.
+   */
+  get hubSendsReplyToFlow() {
+    return !!this.shape?.fields.some((f3) => f3.path === "reply_to_flow" && f3.seen_in > 0);
+  }
   renderGuardPanel(step, index) {
     const rows = guardRows(step.when);
     const update = (next) => this.setDoc(patchStep(this.document, index, { when: rowsToWhen(next) }));
+    const pairsFlow = rows.some((r6) => r6.path === REPLY_STEP_PATH && r6.op === "eq");
+    const isFlowHalf = (r6) => pairsFlow && r6.path === REPLY_FLOW_PATH && r6.op === "eq";
+    const flowHalf = rows.find(isFlowHalf)?.value ?? "";
+    const pickQuestion = (i4, key2) => {
+      const { flowId, stepId } = parseQuestionKey(key2);
+      const op = rows[i4].op;
+      const next = rows.map((r6, j) => j === i4 ? { ...r6, value: stepId } : r6).filter((r6) => !(r6.path === REPLY_FLOW_PATH && r6.op === "eq"));
+      if (op === "eq" && flowId && this.hubSendsReplyToFlow) {
+        next.push({ path: REPLY_FLOW_PATH, op: "eq", value: flowId });
+      }
+      update(next);
+    };
+    const remove = (i4) => {
+      const row = rows[i4];
+      update(rows.filter((r6, j) => j !== i4 && !(row.path === REPLY_STEP_PATH && row.op === "eq" && isFlowHalf(r6))));
+    };
     return b2`
       <span class="hint">${this.t("ui.guardExplain")}</span>
       ${rows.map(
-      (row, i4) => b2`<div class="guard-row">
+      (row, i4) => isFlowHalf(row) ? A : b2`<div class="guard-row">
           <div class="field">
             <label>${this.t("ui.field")}</label>
             <input
@@ -5860,7 +5894,8 @@ var ErpFlowsEditor = class extends i3 {
             <label>${this.t("ui.value")}</label>
             ${row.path === REPLY_STEP_PATH && (row.op === "eq" || row.op === "neq") ? this.renderReplyStepSelect(
         row.value,
-        (value) => update(rows.map((r6, j) => j === i4 ? { ...r6, value } : r6))
+        row.op === "eq" ? flowHalf : "",
+        (key2) => pickQuestion(i4, key2)
       ) : b2`<input
                   type="text"
                   data-field="guard-value"
@@ -5879,7 +5914,7 @@ var ErpFlowsEditor = class extends i3 {
               type="button"
               class="icon-btn"
               aria-label=${this.t("ui.removeCondition")}
-              @click=${() => update(rows.filter((_2, j) => j !== i4))}
+              @click=${() => remove(i4)}
             >
               ×
             </button>
@@ -5903,8 +5938,12 @@ var ErpFlowsEditor = class extends i3 {
    * shown nowhere else, so typing it was not a way to build the check at all. A saved id that no
    * automation carries any more stays selected under its own «no longer exists» label: silently
    * swapping it for the first option would rewrite a working guard on the next save.
+   *
+   * Each option is an (automation, step) pair (flows#124), and `currentFlow` is the automation half
+   * already saved beside the step — `''` for a guard written before it existed, which then shows
+   * the first automation carrying that step, exactly what it matched and still matches.
    */
-  renderReplyStepSelect(current, onChange) {
+  renderReplyStepSelect(current, currentFlow, onChange) {
     const { status } = this.hubFlows;
     if (status === "idle" || status === "loading") {
       return b2`<select data-field="reply-step" disabled>
@@ -5912,19 +5951,20 @@ var ErpFlowsEditor = class extends i3 {
       </select>`;
     }
     const steps = status === "ready" ? questionSteps(this.hubFlows.flows, { id: this.flow?.id, name: this.name, doc: this.document }) : [];
-    const missing = current !== "" && !steps.some((q) => q.stepId === current);
+    const chosen = steps.find((q) => q.stepId === current && (currentFlow === "" || q.flowId === currentFlow));
+    const selected = chosen ? questionKey(chosen.flowId, chosen.stepId) : questionKey(currentFlow, current);
     return b2`<select
         data-field="reply-step"
-        .value=${current}
+        .value=${selected}
         @change=${(e4) => onChange(e4.target.value)}
       >
-        ${option("", this.t("ui.replyStepChoose"), current)}
-        ${missing ? option(current, this.t("ui.replyStepMissing"), current) : A}
+        ${option("", this.t("ui.replyStepChoose"), selected)}
+        ${current !== "" && !chosen ? option(selected, this.t("ui.replyStepMissing"), selected) : A}
         ${steps.map(
-      (q) => option(q.stepId, this.t("ui.replyStepOption", {
+      (q) => option(questionKey(q.flowId, q.stepId), this.t("ui.replyStepOption", {
         flow: q.flowName || this.t("ui.unnamed"),
         text: q.text || this.t("ui.replyStepNoText")
-      }), current)
+      }), selected)
     )}
       </select>
       ${status === "error" ? b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-field="reply-step-error"
@@ -10054,6 +10094,7 @@ var es_default = {
     fieldReplyTitle: "Lo que dec\xEDa la opci\xF3n",
     fieldReplyTo: "El mensaje al que contesta",
     fieldReplyToStep: "El paso que hizo la pregunta",
+    fieldReplyToFlow: "La automatizaci\xF3n que hizo la pregunta",
     replyStepChoose: "Elige la pregunta",
     replyStepOption: "{flow} \u2014 \xAB{text}\xBB",
     replyStepNoText: "mensaje sin texto",
@@ -10985,6 +11026,7 @@ var en_default = {
     fieldReplyTitle: "What the option said",
     fieldReplyTo: "The message they are answering",
     fieldReplyToStep: "The step that asked the question",
+    fieldReplyToFlow: "The automation that asked the question",
     replyStepChoose: "Choose the question",
     replyStepOption: "{flow} \u2014 \xAB{text}\xBB",
     replyStepNoText: "message without text",

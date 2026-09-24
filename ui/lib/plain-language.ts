@@ -413,12 +413,14 @@ export function humaniseField(path: string): string {
  *
  * `reply_to_step` earns its phrase twice over: mechanically it reads «Reply to step», which says
  * the opposite of what it means — it is not a step being replied to, it is the step that ASKED.
+ * `reply_to_flow` (hub#1962) is its automation, for the same reason.
  */
 const FIELD_PHRASES: Readonly<Record<string, string>> = {
   reply_id: 'ui.fieldReplyId',
   reply_title: 'ui.fieldReplyTitle',
   reply_to: 'ui.fieldReplyTo',
   reply_to_step: 'ui.fieldReplyToStep',
+  reply_to_flow: 'ui.fieldReplyToFlow',
 };
 
 export function fieldPhrase(path: string, t: Translator): string {
