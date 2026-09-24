@@ -7637,6 +7637,21 @@ function declaredGrants(raw) {
   }
   return out;
 }
+function grantPhrases(raw, kept, locale) {
+  const out = {};
+  if (!Array.isArray(raw)) return out;
+  const values = new Set(kept.map((grant) => grant.value));
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const value = text(row.value);
+    if (!values.has(value) || value in out) continue;
+    const reason = row.reason;
+    if (!reason || typeof reason !== "object" || Array.isArray(reason)) continue;
+    const phrase = text(documentFor(reason, locale));
+    if (phrase) out[value] = phrase;
+  }
+  return out;
+}
 function neededBy(doc) {
   return NEEDS.filter(
     (need) => doc.steps.some(
@@ -7684,6 +7699,7 @@ function moduleTemplates(rows, locale) {
       // card the hub has just said this business can run.
       witnesses: [],
       grantReasons: {},
+      grantPhrases: grantPhrases(row.grants, grants, locale ?? "en"),
       grants,
       ...needs.length ? { needs } : {},
       enabledOnCreate: false,
@@ -8321,15 +8337,17 @@ var ErpFlowsGallery = class extends i3 {
         <span class="muted">${this.t("ui.tplGrantsIntro")}</span>
         ${grants.map((grant) => {
       const pin = Object.entries(grantPin(grant));
+      const reasonKey = template.grantReasons[grant.value];
+      const label = template.grantPhrases?.[grant.value] ?? (reasonKey ? this.t(reasonKey) : grant.value);
       return b2`<div class="item" data-grant=${grant.value}>
             <span class="grow">
-              <span class="label">${this.t(template.grantReasons[grant.value] ?? grant.value)}</span>
+              <span class="label">${label}</span>
               ${pin.length ? b2`<span class="hint" data-limit=${grant.value}
                     >${this.t("ui.tplGrantLimited", {
         fields: pin.map(([field, value]) => `${field} = ${String(value)}`).join(", ")
       })}</span
                   >` : A}
-              <span class="hint">${grant.value}</span>
+              ${label === grant.value ? A : b2`<span class="hint">${grant.value}</span>`}
             </span>
           </div>`;
     })}

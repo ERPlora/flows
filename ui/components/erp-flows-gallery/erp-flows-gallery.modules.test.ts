@@ -114,6 +114,7 @@ async function mount(client: unknown): Promise<ErpFlowsGallery> {
   return el;
 }
 
+const occurrences = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
 const text = (el: ErpFlowsGallery): string => el.renderRoot.textContent ?? '';
 const card = (el: ErpFlowsGallery, id: string): HTMLElement | null =>
   el.renderRoot.querySelector(`[data-template="${id}"]`);
@@ -245,6 +246,42 @@ describe('the gallery offers what the installed apps bring (flows#98)', () => {
     const panel = card(el, SERVED_ID)?.textContent ?? '';
     expect(panel).toContain(t('ui.tplStepsTitle'));
     expect(panel).toContain(t('ui.stepCommand', { command: 'appointments.appointments.create' }));
+  });
+
+  /**
+   * flows#114 — the «what it will ask you to allow» block of a SERVED card named every permission
+   * twice (the raw value as the label AND as the hint under it) and never in words.
+   */
+  it('explains each permission once, in the sentence the module wrote for it', async () => {
+    const client = hub({
+      rows: [
+        servedRow({
+          grants: [
+            {
+              kind: 'command',
+              value: 'appointments.appointments.create',
+              reason: { en: 'Book the appointment', es: 'Reservar la cita' },
+            },
+          ],
+        }),
+      ],
+    });
+    (client as { locale?: string }).locale = 'es';
+    const el = await mount(client);
+    el.open(SERVED_ID);
+    await el.updateComplete;
+    const row = card(el, SERVED_ID)?.querySelector('[data-grant="appointments.appointments.create"]');
+    expect(row?.querySelector('.label')?.textContent?.trim()).toBe('Reservar la cita');
+    expect(occurrences(row?.textContent ?? '', 'appointments.appointments.create')).toBe(1);
+  });
+
+  it('names a permission the module left unexplained once, not twice', async () => {
+    const el = await mount(hub());
+    el.open(SERVED_ID);
+    await el.updateComplete;
+    const row = card(el, SERVED_ID)?.querySelector('[data-grant="appointments.appointments.create"]');
+    expect(row, 'the grant row is not on the panel — this test proved nothing').toBeTruthy();
+    expect(occurrences(row?.textContent ?? '', 'appointments.appointments.create')).toBe(1);
   });
 
   it('leaves out a served recipe this core cannot parse', async () => {
