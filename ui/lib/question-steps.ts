@@ -5,11 +5,15 @@ import type { FlowDoc } from './flow-doc';
  * A step that sends a WhatsApp, as the owner recognises it: the automation it lives in and what
  * it says (flows#118).
  *
- * `stepId` is what the hub puts in `reply_to_step` when a customer answers that message, so it is
- * the VALUE a guard compares; the other two are only the words the dropdown shows.
+ * `stepId` is what the hub puts in `reply_to_step` when a customer answers that message, and
+ * `flowId` what it puts in `reply_to_flow` (hub#1962): a step id is unique inside its automation,
+ * not across them, so the pair is what a guard compares (flows#124). `flowId` is `''` for an
+ * automation never saved — it has no id the hub could ever send. The other two are only the words
+ * the dropdown shows.
  */
 export interface QuestionStep {
   stepId: string;
+  flowId: string;
   flowName: string;
   text: string;
 }
@@ -37,7 +41,7 @@ function textOf(step: Record<string, unknown>): string {
   return str(body?.text) || str(obj(step.vars)?.text) || str(step.template);
 }
 
-function fromSteps(steps: unknown, flowName: string): QuestionStep[] {
+function fromSteps(steps: unknown, flowId: string, flowName: string): QuestionStep[] {
   if (!Array.isArray(steps)) return [];
   const out: QuestionStep[] = [];
   for (const raw of steps) {
@@ -45,7 +49,7 @@ function fromSteps(steps: unknown, flowName: string): QuestionStep[] {
     if (!step || step.kind !== 'notify' || step.channel !== 'whatsapp') continue;
     const stepId = str(step.id);
     if (!stepId) continue;
-    out.push({ stepId, flowName, text: textOf(step) });
+    out.push({ stepId, flowId, flowName, text: textOf(step) });
   }
   return out;
 }
@@ -59,10 +63,10 @@ function fromSteps(steps: unknown, flowName: string): QuestionStep[] {
  */
 export function questionSteps(flows: Flow[], open: OpenFlow | null): QuestionStep[] {
   const out: QuestionStep[] = [];
-  if (open) out.push(...fromSteps(open.doc.steps, open.name));
+  if (open) out.push(...fromSteps(open.doc.steps, open.id ?? '', open.name));
   for (const flow of flows) {
     if (open?.id && flow.id === open.id) continue;
-    out.push(...fromSteps(obj(flow.definition)?.steps, str(flow.name)));
+    out.push(...fromSteps(obj(flow.definition)?.steps, str(flow.id), str(flow.name)));
   }
   return out;
 }

@@ -424,6 +424,8 @@ describe('the fields a tap comes home in, in the owner\'s words (flows#75)', () 
     // hub#1951 — and which question it answers, said as a question and not as a `wamid`.
     expect(fieldPhrase('reply_to', t)).toBe('ui.fieldReplyTo');
     expect(fieldPhrase('reply_to_step', t)).toBe('ui.fieldReplyToStep');
+    // hub#1962 / flows#124 — and which automation asked it.
+    expect(fieldPhrase('reply_to_flow', t)).toBe('ui.fieldReplyToFlow');
   });
 
   // The catalogue check next door proves the KEY exists in both languages. This one proves the
@@ -437,6 +439,7 @@ describe('the fields a tap comes home in, in the owner\'s words (flows#75)', () 
     expect(fieldPhrase('reply_title', spanish)).toBe('Lo que decía la opción');
     expect(fieldPhrase('reply_to', spanish)).toBe('El mensaje al que contesta');
     expect(fieldPhrase('reply_to_step', spanish)).toBe('El paso que hizo la pregunta');
+    expect(fieldPhrase('reply_to_flow', spanish)).toBe('La automatización que hizo la pregunta');
   });
 
   it('leaves every other field to the mechanical rule', () => {

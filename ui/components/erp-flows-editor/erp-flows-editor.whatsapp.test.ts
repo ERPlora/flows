@@ -920,8 +920,8 @@ describe('the question a reply answers is picked from a list (flows#118)', () =>
     const el = await mountGuard({ 'input.reply_to_step': { eq: '' } });
     const select = valueBox(el);
     expect(select).not.toBeNull();
-    const labels = [...select!.options].filter((o) => o.value).map((o) => [o.value, o.textContent]);
-    expect(labels).toEqual([['s3k9xq', 'ui.replyStepOption:Recordatorio de cita|¿Confirmas tu cita?']]);
+    const labels = [...select!.options].filter((o) => o.value).map((o) => o.textContent);
+    expect(labels).toEqual(['ui.replyStepOption:Recordatorio de cita|¿Confirmas tu cita?']);
     // The id-typing box is gone for this field.
     expect(el.renderRoot.querySelector('.guard-row input[data-field="guard-value"]')).toBeNull();
   });
@@ -929,7 +929,7 @@ describe('the question a reply answers is picked from a list (flows#118)', () =>
   it('writes the chosen step’s id into the check', async () => {
     const el = await mountGuard({ 'input.reply_to_step': { eq: '' } });
     const select = valueBox(el)!;
-    select.value = 's3k9xq';
+    select.value = [...select.options].find((o) => o.textContent?.includes('¿Confirmas tu cita?'))!.value;
     select.dispatchEvent(new Event('change'));
     await settle(el);
     expect(el.document.steps[0].when).toEqual({ 'input.reply_to_step': { eq: 's3k9xq' } });
@@ -938,9 +938,11 @@ describe('the question a reply answers is picked from a list (flows#118)', () =>
   it('keeps a saved choice whose step no longer exists, and says so', async () => {
     const el = await mountGuard({ 'input.reply_to_step': { eq: 'gone12' } });
     const select = valueBox(el)!;
-    const kept = [...select.options].find((o) => o.value === 'gone12');
-    expect(kept?.textContent).toBe('ui.replyStepMissing');
-    expect(select.value).toBe('gone12');
+    const kept = [...select.options].find((o) => o.textContent === 'ui.replyStepMissing');
+    expect(kept).toBeDefined();
+    expect(select.value).toBe(kept!.value);
+    // …and nothing was rewritten just by looking.
+    expect(el.document.steps[0].when).toEqual({ 'input.reply_to_step': { eq: 'gone12' } });
   });
 
   it('says there is no question to pick when no automation sends a WhatsApp', async () => {
@@ -966,7 +968,9 @@ describe('the question a reply answers is picked from a list (flows#118)', () =>
     await settle(el);
     await settle(el);
     expect(el.renderRoot.querySelector('[data-field="reply-step-error"]')).toBeNull();
-    expect([...valueBox(el)!.options].map((o) => o.value)).toContain('s3k9xq');
+    expect([...valueBox(el)!.options].map((o) => o.textContent)).toContain(
+      'ui.replyStepOption:Recordatorio de cita|¿Confirmas tu cita?',
+    );
   });
 
   it('shows it is loading while the automations are on their way', async () => {
@@ -980,5 +984,199 @@ describe('the question a reply answers is picked from a list (flows#118)', () =>
     const el = await mountGuard({ 'input.reply_id': { eq: 'yes' } });
     expect(valueBox(el)).toBeNull();
     expect(el.renderRoot.querySelector('.guard-row input[data-field="guard-value"]')).not.toBeNull();
+  });
+});
+
+/**
+ * **«The question it answers» ties the answer to the automation that asked** (flows#124).
+ *
+ * A step id is unique inside its automation and not across them, so the same template installed
+ * twice — «confirm the appointment» for two services — asks with the same step. Comparing only
+ * the step made the customer's «Yes» to one fire its twin too. The hub now says which automation
+ * sent the question (`reply_to_flow`, hub#1962), and picking the question writes it beside the
+ * step: two rows, both compared.
+ *
+ * On a hub that has never been SEEN sending `reply_to_flow` the second row is not written: an
+ * older core leaves the field out, a missing field never equals anything, and the check would
+ * stop matching every answer — worse than the bug it fixes.
+ */
+describe('picking the question ties the answer to its automation (flows#124)', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  const ask = (flowId: string, name: string, text: string) => ({
+    id: flowId,
+    name,
+    enabled: true,
+    definition: {
+      schema_version: 1,
+      triggers: [{ kind: 'cron', cron: '0 9 * * *' }],
+      steps: [
+        {
+          id: 'confirm',
+          kind: 'notify',
+          channel: 'whatsapp',
+          interactive: { type: 'button', body: { text }, action: { buttons: [] } },
+        },
+      ],
+    },
+  });
+  const CUT = ask('f-cut', 'Confirmar corte', '¿Confirmas el corte?');
+  const DYE = ask('f-dye', 'Confirmar tinte', '¿Confirmas el tinte?');
+
+  /** What `GET /api/hub/events/shape` answers for the WhatsApp event on a hub that runs hub#1962. */
+  const shapeWith = (fields: string[]) => ({
+    event_name: 'hub.whatsapp.message_received',
+    declared_by: ['hub'],
+    samples: 3,
+    fields: fields.map((path) => ({ path, type: 'string', sample: '', redacted: false, truncated: false, seen_in: 3 })),
+  });
+  const NEW_CORE = shapeWith(['from', 'text', 'reply_to_step', 'reply_to_flow']);
+  const OLD_CORE = shapeWith(['from', 'text', 'reply_to_step']);
+
+  async function mountGuard(opts: {
+    when: Record<string, unknown>;
+    shape?: unknown;
+    list?: unknown[];
+    id?: string;
+    extraSteps?: unknown[];
+  }): Promise<ErpFlowsEditor> {
+    const el = document.createElement('erp-flows-editor') as ErpFlowsEditor;
+    const client = fakeClient();
+    client.flows.list = vi.fn(async () => opts.list ?? [CUT, DYE]) as never;
+    client.events.shape = vi.fn(async () => opts.shape ?? NEW_CORE) as never;
+    el.client = client as never;
+    el.t = ((k: string, p?: Record<string, unknown>) =>
+      p ? `${k}:${Object.values(p).join('|')}` : k) as never;
+    el.interactiveNotify = true;
+    el.flow = {
+      id: opts.id,
+      name: 'Atender respuesta',
+      enabled: false,
+      definition: {
+        schema_version: 1,
+        triggers: [{ kind: 'event', event: 'hub.whatsapp.message_received' }],
+        steps: [...(opts.extraSteps ?? []), { id: 'g', kind: 'condition', when: opts.when }],
+      },
+    } as never;
+    document.body.appendChild(el);
+    await settle(el);
+    (el.renderRoot.querySelector('[data-node="g"] button.open') as HTMLButtonElement).click();
+    await settle(el);
+    await settle(el);
+    return el;
+  }
+
+  const select = (el: ErpFlowsEditor) =>
+    el.renderRoot.querySelector('select[data-field="reply-step"]') as HTMLSelectElement;
+  /**
+   * The words of the option the dropdown marks as chosen. Read from the `selected` attribute, which
+   * is what a browser honours when the options land under a `<select>` whose `.value` Lit set a
+   * moment earlier; happy-dom ignores it on insertion and picks the first non-empty option, so its
+   * `.value` would report the first automation whatever the guard says.
+   */
+  const shown = (box: HTMLSelectElement) => [...box.options].find((o) => o.hasAttribute('selected'))?.textContent;
+  const guard = (el: ErpFlowsEditor) => el.document.steps[el.document.steps.length - 1].when;
+  const choose = async (el: ErpFlowsEditor, label: string) => {
+    const box = select(el);
+    const opt = [...box.options].find((o) => o.textContent?.includes(label));
+    expect(opt, `an option says «${label}»`).toBeDefined();
+    box.value = opt!.value;
+    box.dispatchEvent(new Event('change'));
+    await settle(el);
+  };
+
+  it('offers the same step of two automations as two different choices', async () => {
+    const el = await mountGuard({ id: 'f-tap', when: { 'input.reply_to_step': { eq: '' } } });
+    const options = [...select(el).options].filter((o) => o.value);
+    expect(options.map((o) => o.textContent)).toEqual([
+      'ui.replyStepOption:Confirmar corte|¿Confirmas el corte?',
+      'ui.replyStepOption:Confirmar tinte|¿Confirmas el tinte?',
+    ]);
+    expect(new Set(options.map((o) => o.value)).size, 'each choice has its own value').toBe(2);
+  });
+
+  it('picking the second one saves its step AND its automation', async () => {
+    const el = await mountGuard({ id: 'f-tap', when: { 'input.reply_to_step': { eq: '' } } });
+    await choose(el, 'Confirmar tinte');
+    expect(guard(el)).toEqual({
+      'input.reply_to_step': { eq: 'confirm' },
+      'input.reply_to_flow': { eq: 'f-dye' },
+    });
+  });
+
+  it('re-picking moves the automation too, never leaving the old one behind', async () => {
+    const el = await mountGuard({
+      id: 'f-tap',
+      when: { 'input.reply_to_step': { eq: 'confirm' }, 'input.reply_to_flow': { eq: 'f-dye' } },
+    });
+    await choose(el, 'Confirmar corte');
+    expect(guard(el)).toEqual({
+      'input.reply_to_step': { eq: 'confirm' },
+      'input.reply_to_flow': { eq: 'f-cut' },
+    });
+  });
+
+  it('shows a saved pair as the choice it was, not as the first automation with that step', async () => {
+    const el = await mountGuard({
+      id: 'f-tap',
+      when: { 'input.reply_to_step': { eq: 'confirm' }, 'input.reply_to_flow': { eq: 'f-dye' } },
+    });
+    const box = select(el);
+    expect(shown(box)).toBe('ui.replyStepOption:Confirmar tinte|¿Confirmas el tinte?');
+    // The automation id is part of that one choice, not a second row with an id to read.
+    expect(el.renderRoot.querySelectorAll('.guard-row')).toHaveLength(1);
+    expect(el.renderRoot.querySelector('.guard-row input[data-field="guard-value"]')).toBeNull();
+  });
+
+  it('removing the check removes both halves', async () => {
+    const el = await mountGuard({
+      id: 'f-tap',
+      when: { 'input.reply_to_step': { eq: 'confirm' }, 'input.reply_to_flow': { eq: 'f-dye' } },
+    });
+    (el.renderRoot.querySelector('.guard-row button.icon-btn') as HTMLButtonElement).click();
+    await settle(el);
+    expect(guard(el)).toEqual({});
+  });
+
+  it('a question of THIS automation, already saved, names this automation', async () => {
+    const own = { id: 'mine', kind: 'notify', channel: 'whatsapp', vars: { text: '¿Vienes?' } };
+    const el = await mountGuard({ id: 'f-tap', when: { 'input.reply_to_step': { eq: '' } }, list: [], extraSteps: [own] });
+    await choose(el, '¿Vienes?');
+    expect(guard(el)).toEqual({ 'input.reply_to_step': { eq: 'mine' }, 'input.reply_to_flow': { eq: 'f-tap' } });
+  });
+
+  it('a question of an automation never saved has no id yet: only the step, as before', async () => {
+    const own = { id: 'mine', kind: 'notify', channel: 'whatsapp', vars: { text: '¿Vienes?' } };
+    const el = await mountGuard({ id: undefined, when: { 'input.reply_to_step': { eq: '' } }, list: [], extraSteps: [own] });
+    await choose(el, '¿Vienes?');
+    expect(guard(el)).toEqual({ 'input.reply_to_step': { eq: 'mine' } });
+  });
+
+  it('on a hub never seen sending the automation, saves only the step (an older core would never match)', async () => {
+    const el = await mountGuard({ id: 'f-tap', when: { 'input.reply_to_step': { eq: '' } }, shape: OLD_CORE });
+    await choose(el, 'Confirmar tinte');
+    expect(guard(el)).toEqual({ 'input.reply_to_step': { eq: 'confirm' } });
+  });
+
+  it('a field the hub names but has never carried is not evidence it sends it', async () => {
+    const unseen = shapeWith(['from', 'text', 'reply_to_step']);
+    unseen.fields.push({ path: 'reply_to_flow', type: 'string', sample: '', redacted: false, truncated: false, seen_in: 0 });
+    const el = await mountGuard({ id: 'f-tap', when: { 'input.reply_to_step': { eq: '' } }, shape: unseen });
+    await choose(el, 'Confirmar tinte');
+    expect(guard(el)).toEqual({ 'input.reply_to_step': { eq: 'confirm' } });
+  });
+
+  it('«does not answer this question» stays one comparison on the step', async () => {
+    const el = await mountGuard({ id: 'f-tap', when: { 'input.reply_to_step': { neq: '' } } });
+    await choose(el, 'Confirmar tinte');
+    // Two `neq` rows would mean «neither this step NOR this automation» — not what was picked.
+    expect(guard(el)).toEqual({ 'input.reply_to_step': { neq: 'confirm' } });
+  });
+
+  it('a guard saved before, with the step only, still shows its question and is left as it was', async () => {
+    const el = await mountGuard({ id: 'f-tap', when: { 'input.reply_to_step': { eq: 'confirm' } } });
+    const box = select(el);
+    expect(shown(box)).toBe('ui.replyStepOption:Confirmar corte|¿Confirmas el corte?');
+    expect(guard(el)).toEqual({ 'input.reply_to_step': { eq: 'confirm' } });
   });
 });

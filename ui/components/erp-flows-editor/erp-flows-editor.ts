@@ -225,6 +225,22 @@ function eventOption(value: string, label: string, current: string) {
 
 /** The field the hub fills with the id of the WhatsApp step a reply answers (hub#1951). */
 const REPLY_STEP_PATH = 'input.reply_to_step';
+/** …and the one it fills with the id of the automation that step belongs to (hub#1962). */
+const REPLY_FLOW_PATH = 'input.reply_to_flow';
+
+/**
+ * A question is a (automation, step) PAIR, so that is what an option's value carries (flows#124):
+ * the same template installed twice gives both copies the same step id.
+ */
+function questionKey(flowId: string, stepId: string): string {
+  return stepId === '' ? '' : JSON.stringify([flowId, stepId]);
+}
+
+function parseQuestionKey(key: string): { flowId: string; stepId: string } {
+  if (key === '') return { flowId: '', stepId: '' };
+  const [flowId, stepId] = JSON.parse(key) as [string, string];
+  return { flowId, stepId };
+}
 
 function rowsToWhen(rows: GuardRow[]): Condition {
   const out: Condition = {};
@@ -2457,14 +2473,43 @@ export class ErpFlowsEditor extends LitElement {
     </div>`;
   }
 
+  /**
+   * Whether this hub puts `reply_to_flow` in its WhatsApp event (hub#1962) — known only because it
+   * was SEEN there. An older core leaves the field out, a missing field equals nothing, and a check
+   * on it would stop matching every answer; so without that evidence only the step is compared.
+   */
+  private get hubSendsReplyToFlow(): boolean {
+    return !!this.shape?.fields.some((f) => f.path === 'reply_to_flow' && f.seen_in > 0);
+  }
+
   private renderGuardPanel(step: Step, index: number) {
     const rows = guardRows(step.when);
     const update = (next: GuardRow[]): void =>
       this.setDoc(patchStep(this.document, index, { when: rowsToWhen(next) }));
+    // «The question it answers» is ONE choice written as two comparisons (flows#124): the
+    // automation half rides inside the step's dropdown and goes wherever that row goes.
+    const pairsFlow = rows.some((r) => r.path === REPLY_STEP_PATH && r.op === 'eq');
+    const isFlowHalf = (r: GuardRow): boolean => pairsFlow && r.path === REPLY_FLOW_PATH && r.op === 'eq';
+    const flowHalf = rows.find(isFlowHalf)?.value ?? '';
+    const pickQuestion = (i: number, key: string): void => {
+      const { flowId, stepId } = parseQuestionKey(key);
+      const op = rows[i].op;
+      const next = rows
+        .map((r, j) => (j === i ? { ...r, value: stepId } : r))
+        .filter((r) => !(r.path === REPLY_FLOW_PATH && r.op === 'eq'));
+      if (op === 'eq' && flowId && this.hubSendsReplyToFlow) {
+        next.push({ path: REPLY_FLOW_PATH, op: 'eq', value: flowId });
+      }
+      update(next);
+    };
+    const remove = (i: number): void => {
+      const row = rows[i];
+      update(rows.filter((r, j) => j !== i && !(row.path === REPLY_STEP_PATH && row.op === 'eq' && isFlowHalf(r))));
+    };
     return html`
       <span class="hint">${this.t('ui.guardExplain')}</span>
       ${rows.map(
-        (row, i) => html`<div class="guard-row">
+        (row, i) => isFlowHalf(row) ? nothing : html`<div class="guard-row">
           <div class="field">
             <label>${this.t('ui.field')}</label>
             <input
@@ -2506,8 +2551,8 @@ export class ErpFlowsEditor extends LitElement {
           <div class="field">
             <label>${this.t('ui.value')}</label>
             ${row.path === REPLY_STEP_PATH && (row.op === 'eq' || row.op === 'neq')
-              ? this.renderReplyStepSelect(row.value, (value) =>
-                  update(rows.map((r, j) => (j === i ? { ...r, value } : r))),
+              ? this.renderReplyStepSelect(row.value, row.op === 'eq' ? flowHalf : '', (key) =>
+                  pickQuestion(i, key),
                 )
               : html`<input
                   type="text"
@@ -2528,7 +2573,7 @@ export class ErpFlowsEditor extends LitElement {
               type="button"
               class="icon-btn"
               aria-label=${this.t('ui.removeCondition')}
-              @click=${() => update(rows.filter((_, j) => j !== i))}
+              @click=${() => remove(i)}
             >
               ×
             </button>
@@ -2553,8 +2598,12 @@ export class ErpFlowsEditor extends LitElement {
    * shown nowhere else, so typing it was not a way to build the check at all. A saved id that no
    * automation carries any more stays selected under its own «no longer exists» label: silently
    * swapping it for the first option would rewrite a working guard on the next save.
+   *
+   * Each option is an (automation, step) pair (flows#124), and `currentFlow` is the automation half
+   * already saved beside the step — `''` for a guard written before it existed, which then shows
+   * the first automation carrying that step, exactly what it matched and still matches.
    */
-  private renderReplyStepSelect(current: string, onChange: (value: string) => void) {
+  private renderReplyStepSelect(current: string, currentFlow: string, onChange: (key: string) => void) {
     const { status } = this.hubFlows;
     if (status === 'idle' || status === 'loading') {
       return html`<select data-field="reply-step" disabled>
@@ -2565,19 +2614,20 @@ export class ErpFlowsEditor extends LitElement {
       status === 'ready'
         ? questionSteps(this.hubFlows.flows, { id: this.flow?.id, name: this.name, doc: this.document })
         : [];
-    const missing = current !== '' && !steps.some((q) => q.stepId === current);
+    const chosen = steps.find((q) => q.stepId === current && (currentFlow === '' || q.flowId === currentFlow));
+    const selected = chosen ? questionKey(chosen.flowId, chosen.stepId) : questionKey(currentFlow, current);
     return html`<select
         data-field="reply-step"
-        .value=${current}
+        .value=${selected}
         @change=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
       >
-        ${option('', this.t('ui.replyStepChoose'), current)}
-        ${missing ? option(current, this.t('ui.replyStepMissing'), current) : nothing}
+        ${option('', this.t('ui.replyStepChoose'), selected)}
+        ${current !== '' && !chosen ? option(selected, this.t('ui.replyStepMissing'), selected) : nothing}
         ${steps.map((q) =>
-          option(q.stepId, this.t('ui.replyStepOption', {
+          option(questionKey(q.flowId, q.stepId), this.t('ui.replyStepOption', {
               flow: q.flowName || this.t('ui.unnamed'),
               text: q.text || this.t('ui.replyStepNoText'),
-            }), current),
+            }), selected),
         )}
       </select>
       ${status === 'error'
