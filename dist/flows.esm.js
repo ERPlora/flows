@@ -3815,6 +3815,39 @@ function errorCode(e4) {
   return typeof code === "string" ? code : "";
 }
 
+// ui/lib/question-steps.ts
+function obj2(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+function str(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+function textOf2(step) {
+  const body = obj2(obj2(step.interactive)?.body);
+  return str(body?.text) || str(obj2(step.vars)?.text) || str(step.template);
+}
+function fromSteps(steps, flowName) {
+  if (!Array.isArray(steps)) return [];
+  const out = [];
+  for (const raw of steps) {
+    const step = obj2(raw);
+    if (!step || step.kind !== "notify" || step.channel !== "whatsapp") continue;
+    const stepId = str(step.id);
+    if (!stepId) continue;
+    out.push({ stepId, flowName, text: textOf2(step) });
+  }
+  return out;
+}
+function questionSteps(flows, open) {
+  const out = [];
+  if (open) out.push(...fromSteps(open.doc.steps, open.name));
+  for (const flow of flows) {
+    if (open?.id && flow.id === open.id) continue;
+    out.push(...fromSteps(obj2(flow.definition)?.steps, str(flow.name)));
+  }
+  return out;
+}
+
 // ui/components/erp-flows-editor/erp-flows-editor.ts
 var TABS = ["editor", "test", "permissions", "history"];
 function stepSeconds(step) {
@@ -3862,6 +3895,7 @@ function retime(schedule, every) {
 function eventOption(value, label, current) {
   return b2`<option value=${value} title=${value} ?selected=${value === current}>${label}</option>`;
 }
+var REPLY_STEP_PATH = "input.reply_to_step";
 function rowsToWhen(rows) {
   const out = {};
   for (const row of rows) {
@@ -3896,6 +3930,10 @@ var ErpFlowsEditor = class extends i3 {
     this.eventCatalog = { status: "loading" };
     /** One round trip per editor, not one per re-render of a panel that toggles open and shut. */
     this.catalogAsked = false;
+    this.hubFlows = {
+      status: "idle",
+      flows: []
+    };
     this.secrets = [];
     this.secretName = "";
     this.secretValue = "";
@@ -4510,6 +4548,7 @@ var ErpFlowsEditor = class extends i3 {
     if (changed.has("tab") && this.tab === "history") void this.loadRuns();
     if (changed.has("tab") && this.tab === "test") this.tested = true;
     if (this.openStep === "trigger") void this.ensureEventCatalog();
+    if (this.openGuardComparesReplyStep()) void this.ensureHubFlows();
     this.pinEventSelect();
   }
   /**
@@ -4557,6 +4596,20 @@ var ErpFlowsEditor = class extends i3 {
     if (this.catalogAsked) return;
     this.catalogAsked = true;
     this.eventCatalog = await loadEventCatalog(this.client);
+  }
+  openGuardComparesReplyStep() {
+    const step = this.document.steps.find((s4) => s4.id === this.openStep);
+    return step?.kind === "condition" && REPLY_STEP_PATH in (step.when ?? {});
+  }
+  async ensureHubFlows() {
+    if (this.hubFlows.status !== "idle" || !this.client) return;
+    this.hubFlows = { status: "loading", flows: [] };
+    try {
+      const flows = await this.client.flows.list();
+      this.hubFlows = { status: "ready", flows: Array.isArray(flows) ? flows : [] };
+    } catch {
+      this.hubFlows = { status: "error", flows: [] };
+    }
   }
   async loadShape() {
     const event = this.trigger.kind === "event" ? this.trigger.event : "";
@@ -5790,15 +5843,19 @@ var ErpFlowsEditor = class extends i3 {
           </div>
           <div class="field">
             <label>${this.t("ui.value")}</label>
-            <input
-              type="text"
-              .value=${row.value}
-              @change=${(e4) => update(
+            ${row.path === REPLY_STEP_PATH && (row.op === "eq" || row.op === "neq") ? this.renderReplyStepSelect(
+        row.value,
+        (value) => update(rows.map((r6, j) => j === i4 ? { ...r6, value } : r6))
+      ) : b2`<input
+                  type="text"
+                  data-field="guard-value"
+                  .value=${row.value}
+                  @change=${(e4) => update(
         rows.map(
           (r6, j) => j === i4 ? { ...r6, value: e4.target.value } : r6
         )
       )}
-            />
+                />`}
             ${row.op === "in" ? b2`<span class="hint">${this.t("ui.opInHint")}</span>` : A}
           </div>
           <button
@@ -5820,6 +5877,53 @@ var ErpFlowsEditor = class extends i3 {
         </button>
       </div>
     `;
+  }
+  /**
+   * «The step that asked the question», chosen by what it says (flows#118).
+   *
+   * The value is the step's internal id — what the hub writes in `reply_to_step` — and that id is
+   * shown nowhere else, so typing it was not a way to build the check at all. A saved id that no
+   * automation carries any more stays selected under its own «no longer exists» label: silently
+   * swapping it for the first option would rewrite a working guard on the next save.
+   */
+  renderReplyStepSelect(current, onChange) {
+    const { status } = this.hubFlows;
+    if (status === "idle" || status === "loading") {
+      return b2`<select data-field="reply-step" disabled>
+        <option value="">${this.t("ui.replyStepLoading")}</option>
+      </select>`;
+    }
+    const steps = status === "ready" ? questionSteps(this.hubFlows.flows, { id: this.flow?.id, name: this.name, doc: this.document }) : [];
+    const missing = current !== "" && !steps.some((q) => q.stepId === current);
+    return b2`<select
+        data-field="reply-step"
+        .value=${current}
+        @change=${(e4) => onChange(e4.target.value)}
+      >
+        ${option("", this.t("ui.replyStepChoose"), current)}
+        ${missing ? option(current, this.t("ui.replyStepMissing"), current) : A}
+        ${steps.map(
+      (q) => option(q.stepId, this.t("ui.replyStepOption", {
+        flow: q.flowName || this.t("ui.unnamed"),
+        text: q.text || this.t("ui.replyStepNoText")
+      }), current)
+    )}
+      </select>
+      ${status === "error" ? b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-field="reply-step-error"
+              >${this.t("ui.replyStepLoadFailed")}</ok-inline-feedback
+            >
+            <ion-button
+              size="small"
+              fill="clear"
+              data-act="reply-step-retry"
+              @click=${() => {
+      this.hubFlows = { status: "idle", flows: [] };
+      void this.ensureHubFlows();
+    }}
+            >
+              <ion-icon name="refresh-outline" slot="start"></ion-icon>
+              ${this.t("ui.replyStepRetry")}
+            </ion-button>` : steps.length === 0 ? b2`<span class="hint" data-field="reply-step-empty">${this.t("ui.replyStepNone")}</span>` : A}`;
   }
   renderCommandPanel(step, index) {
     return b2`
@@ -6614,6 +6718,9 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "eventCatalog", 2);
+__decorateClass([
+  r5()
+], ErpFlowsEditor.prototype, "hubFlows", 2);
 __decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "secrets", 2);
@@ -9933,6 +10040,14 @@ var es_default = {
     fieldReplyTitle: "Lo que dec\xEDa la opci\xF3n",
     fieldReplyTo: "El mensaje al que contesta",
     fieldReplyToStep: "El paso que hizo la pregunta",
+    replyStepChoose: "Elige la pregunta",
+    replyStepOption: "{flow} \u2014 \xAB{text}\xBB",
+    replyStepNoText: "mensaje sin texto",
+    replyStepMissing: "Una pregunta que ya no existe \u2014 elige otra",
+    replyStepLoading: "Cargando tus mensajes de WhatsApp\u2026",
+    replyStepNone: "Ninguna de tus automatizaciones env\xEDa todav\xEDa un WhatsApp. A\xF1ade un paso de WhatsApp que haga la pregunta y vuelve aqu\xED.",
+    replyStepLoadFailed: "No se han podido cargar tus automatizaciones, as\xED que no se pueden listar las preguntas.",
+    replyStepRetry: "Reintentar",
     filterAt: "Una fecha",
     filterCron: "El reloj",
     filterEvent: "Algo que pasa",
@@ -10856,6 +10971,14 @@ var en_default = {
     fieldReplyTitle: "What the option said",
     fieldReplyTo: "The message they are answering",
     fieldReplyToStep: "The step that asked the question",
+    replyStepChoose: "Choose the question",
+    replyStepOption: "{flow} \u2014 \xAB{text}\xBB",
+    replyStepNoText: "message without text",
+    replyStepMissing: "A question that no longer exists \u2014 choose another",
+    replyStepLoading: "Loading your WhatsApp messages\u2026",
+    replyStepNone: "None of your automations sends a WhatsApp yet. Add a WhatsApp step that asks the question, then come back here.",
+    replyStepLoadFailed: "Your automations could not be loaded, so the questions cannot be listed.",
+    replyStepRetry: "Try again",
     filterAt: "A date",
     filterCron: "The clock",
     filterEvent: "Something happening",

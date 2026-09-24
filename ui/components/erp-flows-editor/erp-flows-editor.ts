@@ -89,6 +89,7 @@ import { classify, needsAttention } from '../../lib/run-trouble';
 import { CAPABILITY_DENIED, errorCode } from '../../lib/hub-flows';
 import type { EventShape, Flow, ModuleClient, SecretInfo } from '../../lib/hub-flows';
 import type { DraftGap } from '../../lib/ai-draft';
+import { questionSteps } from '../../lib/question-steps';
 
 /**
  * The editor's four panels, in the order they are drawn — and the order the arrow keys walk.
@@ -221,6 +222,9 @@ function eventOption(value: string, label: string, current: string) {
   // prettier-ignore
   return html`<option value=${value} title=${value} ?selected=${value === current}>${label}</option>`;
 }
+
+/** The field the hub fills with the id of the WhatsApp step a reply answers (hub#1951). */
+const REPLY_STEP_PATH = 'input.reply_to_step';
 
 function rowsToWhen(rows: GuardRow[]): Condition {
   const out: Condition = {};
@@ -885,6 +889,15 @@ export class ErpFlowsEditor extends LitElement {
   /** One round trip per editor, not one per re-render of a panel that toggles open and shut. */
   private catalogAsked = false;
 
+  /**
+   * The hub's automations, read only to offer «the step that asked the question» by what it says
+   * (flows#118). Asked once, the first time a check on that field is open: most flows have none.
+   */
+  @state() private hubFlows: { status: 'idle' | 'loading' | 'ready' | 'error'; flows: Flow[] } = {
+    status: 'idle',
+    flows: [],
+  };
+
   /** The secret NAMES this hub holds. Never a value: no endpoint returns one (ADR-0283 §4). */
   @state() private secrets: SecretInfo[] = [];
 
@@ -985,6 +998,7 @@ export class ErpFlowsEditor extends LitElement {
     // the switch's warning.
     if (changed.has('tab') && this.tab === 'test') this.tested = true;
     if (this.openStep === 'trigger') void this.ensureEventCatalog();
+    if (this.openGuardComparesReplyStep()) void this.ensureHubFlows();
     this.pinEventSelect();
   }
 
@@ -1039,6 +1053,22 @@ export class ErpFlowsEditor extends LitElement {
     if (this.catalogAsked) return;
     this.catalogAsked = true;
     this.eventCatalog = await loadEventCatalog(this.client);
+  }
+
+  private openGuardComparesReplyStep(): boolean {
+    const step = this.document.steps.find((s) => s.id === this.openStep);
+    return step?.kind === 'condition' && REPLY_STEP_PATH in (step.when ?? {});
+  }
+
+  private async ensureHubFlows(): Promise<void> {
+    if (this.hubFlows.status !== 'idle' || !this.client) return;
+    this.hubFlows = { status: 'loading', flows: [] };
+    try {
+      const flows = await this.client.flows.list();
+      this.hubFlows = { status: 'ready', flows: Array.isArray(flows) ? flows : [] };
+    } catch {
+      this.hubFlows = { status: 'error', flows: [] };
+    }
   }
 
   private async loadShape(): Promise<void> {
@@ -2465,16 +2495,21 @@ export class ErpFlowsEditor extends LitElement {
           </div>
           <div class="field">
             <label>${this.t('ui.value')}</label>
-            <input
-              type="text"
-              .value=${row.value}
-              @change=${(e: Event) =>
-                update(
-                  rows.map((r, j) =>
-                    j === i ? { ...r, value: (e.target as HTMLInputElement).value } : r,
-                  ),
-                )}
-            />
+            ${row.path === REPLY_STEP_PATH && (row.op === 'eq' || row.op === 'neq')
+              ? this.renderReplyStepSelect(row.value, (value) =>
+                  update(rows.map((r, j) => (j === i ? { ...r, value } : r))),
+                )
+              : html`<input
+                  type="text"
+                  data-field="guard-value"
+                  .value=${row.value}
+                  @change=${(e: Event) =>
+                    update(
+                      rows.map((r, j) =>
+                        j === i ? { ...r, value: (e.target as HTMLInputElement).value } : r,
+                      ),
+                    )}
+                />`}
             ${row.op === 'in' ? html`<span class="hint">${this.t('ui.opInHint')}</span>` : nothing}
           </div>
           <button
@@ -2496,6 +2531,61 @@ export class ErpFlowsEditor extends LitElement {
         </button>
       </div>
     `;
+  }
+
+  /**
+   * «The step that asked the question», chosen by what it says (flows#118).
+   *
+   * The value is the step's internal id — what the hub writes in `reply_to_step` — and that id is
+   * shown nowhere else, so typing it was not a way to build the check at all. A saved id that no
+   * automation carries any more stays selected under its own «no longer exists» label: silently
+   * swapping it for the first option would rewrite a working guard on the next save.
+   */
+  private renderReplyStepSelect(current: string, onChange: (value: string) => void) {
+    const { status } = this.hubFlows;
+    if (status === 'idle' || status === 'loading') {
+      return html`<select data-field="reply-step" disabled>
+        <option value="">${this.t('ui.replyStepLoading')}</option>
+      </select>`;
+    }
+    const steps =
+      status === 'ready'
+        ? questionSteps(this.hubFlows.flows, { id: this.flow?.id, name: this.name, doc: this.document })
+        : [];
+    const missing = current !== '' && !steps.some((q) => q.stepId === current);
+    return html`<select
+        data-field="reply-step"
+        .value=${current}
+        @change=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
+      >
+        ${option('', this.t('ui.replyStepChoose'), current)}
+        ${missing ? option(current, this.t('ui.replyStepMissing'), current) : nothing}
+        ${steps.map((q) =>
+          option(q.stepId, this.t('ui.replyStepOption', {
+              flow: q.flowName || this.t('ui.unnamed'),
+              text: q.text || this.t('ui.replyStepNoText'),
+            }), current),
+        )}
+      </select>
+      ${status === 'error'
+        ? html`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-field="reply-step-error"
+              >${this.t('ui.replyStepLoadFailed')}</ok-inline-feedback
+            >
+            <ion-button
+              size="small"
+              fill="clear"
+              data-act="reply-step-retry"
+              @click=${() => {
+                this.hubFlows = { status: 'idle', flows: [] };
+                void this.ensureHubFlows();
+              }}
+            >
+              <ion-icon name="refresh-outline" slot="start"></ion-icon>
+              ${this.t('ui.replyStepRetry')}
+            </ion-button>`
+        : steps.length === 0
+          ? html`<span class="hint" data-field="reply-step-empty">${this.t('ui.replyStepNone')}</span>`
+          : nothing}`;
   }
 
   private renderCommandPanel(step: Step, index: number) {
