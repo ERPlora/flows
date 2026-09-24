@@ -53,9 +53,11 @@ const t = (key: string, params?: Record<string, unknown>): string => {
  */
 const RETIRED = [
   { id: 'whatsapp-appointment', family: 'appointment-from-whatsapp' },
-  { id: 'whatsapp-appointment-unattended', family: 'appointment-from-whatsapp-unattended' },
+  // flows#115: since whatsapp_inbox#129 there is one recipe per use and the survivor carries the
+  // short name, so the unattended ids land on it — same automation, the name it has today.
+  { id: 'whatsapp-appointment-unattended', family: 'appointment-from-whatsapp' },
   { id: 'whatsapp-reservation', family: 'reservation-from-whatsapp' },
-  { id: 'whatsapp-reservation-unattended', family: 'reservation-from-whatsapp-unattended' },
+  { id: 'whatsapp-reservation-unattended', family: 'reservation-from-whatsapp' },
 ] as const;
 
 /** A row exactly as `list_templates` serves it (`crates/server/src/flows_api.rs`). */

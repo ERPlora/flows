@@ -36,10 +36,13 @@ import type { Translator } from '../../lib/plain-language';
 /**
  * `?template=<id>` → the card the shortcut asked for, or `''` for «the whole gallery» (flows#56).
  *
- * The other end of this contract lives in another repository:
- * `whatsapp_inbox/ui/lib/whatsapp-uses.ts::galleryPath()` pushes `/m/flows/automations?template=<id>`
- * when the owner taps «Configurar» on one of the things their WhatsApp can be put to. The id is a
- * **gallery** id (`whatsapp-appointment`), never the file name of the document the module mirrors.
+ * The addresses it reads were published by another repository: `whatsapp_inbox`'s settings screen
+ * pushed `/m/flows/automations?template=<id>` when the owner tapped «Configurar» on one of the
+ * things their WhatsApp can be put to. Since whatsapp_inbox#123 that screen turns each use on
+ * through the kernel and links here only with the bare Automations address (its
+ * `AUTOMATIONS_PATH`, pinned by `erp-flows-gallery.deeplink.test.ts`, flows#119) — the reader stays
+ * because the addresses already out there still have to land. The id is a **gallery** id
+ * (`whatsapp-appointment`), never the file name of the document the module mirrors.
  *
  * An id this catalogue does not have answers `''`, which is the same answer as no parameter at all
  * — the same rule `inventory`'s `statusFilterFromSearch` applies to `?status=`. A link kept in a

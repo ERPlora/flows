@@ -7390,15 +7390,11 @@ function moduleName(id, t3) {
 }
 var RETIRED_IDS = {
   "whatsapp-appointment": { module: "whatsapp_inbox", family: "appointment-from-whatsapp" },
-  "whatsapp-appointment-unattended": {
-    module: "whatsapp_inbox",
-    family: "appointment-from-whatsapp-unattended"
-  },
+  // flows#115: since whatsapp_inbox#129 there is ONE recipe per use and the survivor carries the
+  // short name, so the unattended ids land on it — the same automation under today's name.
+  "whatsapp-appointment-unattended": { module: "whatsapp_inbox", family: "appointment-from-whatsapp" },
   "whatsapp-reservation": { module: "whatsapp_inbox", family: "reservation-from-whatsapp" },
-  "whatsapp-reservation-unattended": {
-    module: "whatsapp_inbox",
-    family: "reservation-from-whatsapp-unattended"
-  }
+  "whatsapp-reservation-unattended": { module: "whatsapp_inbox", family: "reservation-from-whatsapp" }
 };
 function mergeTemplates(local, fromModules) {
   const aliases = {};
@@ -11423,8 +11419,9 @@ var ErpFlowsApp = class extends i3 {
     /**
      * **A shortcut that names a card gets this screen out of its way** (flows#58).
      *
-     * From Settings → WhatsApp, «Configurar» pushes `/m/flows/automations?template=<id>` and fires
-     * `popstate` (`whatsapp_inbox/ui/lib/whatsapp-uses.ts`). The gallery already answers that on its
+     * A shortcut pushes `/m/flows/automations?template=<id>` and fires `popstate` — the shape
+     * Settings → WhatsApp published before whatsapp_inbox#123 (today it links with the bare address,
+     * flows#119). The gallery already answers that on its
      * own (flows#56/#57) — but only while it is on screen, and it is not: with the editor or the
      * guide up, `render()` never puts it in the document, so the one element that listens is not
      * there to listen. Nothing else saves it either, because the shell keeps this page alive when
