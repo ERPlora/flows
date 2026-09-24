@@ -409,8 +409,9 @@ export class ErpFlowsApp extends LitElement {
   /**
    * **A shortcut that names a card gets this screen out of its way** (flows#58).
    *
-   * From Settings → WhatsApp, «Configurar» pushes `/m/flows/automations?template=<id>` and fires
-   * `popstate` (`whatsapp_inbox/ui/lib/whatsapp-uses.ts`). The gallery already answers that on its
+   * A shortcut pushes `/m/flows/automations?template=<id>` and fires `popstate` — the shape
+   * Settings → WhatsApp published before whatsapp_inbox#123 (today it links with the bare address,
+   * flows#119). The gallery already answers that on its
    * own (flows#56/#57) — but only while it is on screen, and it is not: with the editor or the
    * guide up, `render()` never puts it in the document, so the one element that listens is not
    * there to listen. Nothing else saves it either, because the shell keeps this page alive when

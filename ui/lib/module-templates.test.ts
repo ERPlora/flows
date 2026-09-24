@@ -294,9 +294,10 @@ describe('the automations a module brings, as the hub serves them (flows#98)', (
  */
 const RETIRED: Record<string, string> = {
   'whatsapp-appointment': 'appointment-from-whatsapp',
-  'whatsapp-appointment-unattended': 'appointment-from-whatsapp-unattended',
+  // flows#115: one recipe per use since whatsapp_inbox#129; the survivor has the short name.
+  'whatsapp-appointment-unattended': 'appointment-from-whatsapp',
   'whatsapp-reservation': 'reservation-from-whatsapp',
-  'whatsapp-reservation-unattended': 'reservation-from-whatsapp-unattended',
+  'whatsapp-reservation-unattended': 'reservation-from-whatsapp',
 };
 
 describe('the gallery catalogue, once the hub brings the modules’ own recipes', () => {
