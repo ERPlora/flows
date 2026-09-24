@@ -580,3 +580,63 @@ describe('the limits a served WhatsApp recipe arrives with are containments, not
     expect(pinned).toEqual([`command ${CANCEL}`, `command ${RESCHEDULE}`, `query ${READ}`].sort());
   });
 });
+
+/**
+ * **Each permission a served recipe asks for, in a sentence the owner reads** (flows#114).
+ *
+ * A module explains every grant in its own `<family>.grants.json` as `reason: { en, es }`, and the
+ * hub serves it beside the grant. Until then the card's «what it will ask you to allow» block
+ * showed fourteen internal names (`staff.schedules.list_for_member`) and each of them twice.
+ */
+describe('the sentence a served recipe gives each permission (flows#114)', () => {
+  const reasoned = (reason: unknown) =>
+    row({
+      grants: [
+        {
+          kind: 'command',
+          value: 'appointments.appointments.create',
+          reason,
+        },
+        { kind: 'query', value: 'whatsapp_inbox.conversations.list' },
+      ],
+    });
+  const BOTH = { en: 'Book the appointment', es: 'Reservar la cita' };
+
+  it('uses the sentence in the owner’s language', () => {
+    const [card] = moduleTemplates([reasoned(BOTH)], 'es');
+    expect(card.grantPhrases).toEqual({ 'appointments.appointments.create': 'Reservar la cita' });
+  });
+
+  it('reads a region as its language, and falls back to English for one it does not ship', () => {
+    expect(moduleTemplates([reasoned(BOTH)], 'es-ES')[0].grantPhrases).toEqual({
+      'appointments.appointments.create': 'Reservar la cita',
+    });
+    expect(moduleTemplates([reasoned(BOTH)], 'fr')[0].grantPhrases).toEqual({
+      'appointments.appointments.create': 'Book the appointment',
+    });
+  });
+
+  it('gives no sentence for a reason it cannot read, and keeps the grant', () => {
+    for (const bad of [null, 'Book it', 42, [], {}, { en: '' }, { en: 7 }, { es: 'Solo en español' }]) {
+      const [card] = moduleTemplates([reasoned(bad)], 'fr');
+      expect(card.grantPhrases, JSON.stringify(bad)).toEqual({});
+      expect(card.grants?.map((g) => g.value)).toEqual([
+        'appointments.appointments.create',
+        'whatsapp_inbox.conversations.list',
+      ]);
+    }
+  });
+
+  it('never lets the sentence travel with the grant the hub is asked to hold', () => {
+    const [card] = moduleTemplates([reasoned(BOTH)], 'es');
+    for (const grant of card.grants ?? []) expect(Object.keys(grant)).not.toContain('reason');
+  });
+
+  it('keeps the sentence of a grant dropped as unreadable out of the card too', () => {
+    const [card] = moduleTemplates(
+      [row({ grants: [{ kind: 'command', value: '', reason: BOTH }, { kind: 'query', value: 'q.x' }] })],
+      'es',
+    );
+    expect(card.grantPhrases).toEqual({});
+  });
+});

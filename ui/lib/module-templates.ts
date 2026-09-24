@@ -101,6 +101,35 @@ function declaredGrants(raw: unknown): Grant[] {
 }
 
 /**
+ * **The sentence the module wrote for each permission, in the owner's language** (flows#114).
+ *
+ * `reason` is `{ en, es, … }` beside the grant in `<family>.grants.json`, served as it came. Read
+ * with the same language rule as the document ({@link documentFor}), and only for grants that
+ * {@link declaredGrants} kept: a sentence under a permission that is not on the list would explain
+ * nothing. A reason that is not a non-empty string in the language picked is no reason — the card
+ * then names the permission, once.
+ */
+function grantPhrases(
+  raw: unknown,
+  kept: readonly Grant[],
+  locale: string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!Array.isArray(raw)) return out;
+  const values = new Set(kept.map((grant) => grant.value));
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue;
+    const value = text((row as Grant).value);
+    if (!values.has(value) || value in out) continue;
+    const reason = (row as { reason?: unknown }).reason;
+    if (!reason || typeof reason !== 'object' || Array.isArray(reason)) continue;
+    const phrase = text(documentFor(reason as Record<string, unknown>, locale));
+    if (phrase) out[value] = phrase;
+  }
+  return out;
+}
+
+/**
  * The kernel keys this document carries, so an older core is not offered a card it refuses whole.
  *
  * `parse_step` walks an allowlist per step kind: a key it does not know is not ignored, it answers
@@ -180,6 +209,7 @@ export function moduleTemplates(rows: unknown, locale: string | undefined): Flow
       // card the hub has just said this business can run.
       witnesses: [],
       grantReasons: {},
+      grantPhrases: grantPhrases(row.grants, grants, locale ?? 'en'),
       grants,
       ...(needs.length ? { needs } : {}),
       enabledOnCreate: false,

@@ -124,6 +124,15 @@ export interface FlowTemplate {
   /** Why each command is needed, keyed by command name. Shown BEFORE the flow exists. */
   grantReasons: Readonly<Record<string, string>>;
   /**
+   * Why each permission of a SERVED card is needed, keyed by grant value, ALREADY in the owner's
+   * language (flows#114): the module writes it as `reason: { en, es }` in `<family>.grants.json`.
+   *
+   * Kept apart from {@link grantReasons} on purpose: those are keys of THIS module's catalogue,
+   * these are another module's prose, and prose must never go through the translator — a `{`, `@`
+   * or `|` in it means something to the shell's i18n and would be mangled or dropped.
+   */
+  grantPhrases?: Readonly<Record<string, string>>;
+  /**
    * **Step keys this card's document carries that an older core refuses OUTRIGHT** (flows#92).
    *
    * Not a nicety: `parse_step` walks an allowlist per step kind, so an unknown key is not ignored

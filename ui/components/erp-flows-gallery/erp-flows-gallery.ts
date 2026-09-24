@@ -877,9 +877,14 @@ export class ErpFlowsGallery extends LitElement {
           // sentence and a pin that could disagree is how a screen ends up promising containment
           // the hub is not applying, which is the whole complaint this came from.
           const pin = Object.entries(grantPin(grant));
+          // flows#114 — the sentence, then the name it stands for. A permission nobody explained
+          // is named ONCE: the same identifier as label and hint read as two permissions.
+          const reasonKey = template.grantReasons[grant.value];
+          const label =
+            template.grantPhrases?.[grant.value] ?? (reasonKey ? this.t(reasonKey) : grant.value);
           return html`<div class="item" data-grant=${grant.value}>
             <span class="grow">
-              <span class="label">${this.t(template.grantReasons[grant.value] ?? grant.value)}</span>
+              <span class="label">${label}</span>
               ${pin.length
                 ? html`<span class="hint" data-limit=${grant.value}
                     >${this.t('ui.tplGrantLimited', {
@@ -887,7 +892,7 @@ export class ErpFlowsGallery extends LitElement {
                     })}</span
                   >`
                 : nothing}
-              <span class="hint">${grant.value}</span>
+              ${label === grant.value ? nothing : html`<span class="hint">${grant.value}</span>`}
             </span>
           </div>`;
         })}
