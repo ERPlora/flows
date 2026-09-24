@@ -388,7 +388,11 @@ export function describeRunStep(row: RunStepRow, t: Translator, spec?: Step): st
     if (output?.queued === true) {
       return output.channel === 'email' ? t('ui.ranNotifyQueuedEmail') : t('ui.ranNotifyQueuedWhatsapp');
     }
-    return output?.reason === 'flow.nothing_to_offer' ? t('ui.ranNothingToOffer') : t('ui.ranNotifyNotSent');
+    // Only the kernel's own `queued: false` means nothing left. A `committed` row with no output is
+    // a message that WAS queued and lost its output to a restart: that is not «not sent».
+    if (output?.queued === false) {
+      return output.reason === 'flow.nothing_to_offer' ? t('ui.ranNothingToOffer') : t('ui.ranNotifyNotSent');
+    }
   }
   return t('ui.ranStep', { kind: row.kind ?? '' });
 }

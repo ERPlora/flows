@@ -396,6 +396,10 @@ describe('what happened, for somebody who wants to know it worked', () => {
     expect(notify('done', { queued: true, channel: 'email', recipient_redacted: true })).toBe(
       'ui.ranNotifyQueuedEmail',
     );
+    // `committed` with no output is the kernel's crash window: the message WAS queued and only its
+    // output was lost to a restart (the run then fails with flow.step_output_lost). Saying «not
+    // sent» there would be false the other way round, so it stays the neutral line.
+    expect(notify('committed', {})).toBe('ui.ranStep(kind=notify)');
     // A failed notify keeps the failure reason: that branch wins over everything else.
     expect(describeRunStep({ step_id: 'n', kind: 'notify', status: 'failed', error: 'flow.options_not_found' }, t)).toBe(
       'ui.ranFailed(reason=flow.options_not_found)',

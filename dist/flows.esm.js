@@ -2264,7 +2264,9 @@ function describeRunStep(row, t3, spec) {
     if (output?.queued === true) {
       return output.channel === "email" ? t3("ui.ranNotifyQueuedEmail") : t3("ui.ranNotifyQueuedWhatsapp");
     }
-    return output?.reason === "flow.nothing_to_offer" ? t3("ui.ranNothingToOffer") : t3("ui.ranNotifyNotSent");
+    if (output?.queued === false) {
+      return output.reason === "flow.nothing_to_offer" ? t3("ui.ranNothingToOffer") : t3("ui.ranNotifyNotSent");
+    }
   }
   return t3("ui.ranStep", { kind: row.kind ?? "" });
 }
