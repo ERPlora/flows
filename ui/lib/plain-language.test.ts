@@ -375,6 +375,33 @@ describe('what happened, for somebody who wants to know it worked', () => {
     expect(describeRunStep(row({ status: 'running', output: {} }), t)).toBe('ui.ranApprovalWaiting');
   });
 
+  it('says a notice with nothing to offer was NOT sent, and why (flows#128)', () => {
+    // hub#1651: a list or buttons that resolve empty queue nothing; the step is `stopped` and the
+    // run ends `done`. «A notify step» there let the owner believe the customer got the message.
+    const notify = (status: string, output: unknown) =>
+      describeRunStep({ step_id: 'n', kind: 'notify', status, output }, t);
+    for (const place of ['action.sections[0].rows', 'action.sections', 'action.buttons']) {
+      expect(
+        notify('stopped', { queued: false, channel: 'whatsapp', reason: 'flow.nothing_to_offer', place }),
+      ).toBe('ui.ranNothingToOffer');
+    }
+    // Stopped for a reason this screen does not know yet: still never «sent».
+    expect(notify('stopped', { queued: false, channel: 'whatsapp', reason: 'flow.something_new' })).toBe(
+      'ui.ranNotifyNotSent',
+    );
+    // The ordinary case says the message went to the queue, on its channel.
+    expect(notify('done', { queued: true, channel: 'whatsapp', recipient_redacted: true })).toBe(
+      'ui.ranNotifyQueuedWhatsapp',
+    );
+    expect(notify('done', { queued: true, channel: 'email', recipient_redacted: true })).toBe(
+      'ui.ranNotifyQueuedEmail',
+    );
+    // A failed notify keeps the failure reason: that branch wins over everything else.
+    expect(describeRunStep({ step_id: 'n', kind: 'notify', status: 'failed', error: 'flow.options_not_found' }, t)).toBe(
+      'ui.ranFailed(reason=flow.options_not_found)',
+    );
+  });
+
   it('gives the reason a step failed, because that is the only actionable thing on the screen', () => {
     expect(
       describeRunStep({ step_id: 's1', kind: 'command', status: 'failed', error: 'no live grant' }, t),

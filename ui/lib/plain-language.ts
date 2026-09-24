@@ -381,6 +381,15 @@ export function describeRunStep(row: RunStepRow, t: Translator, spec?: Step): st
     if (decision === 'expired') return t('ui.ranApprovalExpired');
     return t('ui.ranApprovalWaiting');
   }
+  // A notice with nothing to offer queues nothing (hub#1651): the step is `stopped` and the run
+  // ends `done`. It must never read as sent — the owner would think the customer got it.
+  if (row.kind === 'notify') {
+    const output = row.output as { queued?: boolean; channel?: string; reason?: string } | undefined;
+    if (output?.queued === true) {
+      return output.channel === 'email' ? t('ui.ranNotifyQueuedEmail') : t('ui.ranNotifyQueuedWhatsapp');
+    }
+    return output?.reason === 'flow.nothing_to_offer' ? t('ui.ranNothingToOffer') : t('ui.ranNotifyNotSent');
+  }
   return t('ui.ranStep', { kind: row.kind ?? '' });
 }
 
