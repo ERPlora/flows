@@ -2259,6 +2259,15 @@ function describeRunStep(row, t3, spec) {
     if (decision === "expired") return t3("ui.ranApprovalExpired");
     return t3("ui.ranApprovalWaiting");
   }
+  if (row.kind === "notify") {
+    const output = row.output;
+    if (output?.queued === true) {
+      return output.channel === "email" ? t3("ui.ranNotifyQueuedEmail") : t3("ui.ranNotifyQueuedWhatsapp");
+    }
+    if (output?.queued === false) {
+      return output.reason === "flow.nothing_to_offer" ? t3("ui.ranNothingToOffer") : t3("ui.ranNotifyNotSent");
+    }
+  }
   return t3("ui.ranStep", { kind: row.kind ?? "" });
 }
 function humaniseField(path) {
@@ -10284,6 +10293,10 @@ var es_default = {
     ranFailedUnknown: "sin motivo indicado",
     ranGuardPassed: "La condici\xF3n se cumpli\xF3",
     ranGuardStopped: "La condici\xF3n no se cumpli\xF3, as\xED que termin\xF3 aqu\xED. Eso es la automatizaci\xF3n funcionando.",
+    ranNothingToOffer: "No hab\xEDa nada que ofrecer (la lista estaba vac\xEDa), as\xED que el mensaje no se mand\xF3",
+    ranNotifyNotSent: "El mensaje no se mand\xF3",
+    ranNotifyQueuedEmail: "Correo en cola para mandarse",
+    ranNotifyQueuedWhatsapp: "Mensaje de WhatsApp en cola para mandarse",
     ranQueryFound: "Encontr\xF3 {count}",
     ranQueryNothing: "No encontr\xF3 nada, y sigui\xF3",
     ranStep: "Un paso \xAB{kind}\xBB",
@@ -11220,6 +11233,10 @@ var en_default = {
     ranFailedUnknown: "no reason given",
     ranGuardPassed: "The condition was met",
     ranGuardStopped: "The condition was not met, so it stopped here. That is the automation working.",
+    ranNothingToOffer: "There was nothing to offer (the list was empty), so the message was not sent",
+    ranNotifyNotSent: "The message was not sent",
+    ranNotifyQueuedEmail: "Email queued to send",
+    ranNotifyQueuedWhatsapp: "WhatsApp message queued to send",
     ranQueryFound: "Found {count}",
     ranQueryNothing: "Found nothing, and carried on",
     ranStep: "A \u201C{kind}\u201D step",

@@ -108,7 +108,9 @@ back — not by you, not by this screen — only used by a *Call another system*
 Every time the automation woke up there is a line with the day and the hour, its outcome, and
 underneath it, in words, what each step did: *Ran `tasks.tasks.create`*, *Found 3*, *Found nothing,
 and carried on*, *Somebody said yes*, *Nobody answered in time*, *The condition was not met, so it
-stopped here*, *Waiting for somebody to answer*. A failed step shows the reason, which is the only
+stopped here*, *Waiting for somebody to answer*, *WhatsApp message queued to send*. A message
+that had nothing to offer — a list of free slots that came back empty — is not sent, and the line
+says so: *There was nothing to offer (the list was empty), so the message was not sent*. A failed step shows the reason, which is the only
 actionable thing on the screen. Each run has an id you can copy for support.
 
 ## The approval tray
