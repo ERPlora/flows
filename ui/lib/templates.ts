@@ -1033,21 +1033,18 @@ export interface MergedCatalogue {
  * name; the other three were live ids of this gallery for weeks and can be sitting in a bookmark.
  * Named here they keep landing on the recipe that replaced them instead of on the whole gallery.
  *
- * 🔴 **An entry is only ever REMOVED when the family itself stops being served.** Deleting one
+ * 🔴 **An entry is only ever REMOVED when the use itself stops being served** — when its family is
+ * renamed, the entry is repointed at the survivor (flows#115), never dropped. Deleting one
  * because «nothing links to it any more» is unverifiable from this repository: the links are in
  * other people's browsers.
  */
 const RETIRED_IDS: Readonly<Record<string, { readonly module: string; readonly family: string }>> = {
   'whatsapp-appointment': { module: 'whatsapp_inbox', family: 'appointment-from-whatsapp' },
-  'whatsapp-appointment-unattended': {
-    module: 'whatsapp_inbox',
-    family: 'appointment-from-whatsapp-unattended',
-  },
+  // flows#115: since whatsapp_inbox#129 there is ONE recipe per use and the survivor carries the
+  // short name, so the unattended ids land on it — the same automation under today's name.
+  'whatsapp-appointment-unattended': { module: 'whatsapp_inbox', family: 'appointment-from-whatsapp' },
   'whatsapp-reservation': { module: 'whatsapp_inbox', family: 'reservation-from-whatsapp' },
-  'whatsapp-reservation-unattended': {
-    module: 'whatsapp_inbox',
-    family: 'reservation-from-whatsapp-unattended',
-  },
+  'whatsapp-reservation-unattended': { module: 'whatsapp_inbox', family: 'reservation-from-whatsapp' },
 };
 
 export function mergeTemplates(

@@ -378,17 +378,21 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
 /**
  * **The other end of the contract, read from the module that emits it.**
  *
- * `?template=` is shared between two repositories: this gallery reads what
- * `whatsapp_inbox/ui/lib/whatsapp-uses.ts` writes. Nothing in CI can see that module, so this is
- * skipped LOUDLY there — but in the workspace, where both checkouts sit side by side, it is the
- * only thing that notices the day the emitter renames the parameter or offers a card this
- * catalogue does not have. Same rule the mirror tests in `ui/lib/templates.test.ts` apply to the
- * neighbour's flow documents.
+ * The WhatsApp settings screen (`whatsapp_inbox/ui/lib/whatsapp-uses.ts`) links to this module in
+ * two ways, and both are strings this repository cannot see from CI: the address its «Advanced
+ * settings» pushes (`AUTOMATIONS_PATH`) and the query it asks to know whether Automations is
+ * installed at all (`AUTOMATIONS_WITNESS`). Since whatsapp_inbox#123 it turns each use on through
+ * the kernel and no longer names a gallery card, so the link is the bare Automations screen — the
+ * `?template=` reader above stays for the addresses already published, and this guard checks what
+ * the emitter sends TODAY (flows#119). Skipped LOUDLY without a checkout beside this module; in the
+ * workspace it is the only thing that notices the day either side renames its half. Same rule the
+ * mirror tests in `ui/lib/templates.test.ts` apply to the neighbour's flow documents.
  */
 const EMITTER_PATH = 'ui/lib/whatsapp-uses.ts';
+const MODULE_ROOT = resolve(__dirname, '../../..');
 
 function emitterSource(): { source: string; where: string } | null {
-  const modules = resolve(__dirname, '../../../..');
+  const modules = resolve(MODULE_ROOT, '..');
   const canonical = join(modules, 'whatsapp_inbox');
   if (existsSync(canonical)) {
     try {
@@ -404,46 +408,81 @@ function emitterSource(): { source: string; where: string } | null {
       // whichever source actually answered, so a fallback is never silent.
     }
   }
-  for (const dir of ['whatsapp_inbox', 'whatsapp_inbox-wt-59']) {
-    const file = join(modules, dir, EMITTER_PATH);
-    if (existsSync(file)) return { source: readFileSync(file, 'utf8'), where: file };
-  }
+  const file = join(canonical, EMITTER_PATH);
+  if (existsSync(file)) return { source: readFileSync(file, 'utf8'), where: file };
   return null;
 }
 
-describe('the module that emits the shortcut and the gallery that reads it agree (whatsapp_inbox#59)', () => {
+/** The one `export const NAME = '…'` of the emitter, or `undefined` when it is spelled otherwise. */
+const constant = (source: string, name: string): string | undefined =>
+  source.match(new RegExp(`^export const ${name} = '([^']+)';$`, 'm'))?.[1];
+
+/**
+ * The address «Advanced settings» pushes, resolved the way the emitter builds it: a template
+ * literal over `AUTOMATIONS_MODULE`, or a plain string.
+ */
+function emittedPath(source: string): string | undefined {
+  const raw =
+    source.match(/^export const AUTOMATIONS_PATH = `([^`]+)`;$/m)?.[1] ?? constant(source, 'AUTOMATIONS_PATH');
+  const module = constant(source, 'AUTOMATIONS_MODULE');
+  if (raw === undefined) return undefined;
+  if (raw.includes('${') && module === undefined) return undefined;
+  return module === undefined ? raw : raw.split('${AUTOMATIONS_MODULE}').join(module);
+}
+
+interface Manifest {
+  id: string;
+  navigation: { id: string }[];
+  queries: Record<string, { sql: string }>;
+}
+const manifest = (): Manifest => JSON.parse(readFileSync(join(MODULE_ROOT, 'module.json'), 'utf8')) as Manifest;
+
+describe('the WhatsApp settings screen links to a screen and a query this module has (flows#119)', () => {
   const emitter = emitterSource();
   const where = emitter
     ? `read from ${emitter.where}`
     : 'SKIPPED: no whatsapp_inbox checkout beside this module';
 
-  it.skipIf(!emitter)(`names the parameter this gallery reads (${where})`, () => {
-    expect(emitter!.source).toContain('?template=');
+  it.skipIf(!emitter)(`«Advanced settings» opens an Automations screen that exists (${where})`, () => {
+    const path = emittedPath(emitter!.source);
+    expect(path, 'no AUTOMATIONS_PATH in the emitter — this guard is reading the wrong thing').toBeDefined();
+    const url = new URL(path!, 'https://hub.invalid');
+    const { id, navigation } = manifest();
+    const [, prefix, module, nav, ...rest] = url.pathname.split('/');
+    expect({ prefix, module, rest }, `${path} is not a screen of this module`).toEqual({
+      prefix: 'm',
+      module: id,
+      rest: [],
+    });
+    expect(
+      navigation.map((n) => n.id),
+      `${path} names a tab this module does not declare`,
+    ).toContain(nav);
+    // A parameter this gallery does not read is a promise nobody keeps; the one it does read has to
+    // name a card it has, or the owner lands on the plain gallery with no word of why.
+    for (const [key, value] of url.searchParams) {
+      expect(key, `${path} carries a parameter this gallery ignores`).toBe('template');
+      expect(templateFromSearch(`?template=${value}`, onScreen()), `${value} names no card`).toBe(value);
+    }
   });
 
   /**
-   * 🔴 Against the catalogue the gallery actually holds — written cards PLUS what the hub served
-   * (flows#101). Every id this emitter offers today is a retired one: the recipes it points at are
-   * the ones it serves itself now, and they are reachable only through the aliases the served rows
-   * create. Asked of the written cards alone this guard would report that `whatsapp_inbox` links
-   * to a card that does not exist, which is exactly backwards — the link works, and it works
-   * *because* the app serves the recipe.
+   * The witness is asked BARE (`queryOptional` with no params) and `undefined` is read as «not
+   * installed». A name this module does not declare answers that on every hub that HAS it, and a
+   * query that wants a parameter answers `missing_required_param` — the card would hide the
+   * Automations link, or paint it for the wrong reason.
    */
-  it.skipIf(!emitter)(`only offers cards this gallery has (${where})`, () => {
+  it.skipIf(!emitter)(`asks whether Automations is here with a query it declares, askable bare (${where})`, () => {
     const source = emitter!.source;
-    const uses = source.slice(source.indexOf('WHATSAPP_USES'));
-    const ids = [...uses.matchAll(/^\s{4}id: '([^']+)',$/gm)].map((m) => m[1]);
-    expect(ids.length, 'the emitter offers no use at all — this guard is reading the wrong thing').toBeGreaterThan(0);
-    const catalogue = onScreen();
-    for (const id of ids) {
-      expect(templateFromSearch(`?template=${id}`, catalogue), `${id} is offered but this gallery has no such card`).toBe(id);
-      // …and it names a card that is really on the shelf, not merely an id the reader accepted.
-      const lands = catalogue.aliases[id] ?? id;
-      expect(
-        catalogue.cards.some((c) => c.id === lands),
-        `${id} is accepted but forwards to ${lands}, which is on no shelf`,
-      ).toBe(true);
-    }
+    const witness = constant(source, 'AUTOMATIONS_WITNESS');
+    expect(witness, 'no AUTOMATIONS_WITNESS in the emitter — this guard is reading the wrong thing').toBeDefined();
+    const asked = source.match(/probeAutomations\b[\s\S]*?queryOptional\('([^']+)'\)/)?.[1];
+    expect(asked, 'the probe asks something other than the witness it declares').toBe(witness);
+    const { queries } = manifest();
+    expect(Object.keys(queries), `${witness} is not a query of this module`).toContain(witness);
+    const sql = readFileSync(join(MODULE_ROOT, queries[witness!].sql), 'utf8');
+    const binds = [...new Set([...sql.replace(/--.*$/gm, '').matchAll(/(?<!:):([a-z_]+)/g)].map((m) => m[1]))];
+    expect(binds, `${witness} needs a parameter the emitter never sends`).toEqual(['hub_id']);
   });
 });
 
