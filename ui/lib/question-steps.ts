@@ -70,3 +70,45 @@ export function questionSteps(flows: Flow[], open: OpenFlow | null): QuestionSte
   }
   return out;
 }
+
+/**
+ * Whether this hub says which automation asked (`reply_to_flow`, hub#1962) — known only because
+ * it was SEEN in its WhatsApp messages. An older core leaves the field out, a missing field equals
+ * nothing, and a check on it would stop matching every answer (flows#124).
+ */
+export function sendsReplyToFlow(
+  shape: { fields?: readonly { path: string; seen_in: number }[] } | null | undefined,
+): boolean {
+  return !!shape?.fields?.some((f) => f.path === 'reply_to_flow' && f.seen_in > 0);
+}
+
+const REPLY_STEP = 'input.reply_to_step';
+const REPLY_FLOW = 'input.reply_to_flow';
+
+/**
+ * The checks of this document that name the step of a question but not its automation, where that
+ * step is asked by MORE than one saved automation (flows#125) — the same template installed twice.
+ * The customer's «Yes» to one then counts for the other too, and only the owner can say which one
+ * she meant, so these are shown, never rewritten. One automation asking with that step is not
+ * ambiguous: the check matches exactly what it always did.
+ */
+export function ambiguousReplyGuards(definition: unknown, flows: Flow[]): string[] {
+  const steps = obj(definition)?.steps;
+  if (!Array.isArray(steps)) return [];
+  const askers = new Map<string, Set<string>>();
+  for (const q of questionSteps(flows, null)) {
+    if (!q.flowId) continue;
+    const set = askers.get(q.stepId) ?? new Set<string>();
+    set.add(q.flowId);
+    askers.set(q.stepId, set);
+  }
+  const out: string[] = [];
+  for (const raw of steps) {
+    const step = obj(raw);
+    const when = obj(step?.when);
+    if (!step || step.kind !== 'condition' || !when || REPLY_FLOW in when) continue;
+    const asked = str(obj(when[REPLY_STEP])?.eq);
+    if (asked && (askers.get(asked)?.size ?? 0) > 1) out.push(str(step.id));
+  }
+  return out;
+}

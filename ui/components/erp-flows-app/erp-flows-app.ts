@@ -24,7 +24,8 @@ import { describeTrigger } from '../../lib/plain-language';
 import { catalogEntry } from '../../lib/trigger-catalog';
 import { CAPABILITY_DENIED, errorCode, resolveClient } from '../../lib/hub-flows';
 import type { Flow, ModuleClient } from '../../lib/hub-flows';
-import { flowProblems, repairedDefinition } from '../../lib/flow-checkup';
+import { flowProblems, repairedDefinition, WHATSAPP_MESSAGE_EVENT } from '../../lib/flow-checkup';
+import { ambiguousReplyGuards, sendsReplyToFlow } from '../../lib/question-steps';
 import type { FlowProblem } from '../../lib/flow-checkup';
 import { contractProblems, draftGaps, readDraft, schemaFacts } from '../../lib/ai-draft';
 import type { Draft, DraftGap, DraftProblem, DraftRow, SchemaFacts } from '../../lib/ai-draft';
@@ -401,6 +402,9 @@ export class ErpFlowsApp extends LitElement {
   /** The automation whose repair is in flight, so its button cannot be pressed twice. */
   @state() private repairing = '';
 
+  /** Whether this hub was SEEN saying which automation asked a question (hub#1962, flows#125). */
+  @state() private replyToFlowSeen = false;
+
   /** The contract THIS hub serves, read from `GET /api/hub/flows/schema` — never bundled. */
   private facts: SchemaFacts = schemaFacts(undefined);
 
@@ -522,6 +526,7 @@ export class ErpFlowsApp extends LitElement {
       this.setGateFromError(e);
       return;
     }
+    await this.askReplyToFlow();
     await this.countApprovals();
     await this.countDead();
     await this.loadTray();
@@ -781,6 +786,23 @@ export class ErpFlowsApp extends LitElement {
       this.error = (e as Error)?.message || this.t('ui.errGeneric');
     } finally {
       this.repairing = '';
+    }
+  }
+
+  /**
+   * **Can picking the question again fix an old check?** (flows#125) — asked only when some
+   * automation carries a check that cannot tell two automations apart, so a hub with none pays no
+   * round trip. Without evidence the hub sends `reply_to_flow`, picking again saves the step only
+   * and the warning could never leave the row: it is not shown.
+   */
+  private async askReplyToFlow(): Promise<void> {
+    if (this.replyToFlowSeen || !this.client) return;
+    if (!this.flows.some((f) => ambiguousReplyGuards(f.definition, this.flows).length > 0)) return;
+    try {
+      this.replyToFlowSeen = sendsReplyToFlow(await this.client.events.shape(WHATSAPP_MESSAGE_EVENT));
+    } catch {
+      // A hub that cannot describe the event cannot be shown to send the field: stay quiet.
+      this.replyToFlowSeen = false;
     }
   }
 
@@ -1047,6 +1069,28 @@ export class ErpFlowsApp extends LitElement {
           </button>
         </div>`,
       )}
+      <!-- flows#125: a check saved before flows#124 names the step, not the automation, and two
+           automations ask with that step. Only the owner knows which one she meant, so the button
+           opens the automation to pick it again instead of saving anything. -->
+      ${this.replyToFlowSeen && ambiguousReplyGuards(flow.definition, this.flows).length > 0
+        ? html`<div class="checkup" data-checkup="reply_step_ambiguous">
+            <span class="said">
+              <strong>${this.t('ui.checkupReplyTitle')}</strong>
+              ${this.t('ui.checkupReplyBody')}
+            </span>
+            <button
+              type="button"
+              data-act="checkup-fix"
+              @click=${() => {
+                this.editing = flow;
+                this.isNew = false;
+                this.editorTab = 'editor';
+              }}
+            >
+              ${this.t('ui.checkupReplyFix')}
+            </button>
+          </div>`
+        : nothing}
     </div>`;
   }
 

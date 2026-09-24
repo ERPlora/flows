@@ -89,7 +89,7 @@ import { classify, needsAttention } from '../../lib/run-trouble';
 import { CAPABILITY_DENIED, errorCode } from '../../lib/hub-flows';
 import type { EventShape, Flow, ModuleClient, SecretInfo } from '../../lib/hub-flows';
 import type { DraftGap } from '../../lib/ai-draft';
-import { questionSteps } from '../../lib/question-steps';
+import { ambiguousReplyGuards, questionSteps, sendsReplyToFlow } from '../../lib/question-steps';
 
 /**
  * The editor's four panels, in the order they are drawn — and the order the arrow keys walk.
@@ -2479,7 +2479,7 @@ export class ErpFlowsEditor extends LitElement {
    * on it would stop matching every answer; so without that evidence only the step is compared.
    */
   private get hubSendsReplyToFlow(): boolean {
-    return !!this.shape?.fields.some((f) => f.path === 'reply_to_flow' && f.seen_in > 0);
+    return sendsReplyToFlow(this.shape);
   }
 
   private renderGuardPanel(step: Step, index: number) {
@@ -2491,6 +2491,12 @@ export class ErpFlowsEditor extends LitElement {
     const pairsFlow = rows.some((r) => r.path === REPLY_STEP_PATH && r.op === 'eq');
     const isFlowHalf = (r: GuardRow): boolean => pairsFlow && r.path === REPLY_FLOW_PATH && r.op === 'eq';
     const flowHalf = rows.find(isFlowHalf)?.value ?? '';
+    // A check saved before flows#124 names the step only; when two saved automations ask with it,
+    // the owner is told to pick again (flows#125) — only where picking again writes the automation.
+    const ambiguous =
+      this.hubSendsReplyToFlow &&
+      this.hubFlows.status === 'ready' &&
+      ambiguousReplyGuards({ steps: [step] }, this.hubFlows.flows).length > 0;
     const pickQuestion = (i: number, key: string): void => {
       const { flowId, stepId } = parseQuestionKey(key);
       const op = rows[i].op;
@@ -2551,9 +2557,13 @@ export class ErpFlowsEditor extends LitElement {
           <div class="field">
             <label>${this.t('ui.value')}</label>
             ${row.path === REPLY_STEP_PATH && (row.op === 'eq' || row.op === 'neq')
-              ? this.renderReplyStepSelect(row.value, row.op === 'eq' ? flowHalf : '', (key) =>
-                  pickQuestion(i, key),
-                )
+              ? html`${this.renderReplyStepSelect(row.value, row.op === 'eq' ? flowHalf : '', (key) =>
+                    pickQuestion(i, key),
+                  )}${ambiguous && row.op === 'eq'
+                    ? html`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-field="reply-step-ambiguous"
+                        >${this.t('ui.replyStepAmbiguous')}</ok-inline-feedback
+                      >`
+                    : nothing}`
               : html`<input
                   type="text"
                   data-field="guard-value"
