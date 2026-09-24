@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { questionSteps } from './question-steps';
+import { ambiguousReplyGuards, questionSteps, sendsReplyToFlow } from './question-steps';
 import type { Flow } from './hub-flows';
 import type { FlowDoc } from './flow-doc';
 
@@ -106,5 +106,70 @@ describe('a question belongs to the automation that asks it (flows#124)', () => 
       ['f-a', 'confirm'],
       ['f-b', 'confirm'],
     ]);
+  });
+});
+
+/**
+ * **A check saved before flows#124 names the step and not the automation** (flows#125).
+ *
+ * It is only a problem when that step id lives in more than one saved automation — the same
+ * template installed twice. Then the customer's «Yes» to one also counts for the other, and the
+ * owner has to pick the question again; nothing can pick it for her, both are equally plausible.
+ */
+describe('checks that cannot tell which automation asked (flows#125)', () => {
+  const twin = (id: string) => flow(id, id, [{ ...ASK, id: 'confirm' }]);
+  const tapFlow = (when: Record<string, unknown>) => ({
+    schema_version: 1,
+    triggers: [{ kind: 'event', event: 'hub.whatsapp.message_received' }],
+    steps: [{ id: 'g', kind: 'condition', when }],
+  });
+
+  it('names a step-only check whose step two automations share', () => {
+    const got = ambiguousReplyGuards(tapFlow({ 'input.reply_to_step': { eq: 'confirm' } }), [twin('f-cut'), twin('f-dye')]);
+    expect(got).toEqual(['g']);
+  });
+
+  it('says nothing once the check also names the automation', () => {
+    const when = { 'input.reply_to_step': { eq: 'confirm' }, 'input.reply_to_flow': { eq: 'f-dye' } };
+    expect(ambiguousReplyGuards(tapFlow(when), [twin('f-cut'), twin('f-dye')])).toEqual([]);
+  });
+
+  it('says nothing when only one automation asks with that step: the check is right as it is', () => {
+    expect(ambiguousReplyGuards(tapFlow({ 'input.reply_to_step': { eq: 'confirm' } }), [twin('f-cut')])).toEqual([]);
+  });
+
+  it('counts automations, not copies of the same one in the list', () => {
+    expect(
+      ambiguousReplyGuards(tapFlow({ 'input.reply_to_step': { eq: 'confirm' } }), [twin('f-cut'), twin('f-cut')]),
+    ).toEqual([]);
+  });
+
+  it('leaves alone what picking again would not change: «not this question» and an empty choice', () => {
+    const flows = [twin('f-cut'), twin('f-dye')];
+    expect(ambiguousReplyGuards(tapFlow({ 'input.reply_to_step': { neq: 'confirm' } }), flows)).toEqual([]);
+    expect(ambiguousReplyGuards(tapFlow({ 'input.reply_to_step': { eq: '' } }), flows)).toEqual([]);
+  });
+
+  it('survives a definition that is not the shape it expects', () => {
+    expect(ambiguousReplyGuards({ steps: 'nope' }, [twin('f-cut'), twin('f-dye')])).toEqual([]);
+    expect(ambiguousReplyGuards(null, [twin('f-cut'), twin('f-dye')])).toEqual([]);
+  });
+});
+
+describe('whether this hub says which automation asked (hub#1962)', () => {
+  const shape = (seen: number | null) => ({
+    event_name: 'hub.whatsapp.message_received',
+    declared_by: ['hub'],
+    samples: 3,
+    fields:
+      seen === null
+        ? []
+        : [{ path: 'reply_to_flow', type: 'string', redacted: false, truncated: false, seen_in: seen }],
+  });
+  it('only when the field was SEEN in its messages', () => {
+    expect(sendsReplyToFlow(shape(3))).toBe(true);
+    expect(sendsReplyToFlow(shape(0))).toBe(false);
+    expect(sendsReplyToFlow(shape(null))).toBe(false);
+    expect(sendsReplyToFlow(null)).toBe(false);
   });
 });

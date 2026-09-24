@@ -257,3 +257,102 @@ describe('telling the owner her automation is the one that answers itself', () =
     expect(fixButton('old-b')!.hasAttribute('disabled'), 'the second button never came back').toBe(false);
   });
 });
+
+/**
+ * **A «did they answer my question» check saved before flows#124** (flows#125).
+ *
+ * It names the step and not the automation. Harmless while one automation asks with that step;
+ * once the same template is installed twice, the customer's «Yes» to one also counts for the
+ * other. The owner does not open automations to look, so the row tells her — and, unlike the echo
+ * repair, the button cannot fix it for her: only she knows which question she meant, so it opens
+ * the automation where she picks it again.
+ */
+describe('an old check that cannot tell which automation asked (flows#125)', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  const asker = (id: string, name: string) => ({
+    id,
+    name,
+    enabled: true,
+    updated_at: '2026-09-05T10:00:00Z',
+    definition: {
+      schema_version: 1,
+      triggers: [{ kind: 'manual' }],
+      steps: [{ id: 'confirm', kind: 'notify', channel: 'whatsapp', vars: { text: `¿${name}?` } }],
+    },
+  });
+  const tap = (when: Record<string, unknown>) => ({
+    id: 'f-tap',
+    name: 'Atender respuesta',
+    enabled: true,
+    updated_at: '2026-09-05T10:00:00Z',
+    definition: {
+      schema_version: 1,
+      triggers: [
+        {
+          kind: 'event',
+          event: WHATSAPP_MESSAGE_EVENT,
+          filter: { 'event.direction': { neq: 'outbound' }, 'event.source': { neq: 'history' } },
+        },
+      ],
+      steps: [{ id: 'g', kind: 'condition', when }],
+    },
+  });
+  const shape = (withFlow: boolean) => ({
+    event_name: WHATSAPP_MESSAGE_EVENT,
+    declared_by: ['hub'],
+    samples: 3,
+    fields: ['reply_to_step', ...(withFlow ? ['reply_to_flow'] : [])].map((path) => ({
+      path, type: 'string', sample: '', redacted: false, truncated: false, seen_in: 3,
+    })),
+  });
+
+  async function mountWith(rows: unknown[], withFlow = true) {
+    const client = fakeClient(rows as never);
+    client.events.shape = vi.fn(async () => shape(withFlow)) as never;
+    const el = await mount(client);
+    return { el, client };
+  }
+  const OLD = { 'input.reply_to_step': { eq: 'confirm' } };
+  const TWINS = [asker('f-cut', 'Confirmar corte'), asker('f-dye', 'Confirmar tinte')];
+  const ambiguity = (el: ErpFlowsApp) => rowOf(el, 'f-tap')?.querySelector('[data-checkup="reply_step_ambiguous"]');
+
+  it('warns on the automation whose check two automations can answer', async () => {
+    const { el } = await mountWith([...TWINS, tap(OLD)]);
+    const warning = ambiguity(el);
+    expect(warning).toBeTruthy();
+    expect(warning!.textContent).not.toContain('ui.checkup');
+    expect(warning!.textContent?.trim().length).toBeGreaterThan(20);
+  });
+
+  it('its button opens the automation to pick the question, and saves nothing on its own', async () => {
+    const { el, client } = await mountWith([...TWINS, tap(OLD)]);
+    await click(el, ambiguity(el)!.querySelector('[data-act="checkup-fix"]'));
+    expect(client.flows.update).not.toHaveBeenCalled();
+    const editor = el.renderRoot.querySelector('erp-flows-editor') as unknown as { flow?: { id: string } } | null;
+    expect(editor?.flow?.id).toBe('f-tap');
+  });
+
+  it('says nothing once the check names the automation', async () => {
+    const { el } = await mountWith([...TWINS, tap({ ...OLD, 'input.reply_to_flow': { eq: 'f-dye' } })]);
+    expect(rowOf(el, 'f-tap')).toBeTruthy();
+    expect(ambiguity(el)).toBeFalsy();
+  });
+
+  it('says nothing when only one automation asks with that step', async () => {
+    const { el } = await mountWith([TWINS[0], tap(OLD)]);
+    expect(rowOf(el, 'f-tap')).toBeTruthy();
+    expect(ambiguity(el)).toBeFalsy();
+  });
+
+  it('says nothing on a hub not seen naming the automation: picking again could not fix it', async () => {
+    const { el } = await mountWith([...TWINS, tap(OLD)], false);
+    expect(rowOf(el, 'f-tap')).toBeTruthy();
+    expect(ambiguity(el)).toBeFalsy();
+  });
+
+  it('does not ask the hub anything when no automation has such a check', async () => {
+    const { client } = await mountWith([...TWINS]);
+    expect(client.events.shape).not.toHaveBeenCalledWith(WHATSAPP_MESSAGE_EVENT);
+  });
+});

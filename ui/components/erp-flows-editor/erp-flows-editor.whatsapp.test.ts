@@ -1191,3 +1191,92 @@ describe('picking the question ties the answer to its automation (flows#124)', (
     expect(guard(el)).toEqual({ 'input.reply_to_step': { eq: 'confirm' } });
   });
 });
+
+/**
+ * **A check saved before flows#124 says so when it can be ambiguous** (flows#125).
+ *
+ * It names the step only. When two saved automations ask with that step, the owner is told under
+ * the dropdown to pick the question again — which, since flows#124, writes the automation too.
+ * Nothing picks for her: both automations are equally plausible.
+ */
+describe('an old check that cannot tell the two automations apart says so (flows#125)', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  const ask = (flowId: string, name: string) => ({
+    id: flowId,
+    name,
+    enabled: true,
+    definition: {
+      schema_version: 1,
+      triggers: [{ kind: 'cron', cron: '0 9 * * *' }],
+      steps: [{ id: 'confirm', kind: 'notify', channel: 'whatsapp', vars: { text: `¿${name}?` } }],
+    },
+  });
+  const shape = (withFlow: boolean) => ({
+    event_name: 'hub.whatsapp.message_received',
+    declared_by: ['hub'],
+    samples: 3,
+    fields: ['reply_to_step', ...(withFlow ? ['reply_to_flow'] : [])].map((path) => ({
+      path, type: 'string', sample: '', redacted: false, truncated: false, seen_in: 3,
+    })),
+  });
+
+  async function mountOld(list: unknown[], withFlow = true): Promise<ErpFlowsEditor> {
+    const el = document.createElement('erp-flows-editor') as ErpFlowsEditor;
+    const client = fakeClient();
+    client.flows.list = vi.fn(async () => list) as never;
+    client.events.shape = vi.fn(async () => shape(withFlow)) as never;
+    el.client = client as never;
+    el.t = ((k: string, p?: Record<string, unknown>) =>
+      p ? `${k}:${Object.values(p).join('|')}` : k) as never;
+    el.interactiveNotify = true;
+    el.flow = {
+      id: 'f-tap',
+      name: 'Atender respuesta',
+      enabled: false,
+      definition: {
+        schema_version: 1,
+        triggers: [{ kind: 'event', event: 'hub.whatsapp.message_received' }],
+        steps: [{ id: 'g', kind: 'condition', when: { 'input.reply_to_step': { eq: 'confirm' } } }],
+      },
+    } as never;
+    document.body.appendChild(el);
+    await settle(el);
+    (el.renderRoot.querySelector('[data-node="g"] button.open') as HTMLButtonElement).click();
+    await settle(el);
+    await settle(el);
+    return el;
+  }
+  const warning = (el: ErpFlowsEditor) => el.renderRoot.querySelector('[data-field="reply-step-ambiguous"]');
+  const TWINS = [ask('f-cut', 'Confirmar corte'), ask('f-dye', 'Confirmar tinte')];
+
+  it('warns when two automations ask with the step it names', async () => {
+    const el = await mountOld(TWINS);
+    expect(warning(el)?.textContent).toContain('ui.replyStepAmbiguous');
+  });
+
+  it('the warning goes away once the question is picked again', async () => {
+    const el = await mountOld(TWINS);
+    const box = el.renderRoot.querySelector('select[data-field="reply-step"]') as HTMLSelectElement;
+    box.value = [...box.options].find((o) => o.textContent?.includes('Confirmar tinte'))!.value;
+    box.dispatchEvent(new Event('change'));
+    await settle(el);
+    expect(el.document.steps[0].when).toEqual({
+      'input.reply_to_step': { eq: 'confirm' },
+      'input.reply_to_flow': { eq: 'f-dye' },
+    });
+    expect(warning(el)).toBeNull();
+  });
+
+  it('says nothing when only one automation asks with it', async () => {
+    const el = await mountOld([TWINS[0]]);
+    expect(el.renderRoot.querySelector('select[data-field="reply-step"]')).not.toBeNull();
+    expect(warning(el)).toBeNull();
+  });
+
+  it('says nothing on a hub not seen naming the automation: picking again could not fix it', async () => {
+    const el = await mountOld(TWINS, false);
+    expect(el.renderRoot.querySelector('select[data-field="reply-step"]')).not.toBeNull();
+    expect(warning(el)).toBeNull();
+  });
+});
