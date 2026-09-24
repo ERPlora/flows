@@ -476,17 +476,27 @@ export class ErpFlowsEditor extends LitElement {
       font-size: 0.78rem;
       color: var(--ok-muted, #6b6a63);
     }
+    /* By the TOP (flows#121): a note under Value — the «one of» hint, a failed list with its
+       «Try again» — grows that cell only; aligned by the end it dragged Field and Is down with it. */
     .guard-row {
       display: grid;
       grid-template-columns: 1fr;
       gap: 0.4rem;
-      align-items: end;
+      align-items: start;
       padding-bottom: 0.5rem;
       border-bottom: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.06));
+    }
+    /* Stands in for a label above the remove button, so the × is level with the controls. */
+    .label-spacer {
+      display: none;
+      font-size: 0.78rem;
     }
     @media (min-width: 560px) {
       .guard-row {
         grid-template-columns: 1.2fr 0.9fr 1.2fr auto;
+      }
+      .guard-row .label-spacer {
+        display: block;
       }
     }
     .param-row {
@@ -2512,14 +2522,17 @@ export class ErpFlowsEditor extends LitElement {
                 />`}
             ${row.op === 'in' ? html`<span class="hint">${this.t('ui.opInHint')}</span>` : nothing}
           </div>
-          <button
-            type="button"
-            class="icon-btn"
-            aria-label=${this.t('ui.removeCondition')}
-            @click=${() => update(rows.filter((_, j) => j !== i))}
-          >
-            ×
-          </button>
+          <div class="field">
+            <span class="label-spacer" aria-hidden="true">&nbsp;</span>
+            <button
+              type="button"
+              class="icon-btn"
+              aria-label=${this.t('ui.removeCondition')}
+              @click=${() => update(rows.filter((_, j) => j !== i))}
+            >
+              ×
+            </button>
+          </div>
         </div>`,
       )}
       <div class="adders" style="margin-left:0">

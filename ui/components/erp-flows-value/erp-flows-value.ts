@@ -26,6 +26,11 @@ export class ErpFlowsValue extends LitElement {
     :host {
       display: block;
     }
+    /* \`display: block\` above beats the \`hidden\` attribute, and the editor keeps one of these
+       hidden in every condition row (flows#121). */
+    :host([hidden]) {
+      display: none;
+    }
     .label {
       font-size: 0.78rem;
       color: var(--ok-muted, var(--ion-color-medium, #6b6a63));
