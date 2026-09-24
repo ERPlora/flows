@@ -851,3 +851,134 @@ describe('the memory survives the second door and stays with its own step (flows
     expect('interactive' in (el.document.steps[1] as unknown as Record<string, unknown>)).toBe(false);
   });
 });
+
+/**
+ * **«If they answer my question» is written by picking the question** (flows#118).
+ *
+ * `reply_to_step` holds the internal id of the step that asked (`s3k9xq`), and that id is shown
+ * nowhere on screen. So when a check compares that field, its value is chosen from a dropdown of
+ * the steps that send a WhatsApp — this automation's and the others', because the reminder that
+ * asks is usually a different automation from the one that handles the answer — each one said by
+ * its automation and its message. Zapier, Make and Shopify Flow do the same whenever a field
+ * refers to another step: it is picked, never typed.
+ */
+describe('the question a reply answers is picked from a list (flows#118)', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  const REMINDER = {
+    id: 'f-ask',
+    name: 'Recordatorio de cita',
+    enabled: true,
+    definition: {
+      schema_version: 1,
+      triggers: [{ kind: 'cron', cron: '0 9 * * *' }],
+      steps: [
+        { id: 'e1', kind: 'notify', channel: 'email', vars: { text: 'Un correo' } },
+        {
+          id: 's3k9xq',
+          kind: 'notify',
+          channel: 'whatsapp',
+          interactive: { type: 'button', body: { text: '¿Confirmas tu cita?' }, action: { buttons: [] } },
+        },
+      ],
+    },
+  };
+
+  async function mountGuard(
+    when: Record<string, unknown>,
+    list: () => Promise<unknown> = async () => [REMINDER],
+  ): Promise<ErpFlowsEditor> {
+    const el = document.createElement('erp-flows-editor') as ErpFlowsEditor;
+    const client = fakeClient();
+    client.flows.list = vi.fn(list) as never;
+    el.client = client as never;
+    el.t = ((k: string, p?: Record<string, unknown>) =>
+      p ? `${k}:${Object.values(p).join('|')}` : k) as never;
+    el.interactiveNotify = true;
+    el.flow = {
+      id: 'f-tap',
+      name: 'Atender respuesta',
+      enabled: false,
+      definition: {
+        schema_version: 1,
+        triggers: [{ kind: 'event', event: 'hub.whatsapp.message_received' }],
+        steps: [{ id: 'g', kind: 'condition', when }],
+      },
+    } as never;
+    document.body.appendChild(el);
+    await settle(el);
+    (el.renderRoot.querySelector('[data-node="g"] button.open') as HTMLButtonElement).click();
+    await settle(el);
+    await settle(el);
+    return el;
+  }
+
+  const valueBox = (el: ErpFlowsEditor) =>
+    el.renderRoot.querySelector('select[data-field="reply-step"]') as HTMLSelectElement | null;
+
+  it('offers the WhatsApp steps of the other automations by what they say, not a text box', async () => {
+    const el = await mountGuard({ 'input.reply_to_step': { eq: '' } });
+    const select = valueBox(el);
+    expect(select).not.toBeNull();
+    const labels = [...select!.options].filter((o) => o.value).map((o) => [o.value, o.textContent]);
+    expect(labels).toEqual([['s3k9xq', 'ui.replyStepOption:Recordatorio de cita|¿Confirmas tu cita?']]);
+    // The id-typing box is gone for this field.
+    expect(el.renderRoot.querySelector('.guard-row input[data-field="guard-value"]')).toBeNull();
+  });
+
+  it('writes the chosen step’s id into the check', async () => {
+    const el = await mountGuard({ 'input.reply_to_step': { eq: '' } });
+    const select = valueBox(el)!;
+    select.value = 's3k9xq';
+    select.dispatchEvent(new Event('change'));
+    await settle(el);
+    expect(el.document.steps[0].when).toEqual({ 'input.reply_to_step': { eq: 's3k9xq' } });
+  });
+
+  it('keeps a saved choice whose step no longer exists, and says so', async () => {
+    const el = await mountGuard({ 'input.reply_to_step': { eq: 'gone12' } });
+    const select = valueBox(el)!;
+    const kept = [...select.options].find((o) => o.value === 'gone12');
+    expect(kept?.textContent).toBe('ui.replyStepMissing');
+    expect(select.value).toBe('gone12');
+  });
+
+  it('says there is no question to pick when no automation sends a WhatsApp', async () => {
+    const el = await mountGuard({ 'input.reply_to_step': { eq: '' } }, async () => []);
+    expect(el.renderRoot.querySelector('[data-field="reply-step-empty"]')).not.toBeNull();
+  });
+
+  it('says the list could not be read, instead of an empty dropdown', async () => {
+    const el = await mountGuard({ 'input.reply_to_step': { eq: '' } }, async () => {
+      throw new Error('boom');
+    });
+    expect(el.renderRoot.querySelector('[data-field="reply-step-error"]')).not.toBeNull();
+  });
+
+  it('lets the owner try again after the list failed', async () => {
+    let calls = 0;
+    const el = await mountGuard({ 'input.reply_to_step': { eq: '' } }, async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('boom');
+      return [REMINDER];
+    });
+    (el.renderRoot.querySelector('[data-act="reply-step-retry"]') as HTMLElement).click();
+    await settle(el);
+    await settle(el);
+    expect(el.renderRoot.querySelector('[data-field="reply-step-error"]')).toBeNull();
+    expect([...valueBox(el)!.options].map((o) => o.value)).toContain('s3k9xq');
+  });
+
+  it('shows it is loading while the automations are on their way', async () => {
+    const el = await mountGuard({ 'input.reply_to_step': { eq: '' } }, () => new Promise(() => {}));
+    const select = valueBox(el)!;
+    expect(select.disabled).toBe(true);
+    expect(select.options[0].textContent).toBe('ui.replyStepLoading');
+  });
+
+  it('leaves every other field as a box you type into', async () => {
+    const el = await mountGuard({ 'input.reply_id': { eq: 'yes' } });
+    expect(valueBox(el)).toBeNull();
+    expect(el.renderRoot.querySelector('.guard-row input[data-field="guard-value"]')).not.toBeNull();
+  });
+});
