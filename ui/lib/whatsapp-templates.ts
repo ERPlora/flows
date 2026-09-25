@@ -25,8 +25,12 @@ export type TemplateHeader = 'image' | 'video' | 'document';
 
 export interface WhatsappTemplateChoice {
   name: string;
-  /** `null` for a template whose header is text or absent: nothing to attach. */
-  header: TemplateHeader | null;
+  /**
+   * `null` for a template whose header is text or absent: nothing to attach. `'unknown'` when the
+   * row does not say — a `whatsapp_inbox` older than whatsapp_inbox#188 serves no `header_format` —
+   * and then nothing is deduced: the owner keeps choosing the header by hand, as before flows#132.
+   */
+  header: TemplateHeader | null | 'unknown';
 }
 
 /**
@@ -37,7 +41,8 @@ export type WhatsappTemplatesState =
   | { status: 'idle' | 'loading' | 'absent' | 'error'; templates: WhatsappTemplateChoice[] }
   | { status: 'ready'; templates: WhatsappTemplateChoice[] };
 
-const HEADER_OF: Record<string, TemplateHeader> = {
+const HEADER_OF: Record<string, TemplateHeader | null> = {
+  TEXT: null,
   IMAGE: 'image',
   VIDEO: 'video',
   DOCUMENT: 'document',
@@ -56,7 +61,8 @@ export function readWhatsappTemplates(rows: unknown): WhatsappTemplateChoice[] {
     if (!name || byName.has(name)) continue;
     if (String(r.meta_status ?? '').toLowerCase() !== 'approved') continue;
     if (!(r.is_active === true || Number(r.is_active) === 1)) continue;
-    byName.set(name, { name, header: HEADER_OF[String(r.header_format ?? '').toUpperCase()] ?? null });
+    const format = String(r.header_format ?? '').toUpperCase();
+    byName.set(name, { name, header: format in HEADER_OF ? HEADER_OF[format] : 'unknown' });
   }
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -46,6 +46,15 @@ describe('readWhatsappTemplates', () => {
     ]);
   });
 
+  it('says unknown, not "no header", for a row that does not carry header_format', () => {
+    // A `whatsapp_inbox` older than whatsapp_inbox#188 serves the rows without the column; a
+    // row with a spelling this reader does not know is the same case. Nothing can be deduced.
+    expect(readWhatsappTemplates([row({ header_format: undefined }), row({ name: 'odd', header_format: 'LOCATION' })])).toEqual([
+      { name: 'autumn_promo', header: 'unknown' },
+      { name: 'odd', header: 'unknown' },
+    ]);
+  });
+
   it('lists a name once even when it is approved in several languages', () => {
     const list = readWhatsappTemplates([
       row({ language: 'es', header_format: 'IMAGE' }),

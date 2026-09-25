@@ -2382,9 +2382,10 @@ export class ErpFlowsEditor extends LitElement {
       if (!template.trim()) {
         // A free text has no header: the kernel refuses one without its template (hub#2101).
         this.setDoc(dropHeaderOf(next, index));
-      } else if (picked) {
+      } else if (picked && picked.header !== 'unknown') {
         // The header comes WITH the template: the key its kind needs, or none. Not on a hub that
         // cannot send one — there the key would travel as a body variable and Meta refuse it.
+        // A row that does not say (no `header_format`) leaves the header exactly as she set it.
         const header = this.headerMedia ? picked.header : null;
         this.setDoc(patchStep(next, index, { vars: withTemplateHeader(vars, header) }));
       } else {
@@ -2456,7 +2457,7 @@ export class ErpFlowsEditor extends LitElement {
    */
   private renderDeducedHeader(index: number, vars: Record<string, unknown>, known: WhatsappTemplateChoice) {
     const kind = known.header;
-    if (!kind) return nothing;
+    if (!kind || kind === 'unknown') return nothing;
     const kindLabel = this.t(`ui.notifyHeader_${kind}`);
     if (!this.headerMedia) {
       return html`<ok-inline-feedback tone="warning" data-field="header-unsupported"
@@ -2492,7 +2493,7 @@ export class ErpFlowsEditor extends LitElement {
   private renderTemplateHeader(step: Step, index: number, vars: Record<string, unknown>) {
     if (step.channel !== 'whatsapp' || !String(step.template ?? '').trim()) return nothing;
     const known = this.knownTemplate(step);
-    if (known) return this.renderDeducedHeader(index, vars, known);
+    if (known && known.header !== 'unknown') return this.renderDeducedHeader(index, vars, known);
     if (!this.headerMedia) return nothing;
     const header = readHeader(vars);
     const write = (kind: HeaderKind | 'none', link: unknown): void => {

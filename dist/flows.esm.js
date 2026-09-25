@@ -3068,6 +3068,7 @@ function errorCode(e4) {
 
 // ui/lib/whatsapp-templates.ts
 var HEADER_OF = {
+  TEXT: null,
   IMAGE: "image",
   VIDEO: "video",
   DOCUMENT: "document"
@@ -3083,7 +3084,8 @@ function readWhatsappTemplates(rows) {
     if (!name || byName2.has(name)) continue;
     if (String(r6.meta_status ?? "").toLowerCase() !== "approved") continue;
     if (!(r6.is_active === true || Number(r6.is_active) === 1)) continue;
-    byName2.set(name, { name, header: HEADER_OF[String(r6.header_format ?? "").toUpperCase()] ?? null });
+    const format = String(r6.header_format ?? "").toUpperCase();
+    byName2.set(name, { name, header: format in HEADER_OF ? HEADER_OF[format] : "unknown" });
   }
   return [...byName2.values()].sort((a3, b3) => a3.name.localeCompare(b3.name));
 }
@@ -5785,7 +5787,7 @@ var ErpFlowsEditor = class extends i3 {
       const next = patchStep(this.document, index, { template });
       if (!template.trim()) {
         this.setDoc(dropHeaderOf(next, index));
-      } else if (picked) {
+      } else if (picked && picked.header !== "unknown") {
         const header = this.headerMedia ? picked.header : null;
         this.setDoc(patchStep(next, index, { vars: withTemplateHeader(vars, header) }));
       } else {
@@ -5846,7 +5848,7 @@ var ErpFlowsEditor = class extends i3 {
    */
   renderDeducedHeader(index, vars, known) {
     const kind = known.header;
-    if (!kind) return A;
+    if (!kind || kind === "unknown") return A;
     const kindLabel = this.t(`ui.notifyHeader_${kind}`);
     if (!this.headerMedia) {
       return b2`<ok-inline-feedback tone="warning" data-field="header-unsupported"
@@ -5880,7 +5882,7 @@ var ErpFlowsEditor = class extends i3 {
   renderTemplateHeader(step, index, vars) {
     if (step.channel !== "whatsapp" || !String(step.template ?? "").trim()) return A;
     const known = this.knownTemplate(step);
-    if (known) return this.renderDeducedHeader(index, vars, known);
+    if (known && known.header !== "unknown") return this.renderDeducedHeader(index, vars, known);
     if (!this.headerMedia) return A;
     const header = readHeader(vars);
     const write = (kind, link) => {

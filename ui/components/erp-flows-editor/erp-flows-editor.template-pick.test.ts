@@ -245,3 +245,23 @@ describe('where the list cannot be read, the box stays', () => {
     expect(panel.querySelector('input[data-field="template"]')).toBeTruthy();
   });
 });
+
+describe('a list that does not say what the header is', () => {
+  beforeEach(() => document.body.replaceChildren());
+
+  // A hub whose `whatsapp_inbox` predates whatsapp_inbox#188 serves the rows without
+  // `header_format`. Nothing can be deduced there: hiding the manual selector would leave the
+  // owner unable to attach the picture her template carries, which main let her do.
+  it('keeps the manual header selector when the row carries no header_format', async () => {
+    const bare = vi.fn(async () => [{ name: 'autumn_promo', meta_status: 'approved', is_active: 1 }]);
+    const el = await mount(whatsapp({ template: 'autumn_promo', vars: { header_image: 'https://a/x.jpg' } }), bare);
+    await panelOf(el);
+    await settle(el);
+    expect(chosenOf(el.renderRoot.querySelector('select[data-field="template-pick"]'))).toEqual(['autumn_promo']);
+    expect(el.renderRoot.querySelector('select[data-field="header-kind"]'), 'the header can no longer be chosen').toBeTruthy();
+    expect(el.renderRoot.querySelector('[data-field="header-deduced"]')).toBeNull();
+    // Picking it again does not throw the saved link away either.
+    await pick(el, el.renderRoot.querySelector('select[data-field="template-pick"]'), 'autumn_promo');
+    expect((step(el).vars as Record<string, unknown>).header_image).toBe('https://a/x.jpg');
+  });
+});
