@@ -16,7 +16,14 @@ import {
   setTapOptions,
   tapOptionProblems,
 } from '../../lib/whatsapp-options';
-import { loadWhatsappTemplates, withTemplateHeader } from '../../lib/whatsapp-templates';
+import {
+  TITLE_KEY,
+  linkKey,
+  loadWhatsappTemplates,
+  withTemplateHeader,
+  withTemplateSlots,
+  withoutTemplateSlots,
+} from '../../lib/whatsapp-templates';
 import type { WhatsappTemplateChoice, WhatsappTemplatesState } from '../../lib/whatsapp-templates';
 import type { TapKind, TapOptions } from '../../lib/whatsapp-options';
 import {
@@ -180,18 +187,23 @@ function readHeader(vars: Record<string, unknown>): { kind: HeaderKind; link: un
   return kind ? { kind, link: vars[headerKey(kind)] } : null;
 }
 
-/** `vars` without any header key — what a step that cannot carry one must be saved with. */
+/** `vars` without any media header key — what a step that cannot carry one must be saved with. */
 function withoutHeader(vars: Record<string, unknown>): Record<string, unknown> {
   const next = { ...vars };
   for (const kind of HEADER_KINDS) delete next[headerKey(kind)];
   return next;
 }
 
-/** Drops the header from a step whose vars carry one; any other step is returned untouched. */
+/**
+ * Drops everything that only travels with a template — the header and the link-button ends
+ * (hub#2110) — from a step whose vars carry any; any other step is returned untouched.
+ */
 function dropHeaderOf(doc: FlowDoc, index: number): FlowDoc {
   const vars = doc.steps[index]?.vars as Record<string, unknown> | undefined;
-  if (!vars || !readHeader(vars)) return doc;
-  return patchStep(doc, index, { vars: withoutHeader(vars) });
+  if (!vars) return doc;
+  const bare = withoutTemplateSlots(withoutHeader(vars));
+  if (Object.keys(bare).length === Object.keys(vars).length) return doc;
+  return patchStep(doc, index, { vars: bare });
 }
 
 /**
@@ -921,6 +933,14 @@ export class ErpFlowsEditor extends LitElement {
    * would refuse the send, so the control is not offered at all.
    */
   @property({ attribute: false }) headerMedia = false;
+
+  /**
+   * **Whether THIS hub sends the value of a template's text title** (hub#2111) and **the end of its
+   * link buttons** (hub#2110), read off the schema the hub served. Default `false` for the same
+   * reason as {@link headerMedia}.
+   */
+  @property({ attribute: false }) headerText = false;
+  @property({ attribute: false }) buttonUrl = false;
 
   @state() private openStep: string | null = null;
 
@@ -2356,6 +2376,8 @@ export class ErpFlowsEditor extends LitElement {
 
             ${this.renderTemplateHeader(step, index, vars)}
 
+            ${this.renderTemplateSlots(step, index, vars)}
+
             ${this.renderValue({
               field: 'var-text',
               label: this.t('ui.notifyText'),
@@ -2382,12 +2404,15 @@ export class ErpFlowsEditor extends LitElement {
       if (!template.trim()) {
         // A free text has no header: the kernel refuses one without its template (hub#2101).
         this.setDoc(dropHeaderOf(next, index));
-      } else if (picked && picked.header !== 'unknown') {
+      } else if (picked) {
         // The header comes WITH the template: the key its kind needs, or none. Not on a hub that
         // cannot send one — there the key would travel as a body variable and Meta refuse it.
-        // A row that does not say (no `header_format`) leaves the header exactly as she set it.
+        // A row that does not say (no `header_format`) leaves the media header as she set it.
         const header = this.headerMedia ? picked.header : null;
-        this.setDoc(patchStep(next, index, { vars: withTemplateHeader(vars, header) }));
+        const media = picked.header === 'unknown' ? vars : withTemplateHeader(vars, header === 'unknown' ? null : header);
+        // …and so do its gaps: the title value and the link-button ends it has, and no others.
+        const slots = withTemplateSlots(media, picked, { title: this.headerText, links: this.buttonUrl });
+        this.setDoc(patchStep(next, index, { vars: slots }));
       } else {
         this.setDoc(next);
       }
@@ -2494,7 +2519,8 @@ export class ErpFlowsEditor extends LitElement {
     if (step.channel !== 'whatsapp' || !String(step.template ?? '').trim()) return nothing;
     const known = this.knownTemplate(step);
     if (known && known.header !== 'unknown') return this.renderDeducedHeader(index, vars, known);
-    if (!this.headerMedia) return nothing;
+    // A title with a gap IS the header: there is no room for a picture next to it (hub#2111).
+    if (known?.titleVariable || !this.headerMedia) return nothing;
     const header = readHeader(vars);
     const write = (kind: HeaderKind | 'none', link: unknown): void => {
       const rest = withoutHeader(vars);
@@ -2528,6 +2554,52 @@ export class ErpFlowsEditor extends LitElement {
             template: true,
             onChange: (link) => write(header.kind, link),
           })
+        : nothing}
+    `;
+  }
+
+  /**
+   * **The gaps of a template the list knows** (hub#2110/#2111): the value of a title with a `{{1}}`
+   * and the end of each link button whose URL has one — composed in the same picker as the copy,
+   * because the appointment's date or the order's code is a field of the run. On a hub that cannot
+   * send them, a warning instead: the send would be refused by Meta, and she should know now.
+   */
+  private renderTemplateSlots(step: Step, index: number, vars: Record<string, unknown>) {
+    if (step.channel !== 'whatsapp') return nothing;
+    const known = this.knownTemplate(step);
+    if (!known) return nothing;
+    const set = (key: string, value: string): void =>
+      this.setDoc(patchStep(this.document, index, { vars: { ...vars, [key]: value } }));
+    const links = known.linkButtons ?? [];
+    return html`
+      ${known.titleVariable
+        ? this.headerText
+          ? this.renderValue({
+              field: 'header-text',
+              label: this.t('ui.notifyTitleValue'),
+              value: vars[TITLE_KEY] ?? '',
+              template: true,
+              onChange: (v) => set(TITLE_KEY, v),
+            })
+          : html`<ok-inline-feedback tone="warning" data-field="header-text-unsupported"
+              >${this.t('ui.notifyTitleUnsupported')}</ok-inline-feedback
+            >`
+        : nothing}
+      ${links.length && !this.buttonUrl
+        ? html`<ok-inline-feedback tone="warning" data-field="button-url-unsupported"
+            >${this.t('ui.notifyLinkUnsupported')}</ok-inline-feedback
+          >`
+        : nothing}
+      ${this.buttonUrl
+        ? links.map(({ index: n, text }) =>
+            this.renderValue({
+              field: `button-url-${n}`,
+              label: this.t('ui.notifyLinkValue', { button: text || String(n + 1) }),
+              value: vars[linkKey(n)] ?? '',
+              template: true,
+              onChange: (v) => set(linkKey(n), v),
+            }),
+          )
         : nothing}
     `;
   }
