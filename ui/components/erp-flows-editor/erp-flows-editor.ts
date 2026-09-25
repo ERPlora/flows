@@ -164,6 +164,35 @@ function clamp(value: number, min: number, max: number, fallback: number): numbe
 }
 
 /**
+ * **The media in a WhatsApp template's header** (hub#2101): the kinds the hub sends, each written as
+ * ONE `vars` key the kernel turns into Meta's `header` parameter. A template has one header, so a
+ * step carries at most one of these keys — the kernel refuses two at save time.
+ */
+const HEADER_KINDS = ['image', 'video', 'document'] as const;
+type HeaderKind = (typeof HEADER_KINDS)[number];
+const headerKey = (kind: HeaderKind): string => `header_${kind}`;
+
+/** The header a step's `vars` carry today, or `null` when it has none. */
+function readHeader(vars: Record<string, unknown>): { kind: HeaderKind; link: unknown } | null {
+  const kind = HEADER_KINDS.find((k) => headerKey(k) in vars);
+  return kind ? { kind, link: vars[headerKey(kind)] } : null;
+}
+
+/** `vars` without any header key — what a step that cannot carry one must be saved with. */
+function withoutHeader(vars: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...vars };
+  for (const kind of HEADER_KINDS) delete next[headerKey(kind)];
+  return next;
+}
+
+/** Drops the header from a step whose vars carry one; any other step is returned untouched. */
+function dropHeaderOf(doc: FlowDoc, index: number): FlowDoc {
+  const vars = doc.steps[index]?.vars as Record<string, unknown> | undefined;
+  if (!vars || !readHeader(vars)) return doc;
+  return patchStep(doc, index, { vars: withoutHeader(vars) });
+}
+
+/**
  * One `<option>`, carrying its own selected state.
  *
  * **Not cosmetic.** Lit applies `.value` to a `<select>` BEFORE the template's `<option>` children
@@ -882,6 +911,14 @@ export class ErpFlowsEditor extends LitElement {
    * or the assistant put the key there and leave the owner reading `flow.invalid_definition`.
    */
   @property({ attribute: false }) interactiveNotify = false;
+
+  /**
+   * **Whether THIS hub sends a template's media header** (hub#2101), read off the schema the hub
+   * served (`schemaFacts().headerMedia`). Default `false` for the same reason as
+   * {@link interactiveNotify}: on an older core the key would travel as a body variable and Meta
+   * would refuse the send, so the control is not offered at all.
+   */
+  @property({ attribute: false }) headerMedia = false;
 
   @state() private openStep: string | null = null;
 
@@ -2213,7 +2250,13 @@ export class ErpFlowsEditor extends LitElement {
             // into a panel that shows an empty one (flows#90) — and remembering it first, because
             // this door loses the options exactly like the mode one does (flows#95).
             if (channel !== 'whatsapp') this.rememberTaps(step);
-            this.setDoc(channel === 'whatsapp' ? next : setTapMode(next, index, false));
+            // …and an email has no header either: the kernel refuses `vars.header_*` off WhatsApp
+            // at save time, so it goes with the channel instead of waiting there (hub#2101).
+            this.setDoc(
+              channel === 'whatsapp'
+                ? next
+                : setTapMode(dropHeaderOf(next, index), index, false),
+            );
           }}
         >
           <!-- Two options, and sms is not one of them: it has no transport anywhere and is
@@ -2289,15 +2332,18 @@ export class ErpFlowsEditor extends LitElement {
                 data-field="template"
                 type="text"
                 .value=${String(step.template ?? '')}
-                @change=${(e: Event) =>
-                  this.setDoc(
-                    patchStep(this.document, index, {
-                      template: (e.target as HTMLInputElement).value,
-                    }),
-                  )}
+                @change=${(e: Event) => {
+                  const template = (e.target as HTMLInputElement).value;
+                  const next = patchStep(this.document, index, { template });
+                  // A free text has no header: the kernel refuses one without its template, so
+                  // clearing the template takes the header with it (hub#2101).
+                  this.setDoc(template.trim() ? next : dropHeaderOf(next, index));
+                }}
               />
               <span class="hint">${this.t('ui.notifyTemplateHint')}</span>
             </div>
+
+            ${this.renderTemplateHeader(step, index, vars)}
 
             ${this.renderValue({
               field: 'var-text',
@@ -2306,6 +2352,54 @@ export class ErpFlowsEditor extends LitElement {
               onChange: (text) => setVar('text', text),
             })}
           `}
+    `;
+  }
+
+  /**
+   * **The media in the template's header** (hub#2101): a kind and a link, and nothing else.
+   *
+   * Only on a WhatsApp step that names a template, on a hub that declared the keys. The link is
+   * composed in the same picker as the copy — a customer's photo or a product picture is usually a
+   * field of the run — and written as a string, because Meta's `link` is one.
+   */
+  private renderTemplateHeader(step: Step, index: number, vars: Record<string, unknown>) {
+    if (!this.headerMedia || step.channel !== 'whatsapp' || !String(step.template ?? '').trim()) {
+      return nothing;
+    }
+    const header = readHeader(vars);
+    const write = (kind: HeaderKind | 'none', link: unknown): void => {
+      const rest = withoutHeader(vars);
+      this.setDoc(
+        patchStep(this.document, index, {
+          vars: kind === 'none' ? rest : { ...rest, [headerKey(kind)]: link ?? '' },
+        }),
+      );
+    };
+    return html`
+      <div class="field">
+        <label for="hk-${step.id}">${this.t('ui.notifyHeader')}</label>
+        <select
+          id="hk-${step.id}"
+          data-field="header-kind"
+          .value=${header?.kind ?? 'none'}
+          @change=${(e: Event) =>
+            write((e.target as HTMLSelectElement).value as HeaderKind | 'none', header?.link)}
+        >
+          ${(['none', ...HEADER_KINDS] as const).map((k) =>
+            option(k, this.t(`ui.notifyHeader_${k}`), header?.kind ?? 'none'),
+          )}
+        </select>
+        <span class="hint">${this.t('ui.notifyHeaderHint')}</span>
+      </div>
+      ${header
+        ? this.renderValue({
+            field: 'header-link',
+            label: this.t('ui.notifyHeaderLink'),
+            value: header.link ?? '',
+            template: true,
+            onChange: (link) => write(header.kind, link),
+          })
+        : nothing}
     `;
   }
 

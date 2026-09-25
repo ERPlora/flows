@@ -156,6 +156,15 @@ export interface SchemaFacts {
    */
   aiOutput: boolean;
   /**
+   * Whether this hub turns `vars.header_<kind>` into the media header of a WhatsApp template
+   * (hub#2101), read off the keys the served schema names under `vars.properties`.
+   *
+   * Fail-closed like {@link SchemaFacts.interactiveNotify}, for a softer but still real reason: on
+   * an older core the key does not kill the document, it travels as a BODY variable — and Meta
+   * refuses the send of a template whose header went missing, eight retries later.
+   */
+  headerMedia: boolean;
+  /**
    * Whether this hub can store a `query` grant that FIXES its parameters (hub#1662).
    *
    * The third fail-closed fact, and the only one in here that is **not** read off the schema —
@@ -255,6 +264,9 @@ export function schemaFacts(schema: unknown, coreVersion?: unknown): SchemaFacts
     // definition down with it too. Measured on the published schemas: `v1.1.15` declares neither
     // of the two and `v1.1.16` declares both.
     aiOutput: !!at(schema, ['$defs', 'step', 'properties', 'output']),
+    // Same rule again (hub#2101). The three keys landed together; asking for the first one is
+    // asking for the release that sends them.
+    headerMedia: !!at(schema, ['$defs', 'step', 'properties', 'vars', 'properties', 'header_image']),
     // Not `at(schema, …)` like every line above it, because there is nothing in the schema to
     // read: this one is answered by the version the same response carries, and by nothing else.
     // A caller that does not hand it over gets `false`, which is the same fail-closed default the

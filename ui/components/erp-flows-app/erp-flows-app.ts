@@ -1212,6 +1212,7 @@ export class ErpFlowsApp extends LitElement {
         .tab=${this.editorTab}
         .draft=${this.draftReview}
         .interactiveNotify=${this.facts.interactiveNotify}
+        .headerMedia=${this.facts.headerMedia}
         @flows-back=${() => {
           this.editing = null;
           this.isNew = false;
