@@ -14,7 +14,10 @@
 import { errorCode } from './hub-flows';
 import type { ModuleClient } from './hub-flows';
 
-/** The list query of `whatsapp_inbox` (its manifest, whatsapp_inbox#188). */
+/**
+ * The list query of `whatsapp_inbox` (its manifest, whatsapp_inbox#188). Spelled as a literal again
+ * at each call below: `erplora validate` reads consumed contracts off the literal (ADR-0127).
+ */
 export const TEMPLATES_QUERY = 'whatsapp_inbox.templates.list';
 
 /** The media kinds a template header can carry, as the kernel's `vars.header_<kind>` names them. */
@@ -65,17 +68,13 @@ const ABSENT_CODES = new Set(['module_not_installed', 'module_inactive']);
  * templates would otherwise find the one it wants missing from the picker.
  */
 export async function loadWhatsappTemplates(
-  client: Pick<ModuleClient, 'query' | 'queryAllOptional'> | null | undefined,
+  client: Pick<ModuleClient, 'queryAllOptional'> | null | undefined,
 ): Promise<WhatsappTemplatesState> {
   try {
-    let rows: unknown;
-    if (typeof client?.queryAllOptional === 'function') {
-      rows = await client.queryAllOptional(TEMPLATES_QUERY, {});
-    } else if (typeof client?.query === 'function') {
-      rows = await client.query(TEMPLATES_QUERY, { limit: 500 });
-    } else {
-      return { status: 'absent', templates: [] };
-    }
+    // Only through the OPTIONAL door: a hub without WhatsApp is an ordinary hub, not a broken
+    // dependency. Every shell since hub v1.1.20 hands it out; one that does not keeps the box.
+    if (typeof client?.queryAllOptional !== 'function') return { status: 'absent', templates: [] };
+    const rows = await client.queryAllOptional('whatsapp_inbox.templates.list', {});
     if (rows === undefined) return { status: 'absent', templates: [] };
     return { status: 'ready', templates: readWhatsappTemplates(rows) };
   } catch (e) {

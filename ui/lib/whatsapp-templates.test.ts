@@ -80,13 +80,20 @@ describe('loadWhatsappTemplates', () => {
     expect(got.status).toBe('absent');
   });
 
-  it('falls back to query() on an older client, and to absent on module_not_installed', async () => {
+  it('says absent on a client with only query(): the list is an OPTIONAL integration', async () => {
+    // A bare query() is a REQUIRED contract for `erplora validate` (ADR-0127), which would make
+    // WhatsApp a dependency of every hub with automations. Every shell since hub v1.1.20 has
+    // queryAllOptional, so an older one keeps the free box instead.
     const query = vi.fn(async () => [row()]);
-    expect((await loadWhatsappTemplates({ query } as never)).status).toBe('ready');
+    expect((await loadWhatsappTemplates({ query } as never)).status).toBe('absent');
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('says absent when queryAllOptional itself reports module_not_installed', async () => {
     const missing = vi.fn(async () => {
       throw Object.assign(new Error('x'), { code: 'module_not_installed' });
     });
-    expect((await loadWhatsappTemplates({ query: missing } as never)).status).toBe('absent');
+    expect((await loadWhatsappTemplates({ queryAllOptional: missing } as never)).status).toBe('absent');
   });
 
   it('says error — never an empty list — when the hub refuses', async () => {
