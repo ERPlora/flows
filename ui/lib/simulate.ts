@@ -364,7 +364,7 @@ export interface SimulatedValue {
 export interface SimulatedStep {
   id: string;
   kind: string;
-  outcome: 'would-run' | 'stops-here' | 'not-reached';
+  outcome: 'would-run' | 'stops-here' | 'not-reached' | 'skipped';
   values: SimulatedValue[];
   /** For a guard: the clauses that did not hold, and whether the verdict is trustworthy. */
   condition?: ConditionResult;
@@ -374,6 +374,17 @@ export interface SimulatedStep {
    * decision is uncertain, because all three outcomes are still possible.
    */
   pauses?: boolean;
+  /**
+   * The verdict on the step's own `run_if` (hub#2066), present whenever the step carries one and
+   * the walk reached it — whether that verdict left the step `skipped`, or let it fall through to
+   * its normal outcome.
+   */
+  runIf?: ConditionResult;
+  /**
+   * `true` only when `run_if` is UNCERTAIN: the step is shown with its normal outcome (it is not
+   * skipped here), but the kernel could still skip it once it knows what this side cannot.
+   */
+  maySkip?: boolean;
 }
 
 export interface Simulation {
@@ -480,10 +491,12 @@ function stepValues(step: Step, scope: unknown): SimulatedValue[] {
  * The walk: trigger filter, then the steps in order, stopping where the kernel would stop.
  *
  * Nothing here calls the hub. `input` is the payload {@link inputFromShape} reassembled; the scope
- * is `{input}` plus an empty `steps`, because no step has run and its output is unknowable.
+ * is `{input}` plus a `steps` that starts empty and gains only what a SKIPPED step writes
+ * (`{skipped: true}`, mirroring the kernel) — no other step has run, so its output stays unknowable.
  */
 export function simulate(doc: FlowDoc, input: Record<string, unknown>): Simulation {
-  const scope = { input, event: input, steps: {} };
+  const stepsOut: Record<string, unknown> = {};
+  const scope = { input, event: input, steps: stepsOut };
   const trigger: Trigger | undefined = doc.triggers?.[0];
   // No filter is not a failed filter: an absent one matches always (flow.schema.json §trigger).
   const triggerCondition =
@@ -499,6 +512,21 @@ export function simulate(doc: FlowDoc, input: Record<string, unknown>): Simulati
       steps.push({ id: step.id, kind: step.kind, outcome: 'not-reached', values: [] });
       continue;
     }
+
+    // `run_if` (hub#2066) is checked BEFORE the step runs, on every kind — a `condition` included.
+    // One clause that surely fails skips the step outright — the guard is an AND, so an uncertain
+    // clause beside it cannot rescue it. Nothing runs, the walk continues, and later steps can read
+    // `steps.<id>.skipped`. Only a guard with no sure failure and some doubt is «may be skipped».
+    let runIf: ConditionResult | undefined;
+    if (step.run_if) {
+      runIf = conditionResult(step.run_if, scope);
+      if (runIf.failed.length > 0) {
+        steps.push({ id: step.id, kind: step.kind, outcome: 'skipped', values: [], runIf });
+        stepsOut[step.id] = { skipped: true };
+        continue;
+      }
+    }
+
     if (step.kind === 'condition') {
       const condition = conditionResult(step.when, scope);
       // An UNCERTAIN guard does not stop the walk: the rest of the flow is still worth showing,
@@ -510,6 +538,8 @@ export function simulate(doc: FlowDoc, input: Record<string, unknown>): Simulati
         outcome: passes ? 'would-run' : 'stops-here',
         values: [],
         condition,
+        ...(runIf ? { runIf } : {}),
+        ...(runIf?.uncertain ? { maySkip: true } : {}),
       });
       if (!passes) {
         stopped = true;
@@ -523,6 +553,8 @@ export function simulate(doc: FlowDoc, input: Record<string, unknown>): Simulati
       outcome: 'would-run',
       values: stepValues(step, scope),
       ...(step.kind === 'approval' ? { pauses: true } : {}),
+      ...(runIf ? { runIf } : {}),
+      ...(runIf?.uncertain ? { maySkip: true } : {}),
     });
   }
 

@@ -658,7 +658,8 @@ export class ErpFlowsEditor extends LitElement {
     .pstep[data-outcome='trigger-blocked'] {
       border-left-color: var(--ok-warning, #ffc409);
     }
-    .pstep[data-outcome='not-reached'] {
+    .pstep[data-outcome='not-reached'],
+    .pstep[data-outcome='skipped'] {
       opacity: 0.6;
     }
     .pvalue {
@@ -3505,11 +3506,16 @@ export class ErpFlowsEditor extends LitElement {
           ${step.outcome === 'not-reached'
             ? html`<span class="muted">${this.t('ui.testNotReached')}</span>`
             : nothing}
+          ${step.outcome === 'skipped'
+            ? html`<span class="muted">${this.t('ui.testSkipped')}</span>`
+            : nothing}
           ${step.pauses ? html`<span class="verdict">${this.t('ui.testPausesHere')}</span>` : nothing}
+          ${step.maySkip ? html`<span class="verdict">${this.t('ui.testMaySkip')}</span>` : nothing}
           ${step.condition?.uncertain
             ? html`<span class="verdict">${this.t('ui.testUncertain')}</span>`
             : nothing}
           ${step.outcome === 'stops-here' ? this.renderFailedClauses(step.condition) : nothing}
+          ${step.outcome === 'skipped' ? this.renderFailedClauses(step.runIf) : nothing}
           ${step.values.map(
             (value) => html`<div class="pvalue" data-blank=${value.blank ? 'true' : 'false'}>
               <span class="pkey">${value.label}</span>

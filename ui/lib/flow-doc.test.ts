@@ -905,3 +905,18 @@ describe('the values a limit may be worth (flows#108)', () => {
     expect(pinProblems({ customer_id: 'steps.a.id' })).toEqual([]);
   });
 });
+
+describe('a step guard the editor does not draw (`run_if`, hub#2066)', () => {
+  it('survives opening the document and editing the step (flows#129)', () => {
+    // The WhatsApp recipes carry `run_if` (whatsapp_inbox#122). The editor has no control for it
+    // yet, so dropping it on save would turn «only if the assistant failed» into «always».
+    const guard = { 'steps.assistant.failed': { eq: true } };
+    const doc = readDoc({
+      schema_version: 1,
+      triggers: [{ kind: 'manual' }],
+      steps: [{ id: 'n', kind: 'notify', channel: 'whatsapp', vars: { 1: 'x' }, run_if: guard }],
+    });
+    const edited = patchStep(doc, 0, { vars: { 1: 'y' } });
+    expect(JSON.parse(JSON.stringify(edited)).steps[0].run_if).toEqual(guard);
+  });
+});
