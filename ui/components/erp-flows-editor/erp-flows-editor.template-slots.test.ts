@@ -222,4 +222,17 @@ describe('the gaps of the picked template', () => {
     expect(el.renderRoot.querySelector('select[data-field="header-kind"]')).toBeNull();
     expect(el.renderRoot.querySelector('erp-flows-value[data-field="header-text"]')).toBeTruthy();
   });
+
+  // Every live hub today predates hub#2110, so this is the screen most owners see: the warning
+  // belongs to a template that HAS a link button with a gap, and a template without one gets
+  // no warning about a button it does not have.
+  it('warns about a link button only when the picked template has one', async () => {
+    const el = await mount(whatsapp(), listed(), false);
+    await panelOf(el);
+    await pick(el, templateSelect(el), 'plain');
+    expect(el.renderRoot.querySelector('[data-field="button-url-unsupported"]')).toBeNull();
+    expect(el.renderRoot.querySelector('[data-field="header-text-unsupported"]')).toBeNull();
+    await pick(el, templateSelect(el), 'booking_link');
+    expect(el.renderRoot.querySelector('[data-field="button-url-unsupported"]')).toBeTruthy();
+  });
 });
