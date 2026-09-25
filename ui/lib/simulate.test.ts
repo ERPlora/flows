@@ -543,6 +543,8 @@ describe('a step that only runs when its `run_if` holds (flows#129, hub#2066)', 
   });
 
   it('skips a guarded CONDITION instead of letting it end the run', () => {
+    // The kernel refuses `run_if` on a `condition` at save (hub/flows.md §7.8), but a draft being
+    // edited can still carry one: the preview must not turn it into a stop the kernel never makes.
     const out = simulate(
       doc([
         { id: 'g', kind: 'condition', when: { 'input.total': { gte: 100 } }, run_if: { 'input.check': { eq: true } } },
@@ -555,6 +557,7 @@ describe('a step that only runs when its `run_if` holds (flows#129, hub#2066)', 
   });
 
   it('says a guarded CONDITION may be skipped when its `run_if` cannot be decided here', () => {
+    // Same unsaved-draft case as above: the doubt is shown, not silently dropped.
     const out = simulate(
       doc([
         { id: 'assistant', kind: 'ai', prompt: 'hola' },
