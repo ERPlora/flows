@@ -3,7 +3,9 @@
   "module": "flows",
   "consumes": {
     "queries": [],
-    "optional_queries": [],
+    "optional_queries": [
+      "whatsapp_inbox.templates.list"
+    ],
     "commands": [],
     "events": [],
     "slots": []

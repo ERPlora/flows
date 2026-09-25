@@ -3045,6 +3045,70 @@ function setTapMode(doc, index, wants, remembered) {
   });
 }
 
+// ui/lib/hub-flows.ts
+var CAPABILITY_DENIED = "capability_denied";
+var APPROVAL_EXPIRED = "flow.approval_expired";
+var APPROVAL_ALREADY_DECIDED = "flow.approval_already_decided";
+var APPROVAL_NOT_YOURS = "flow.approval_not_yours";
+var EVENT_APPROVAL_CREATED = "flow.approval.created";
+var EVENT_APPROVAL_EXPIRED = "flow.approval.expired";
+function hasFlows(candidate) {
+  const c4 = candidate;
+  return !!c4 && typeof c4 === "object" && !!c4.flows && !!c4.events;
+}
+function resolveClient(host, global) {
+  if (hasFlows(host?.client)) return host.client;
+  const scoped = typeof global?.forModule === "function" ? global.forModule("flows") : void 0;
+  return hasFlows(scoped) ? scoped : null;
+}
+function errorCode(e4) {
+  const code = e4?.code;
+  return typeof code === "string" ? code : "";
+}
+
+// ui/lib/whatsapp-templates.ts
+var HEADER_OF = {
+  TEXT: null,
+  IMAGE: "image",
+  VIDEO: "video",
+  DOCUMENT: "document"
+};
+var HEADER_KEYS = ["header_image", "header_video", "header_document"];
+function readWhatsappTemplates(rows) {
+  if (!Array.isArray(rows)) return [];
+  const byName2 = /* @__PURE__ */ new Map();
+  for (const raw of rows) {
+    if (!raw || typeof raw !== "object") continue;
+    const r6 = raw;
+    const name = typeof r6.name === "string" ? r6.name.trim() : "";
+    if (!name || byName2.has(name)) continue;
+    if (String(r6.meta_status ?? "").toLowerCase() !== "approved") continue;
+    if (!(r6.is_active === true || Number(r6.is_active) === 1)) continue;
+    const format = String(r6.header_format ?? "").toUpperCase();
+    byName2.set(name, { name, header: format in HEADER_OF ? HEADER_OF[format] : "unknown" });
+  }
+  return [...byName2.values()].sort((a3, b3) => a3.name.localeCompare(b3.name));
+}
+var ABSENT_CODES = /* @__PURE__ */ new Set(["module_not_installed", "module_inactive"]);
+async function loadWhatsappTemplates(client) {
+  try {
+    if (typeof client?.queryAllOptional !== "function") return { status: "absent", templates: [] };
+    const rows = await client.queryAllOptional("whatsapp_inbox.templates.list", {});
+    if (rows === void 0) return { status: "absent", templates: [] };
+    return { status: "ready", templates: readWhatsappTemplates(rows) };
+  } catch (e4) {
+    if (ABSENT_CODES.has(errorCode(e4))) return { status: "absent", templates: [] };
+    return { status: "error", templates: [] };
+  }
+}
+function withTemplateHeader(vars, header) {
+  const next = { ...vars };
+  const link = HEADER_KEYS.map((k2) => next[k2]).find((v2) => v2 !== void 0);
+  for (const k2 of HEADER_KEYS) delete next[k2];
+  if (header) next[`header_${header}`] = link ?? "";
+  return next;
+}
+
 // ui/lib/trigger-catalog.ts
 var TRIGGER_CATALOG = [
   { event: "sale.completed", labelKey: "ui.evSaleCompleted", module: "sales" },
@@ -3809,27 +3873,6 @@ function needsAttention(run2) {
   return run2.status === "failed";
 }
 
-// ui/lib/hub-flows.ts
-var CAPABILITY_DENIED = "capability_denied";
-var APPROVAL_EXPIRED = "flow.approval_expired";
-var APPROVAL_ALREADY_DECIDED = "flow.approval_already_decided";
-var APPROVAL_NOT_YOURS = "flow.approval_not_yours";
-var EVENT_APPROVAL_CREATED = "flow.approval.created";
-var EVENT_APPROVAL_EXPIRED = "flow.approval.expired";
-function hasFlows(candidate) {
-  const c4 = candidate;
-  return !!c4 && typeof c4 === "object" && !!c4.flows && !!c4.events;
-}
-function resolveClient(host, global) {
-  if (hasFlows(host?.client)) return host.client;
-  const scoped = typeof global?.forModule === "function" ? global.forModule("flows") : void 0;
-  return hasFlows(scoped) ? scoped : null;
-}
-function errorCode(e4) {
-  const code = e4?.code;
-  return typeof code === "string" ? code : "";
-}
-
 // ui/lib/question-steps.ts
 function obj2(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -4000,6 +4043,7 @@ var ErpFlowsEditor = class extends i3 {
       status: "idle",
       flows: []
     };
+    this.waTemplates = { status: "idle", templates: [] };
     this.secrets = [];
     this.secretName = "";
     this.secretValue = "";
@@ -4625,6 +4669,7 @@ var ErpFlowsEditor = class extends i3 {
     if (changed.has("tab") && this.tab === "test") this.tested = true;
     if (this.openStep === "trigger") void this.ensureEventCatalog();
     if (this.openGuardComparesReplyStep()) void this.ensureHubFlows();
+    if (this.openStepSendsWhatsapp()) void this.ensureWaTemplates();
     this.pinEventSelect();
   }
   /**
@@ -4676,6 +4721,21 @@ var ErpFlowsEditor = class extends i3 {
   openGuardComparesReplyStep() {
     const step = this.document.steps.find((s4) => s4.id === this.openStep);
     return step?.kind === "condition" && REPLY_STEP_PATH in (step.when ?? {});
+  }
+  openStepSendsWhatsapp() {
+    const step = this.document.steps.find((s4) => s4.id === this.openStep);
+    return step?.kind === "notify" && step.channel === "whatsapp";
+  }
+  async ensureWaTemplates() {
+    if (this.waTemplates.status !== "idle" || !this.client) return;
+    this.waTemplates = { status: "loading", templates: [] };
+    this.waTemplates = await loadWhatsappTemplates(this.client);
+  }
+  /** The template a WhatsApp step names, when the list the hub served has it. */
+  knownTemplate(step) {
+    if (this.waTemplates.status !== "ready") return void 0;
+    const name = String(step.template ?? "").trim();
+    return this.waTemplates.templates.find((t3) => t3.name === name);
   }
   async ensureHubFlows() {
     if (this.hubFlows.status !== "idle" || !this.client) return;
@@ -5699,21 +5759,7 @@ var ErpFlowsEditor = class extends i3 {
           </div>` : A}
 
       ${taps && canTap ? this.renderTapOptions(step, index, taps) : b2`
-            <div class="field">
-              <label for="tp-${step.id}">${this.t("ui.notifyTemplate")}</label>
-              <input
-                id="tp-${step.id}"
-                data-field="template"
-                type="text"
-                .value=${String(step.template ?? "")}
-                @change=${(e4) => {
-      const template = e4.target.value;
-      const next = patchStep(this.document, index, { template });
-      this.setDoc(template.trim() ? next : dropHeaderOf(next, index));
-    }}
-              />
-              <span class="hint">${this.t("ui.notifyTemplateHint")}</span>
-            </div>
+            ${this.renderTemplateField(step, index, vars)}
 
             ${this.renderTemplateHeader(step, index, vars)}
 
@@ -5727,6 +5773,106 @@ var ErpFlowsEditor = class extends i3 {
     `;
   }
   /**
+   * **Which template**: a list on WhatsApp (flows#132), a box on email — where the name is the
+   * subject — and a box too wherever the list cannot be read, so a hub without it keeps a step.
+   *
+   * A name that is not in the list is kept as an option of its own and said out loud, never
+   * dropped: the step was saved with it, and rewriting it behind her back would change what the
+   * flow sends without anyone choosing to.
+   */
+  renderTemplateField(step, index, vars) {
+    const current = String(step.template ?? "").trim();
+    const list = this.waTemplates;
+    const setTemplate = (template, picked) => {
+      const next = patchStep(this.document, index, { template });
+      if (!template.trim()) {
+        this.setDoc(dropHeaderOf(next, index));
+      } else if (picked && picked.header !== "unknown") {
+        const header = this.headerMedia ? picked.header : null;
+        this.setDoc(patchStep(next, index, { vars: withTemplateHeader(vars, header) }));
+      } else {
+        this.setDoc(next);
+      }
+    };
+    if (step.channel !== "whatsapp" || list.status !== "ready" && list.status !== "loading") {
+      return b2`
+        ${step.channel === "whatsapp" && list.status === "error" ? b2`<ok-inline-feedback tone="warning" data-field="templates-error"
+              >${this.t("ui.notifyTemplatesError")}</ok-inline-feedback
+            >` : A}
+        <div class="field">
+          <label for="tp-${step.id}">${this.t("ui.notifyTemplate")}</label>
+          <input
+            id="tp-${step.id}"
+            data-field="template"
+            type="text"
+            .value=${String(step.template ?? "")}
+            @change=${(e4) => setTemplate(e4.target.value)}
+          />
+          <span class="hint">${this.t("ui.notifyTemplateHint")}</span>
+        </div>
+      `;
+    }
+    const unknown = !!current && list.status === "ready" && !list.templates.some((t3) => t3.name === current);
+    return b2`
+      <div class="field">
+        <label for="tp-${step.id}">${this.t("ui.notifyTemplatePick")}</label>
+        <select
+          id="tp-${step.id}"
+          data-field="template-pick"
+          ?disabled=${list.status === "loading"}
+          .value=${current}
+          @change=${(e4) => {
+      const name = e4.target.value;
+      setTemplate(name, list.templates.find((t3) => t3.name === name));
+    }}
+        >
+          ${option("", this.t("ui.notifyTemplateNone"), current)}
+          ${list.templates.map((t3) => option(t3.name, t3.name, current))}
+          ${unknown ? option(current, this.t("ui.notifyTemplateUnknownOption", { name: current }), current) : A}
+        </select>
+        <span class="hint"
+          >${list.status === "loading" ? this.t("ui.notifyTemplatesLoading") : this.t("ui.notifyTemplatePickHint")}</span
+        >
+      </div>
+      ${list.status === "ready" && list.templates.length === 0 ? b2`<ok-inline-feedback tone="info" data-field="templates-empty"
+            >${this.t("ui.notifyTemplatesEmpty")}</ok-inline-feedback
+          >` : A}
+      ${unknown ? b2`<ok-inline-feedback tone="warning" data-field="template-unknown"
+            >${this.t("ui.notifyTemplateUnknown", { name: current })}</ok-inline-feedback
+          >` : A}
+    `;
+  }
+  /**
+   * The header of a template the list knows: nothing to choose, only the file to attach (flows#132).
+   * On a hub that cannot send a header, a warning instead of a field the kernel would refuse.
+   */
+  renderDeducedHeader(index, vars, known) {
+    const kind = known.header;
+    if (!kind || kind === "unknown") return A;
+    const kindLabel = this.t(`ui.notifyHeader_${kind}`);
+    if (!this.headerMedia) {
+      return b2`<ok-inline-feedback tone="warning" data-field="header-unsupported"
+        >${this.t("ui.notifyHeaderUnsupported", { kind: kindLabel })}</ok-inline-feedback
+      >`;
+    }
+    return b2`
+      <span class="hint" data-field="header-deduced"
+        >${this.t("ui.notifyHeaderDeduced", { kind: kindLabel })}</span
+      >
+      ${this.renderValue({
+      field: "header-link",
+      label: this.t("ui.notifyHeaderLink"),
+      value: readHeader(vars)?.link ?? "",
+      template: true,
+      onChange: (link) => this.setDoc(
+        patchStep(this.document, index, {
+          vars: { ...withoutHeader(vars), [headerKey(kind)]: link }
+        })
+      )
+    })}
+    `;
+  }
+  /**
    * **The media in the template's header** (hub#2101): a kind and a link, and nothing else.
    *
    * Only on a WhatsApp step that names a template, on a hub that declared the keys. The link is
@@ -5734,9 +5880,10 @@ var ErpFlowsEditor = class extends i3 {
    * field of the run — and written as a string, because Meta's `link` is one.
    */
   renderTemplateHeader(step, index, vars) {
-    if (!this.headerMedia || step.channel !== "whatsapp" || !String(step.template ?? "").trim()) {
-      return A;
-    }
+    if (step.channel !== "whatsapp" || !String(step.template ?? "").trim()) return A;
+    const known = this.knownTemplate(step);
+    if (known && known.header !== "unknown") return this.renderDeducedHeader(index, vars, known);
+    if (!this.headerMedia) return A;
     const header = readHeader(vars);
     const write = (kind, link) => {
       const rest = withoutHeader(vars);
@@ -6884,6 +7031,9 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "hubFlows", 2);
+__decorateClass([
+  r5()
+], ErpFlowsEditor.prototype, "waTemplates", 2);
 __decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "secrets", 2);
@@ -10315,6 +10465,16 @@ var es_default = {
     notifyModeText: "Algo que les cuentas",
     notifyTemplate: "Nombre de la plantilla",
     notifyTemplateHint: "En WhatsApp, la plantilla que te aprob\xF3 Meta. En email hace de asunto, salvo que escribas uno t\xFA.",
+    notifyTemplatePick: "Plantilla",
+    notifyTemplatePickHint: "Las plantillas que Meta aprob\xF3 para tu negocio. Sin ninguna, el mensaje solo llega a un cliente que te escribi\xF3 en las \xFAltimas 24 horas.",
+    notifyTemplateNone: "Sin plantilla \u2014 texto libre (solo \xFAltimas 24 horas)",
+    notifyTemplatesLoading: "Cargando tus plantillas\u2026",
+    notifyTemplatesEmpty: "Todav\xEDa no tienes ninguna plantilla aprobada por Meta. Tr\xE1elas desde WhatsApp \u2192 Plantillas.",
+    notifyTemplatesError: "No se han podido leer tus plantillas de WhatsApp. Puedes escribir el nombre de la plantilla a mano.",
+    notifyTemplateUnknown: "\xAB{name}\xBB no est\xE1 entre tus plantillas aprobadas: WhatsApp no la enviar\xE1. Elige una de la lista.",
+    notifyTemplateUnknownOption: "{name} (no est\xE1 en tu lista)",
+    notifyHeaderDeduced: "Esta plantilla lleva arriba: {kind}. A\xF1ade el enlace al archivo.",
+    notifyHeaderUnsupported: "Esta plantilla lleva arriba: {kind}, y este hub todav\xEDa no puede enviarlo. Actualiza el hub o elige una plantilla sin archivo.",
     notifyHeader: "Cabecera de la plantilla",
     notifyHeader_none: "Sin archivo",
     notifyHeader_image: "Imagen",
@@ -11262,6 +11422,16 @@ var en_default = {
     notifyModeText: "Something you tell them",
     notifyTemplate: "Template name",
     notifyTemplateHint: "On WhatsApp, the template Meta approved for you. On email it becomes the subject, unless you write one yourself.",
+    notifyTemplatePick: "Template",
+    notifyTemplatePickHint: "The templates Meta approved for your business. Without one, the message only reaches a customer who wrote to you in the last 24 hours.",
+    notifyTemplateNone: "No template \u2014 plain text (last 24 hours only)",
+    notifyTemplatesLoading: "Loading your templates\u2026",
+    notifyTemplatesEmpty: "You have no template approved by Meta yet. Bring them in from WhatsApp \u2192 Templates.",
+    notifyTemplatesError: "Your WhatsApp templates could not be read. You can still write the name of the template by hand.",
+    notifyTemplateUnknown: "\u201C{name}\u201D is not among your approved templates: WhatsApp will not send it. Choose one from the list.",
+    notifyTemplateUnknownOption: "{name} (not in your list)",
+    notifyHeaderDeduced: "This template carries a file at the top ({kind}): add the link to it.",
+    notifyHeaderUnsupported: "This template carries a file at the top ({kind}) and this hub cannot send it yet. Update the hub, or choose a template without one.",
     notifyHeader: "Template header",
     notifyHeader_none: "No media",
     notifyHeader_image: "Image",
