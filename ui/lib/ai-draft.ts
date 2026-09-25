@@ -165,6 +165,16 @@ export interface SchemaFacts {
    */
   headerMedia: boolean;
   /**
+   * Whether this hub turns `vars.header_text` into the value of a template's text title (hub#2111).
+   * Fail-closed like {@link SchemaFacts.headerMedia}, for the same reason.
+   */
+  headerText: boolean;
+  /**
+   * Whether this hub turns `vars.button_url_<n>` into the end of a template's link button
+   * (hub#2110), read off the `patternProperties` the served schema names under `vars`.
+   */
+  buttonUrl: boolean;
+  /**
    * Whether this hub can store a `query` grant that FIXES its parameters (hub#1662).
    *
    * The third fail-closed fact, and the only one in here that is **not** read off the schema —
@@ -267,6 +277,9 @@ export function schemaFacts(schema: unknown, coreVersion?: unknown): SchemaFacts
     // Same rule again (hub#2101). The three keys landed together; asking for the first one is
     // asking for the release that sends them.
     headerMedia: !!at(schema, ['$defs', 'step', 'properties', 'vars', 'properties', 'header_image']),
+    // Same rule, one key per release: hub#2111 (the title) and hub#2110 (the link button).
+    headerText: !!at(schema, ['$defs', 'step', 'properties', 'vars', 'properties', 'header_text']),
+    buttonUrl: !!at(schema, ['$defs', 'step', 'properties', 'vars', 'patternProperties', '^button_url_[0-9]$']),
     // Not `at(schema, …)` like every line above it, because there is nothing in the schema to
     // read: this one is answered by the version the same response carries, and by nothing else.
     // A caller that does not hand it over gets `false`, which is the same fail-closed default the

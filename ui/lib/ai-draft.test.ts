@@ -149,6 +149,23 @@ describe('the contract is read off the LIVE schema, not remembered', () => {
     expect(schemaFacts(undefined).headerMedia).toBe(false);
   });
 
+  // hub#2111 / hub#2110: the title with a variable and the link button, each its own key and its
+  // own release. Same floor: on a core that never named them they travel as BODY variables.
+  it('offers the title and the link-button gaps only where the hub named their keys', () => {
+    const declaring = JSON.parse(JSON.stringify(liveSchema));
+    declaring.$defs.step.properties.vars = {
+      $ref: '#/$defs/mapping',
+      properties: { header_image: {}, header_text: {} },
+      patternProperties: { '^button_url_[0-9]$': {} },
+    };
+    expect(schemaFacts(declaring).headerText).toBe(true);
+    expect(schemaFacts(declaring).buttonUrl).toBe(true);
+    expect(schemaFacts(liveSchema).headerText).toBe(false);
+    expect(schemaFacts(liveSchema).buttonUrl).toBe(false);
+    expect(schemaFacts(undefined).headerText).toBe(false);
+    expect(schemaFacts(undefined).buttonUrl).toBe(false);
+  });
+
   it('hides them when the schema could not be read at all, unlike every other fact here', () => {
     expect(schemaFacts(undefined).interactiveNotify).toBe(false);
     expect(schemaFacts({ $defs: { step: {} } }).interactiveNotify).toBe(false);

@@ -4,6 +4,7 @@ import {
   loadWhatsappTemplates,
   readWhatsappTemplates,
   withTemplateHeader,
+  withTemplateSlots,
 } from './whatsapp-templates';
 
 /**
@@ -134,5 +135,111 @@ describe('withTemplateHeader', () => {
     expect(withTemplateHeader({ text: 'hola', header_image: 'https://a/x.jpg' }, null)).toEqual({
       text: 'hola',
     });
+  });
+});
+
+/**
+ * **The gaps a template asks to be filled besides its body** (flows#132, after hub#2110/#2111):
+ * a title with a `{{1}}` («Your appointment on {{1}}») and a link button whose URL ends in one.
+ * The row says both — `header` holds the title, `buttons` the buttons in Meta's order — so the
+ * step asks for exactly those and nothing else.
+ */
+describe('the gaps of a template, read off its row', () => {
+  const url = (u: string) => ({ type: 'URL', text: 'See', url: u });
+
+  it('marks a text title with a variable, and only a text one', () => {
+    expect(
+      readWhatsappTemplates([
+        row({ name: 'dated', header: 'Your appointment on {{1}}' }),
+        row({ name: 'plain', header: 'Your appointment' }),
+        row({ name: 'photo', header_format: 'IMAGE', header: '' }),
+      ]),
+    ).toEqual([
+      { name: 'dated', header: null, titleVariable: true },
+      { name: 'photo', header: 'image' },
+      { name: 'plain', header: null },
+    ]);
+  });
+
+  it('reads the title of a row that predates header_format, which was always text', () => {
+    expect(readWhatsappTemplates([row({ header_format: undefined, header: 'Hi {{1}}' })])).toEqual([
+      { name: 'autumn_promo', header: 'unknown', titleVariable: true },
+    ]);
+  });
+
+  it('lists the position of every link button with a variable, as Meta counts the buttons', () => {
+    const buttons = JSON.stringify([
+      { type: 'QUICK_REPLY', text: 'Yes' },
+      url('https://shop.example/orders/{{1}}'),
+      { type: 'PHONE_NUMBER', text: 'Call', phone_number: '+34600000000' },
+      url('https://shop.example/help'),
+      url('https://shop.example/pay/{{1}}'),
+    ]);
+    expect(readWhatsappTemplates([row({ buttons })])).toEqual([
+      {
+        name: 'autumn_promo',
+        header: null,
+        linkButtons: [
+          { index: 1, text: 'See' },
+          { index: 4, text: 'See' },
+        ],
+      },
+    ]);
+  });
+
+  it('never asks for a button that is not a link, whatever it carries', () => {
+    const buttons = [{ type: 'PHONE_NUMBER', text: 'Call', url: 'https://a/{{1}}', phone_number: '+34600000000' }];
+    expect(readWhatsappTemplates([row({ buttons })])[0].linkButtons).toBeUndefined();
+  });
+
+  it('reads buttons served already parsed, and ignores a column it cannot read', () => {
+    expect(readWhatsappTemplates([row({ buttons: [url('https://a/{{1}}')] })])[0].linkButtons).toEqual([{ index: 0, text: 'See' }]);
+    expect(readWhatsappTemplates([row({ buttons: 'not json' })])[0].linkButtons).toBeUndefined();
+    expect(readWhatsappTemplates([row({ buttons: undefined })])[0].linkButtons).toBeUndefined();
+  });
+});
+
+describe('withTemplateSlots', () => {
+  const all = { title: true, links: true };
+
+  it('writes the title and the link keys the template asks for, carrying what was written', () => {
+    expect(
+      withTemplateSlots(
+        { text: 'hola', header_text: '{{input.day}}', button_url_3: 'x', button_url_1: '{{input.code}}' },
+        {
+          name: 't',
+          header: null,
+          titleVariable: true,
+          linkButtons: [
+            { index: 1, text: 'See' },
+            { index: 2, text: 'Pay' },
+          ],
+        },
+        all,
+      ),
+    ).toEqual({ text: 'hola', header_text: '{{input.day}}', button_url_1: '{{input.code}}', button_url_2: '' });
+  });
+
+  it('drops every title and link key of a template that asks for none', () => {
+    expect(
+      withTemplateSlots({ text: 'hola', header_text: 'a', button_url_0: 'b' }, { name: 't', header: null }, all),
+    ).toEqual({ text: 'hola' });
+  });
+
+  it('never writes a key the hub cannot send, and drops one that was there', () => {
+    // On a core without hub#2111 `header_text` travels as a BODY variable and Meta refuses the send.
+    expect(
+      withTemplateSlots(
+        { header_text: 'a', button_url_0: 'b' },
+        { name: 't', header: null, titleVariable: true, linkButtons: [{ index: 0, text: 'See' }] },
+        { title: false, links: false },
+      ),
+    ).toEqual({});
+  });
+
+  it('drops a media header when the template has a title with a variable: a template has ONE header', () => {
+    expect(
+      withTemplateSlots({ header_image: 'https://a/x.jpg' }, { name: 't', header: 'unknown', titleVariable: true }, all),
+    ).toEqual({ header_text: '' });
   });
 });

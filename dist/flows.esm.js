@@ -3074,6 +3074,31 @@ var HEADER_OF = {
   DOCUMENT: "document"
 };
 var HEADER_KEYS = ["header_image", "header_video", "header_document"];
+var TITLE_KEY = "header_text";
+var linkKey = (n5) => `button_url_${n5}`;
+var LINK_KEY = /^button_url_[0-9]$/;
+var HAS_VARIABLE = /\{\{[^}]*\}\}/;
+function linkButtonsOf(raw) {
+  let list = raw;
+  if (typeof raw === "string") {
+    try {
+      list = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  list.forEach((b3, i4) => {
+    if (!b3 || typeof b3 !== "object" || i4 > 9) return;
+    const button = b3;
+    if (String(button.type ?? "").toUpperCase() !== "URL") return;
+    if (typeof button.url === "string" && HAS_VARIABLE.test(button.url)) {
+      out.push({ index: i4, text: typeof button.text === "string" ? button.text : "" });
+    }
+  });
+  return out;
+}
 function readWhatsappTemplates(rows) {
   if (!Array.isArray(rows)) return [];
   const byName2 = /* @__PURE__ */ new Map();
@@ -3085,7 +3110,12 @@ function readWhatsappTemplates(rows) {
     if (String(r6.meta_status ?? "").toLowerCase() !== "approved") continue;
     if (!(r6.is_active === true || Number(r6.is_active) === 1)) continue;
     const format = String(r6.header_format ?? "").toUpperCase();
-    byName2.set(name, { name, header: format in HEADER_OF ? HEADER_OF[format] : "unknown" });
+    const choice = { name, header: format in HEADER_OF ? HEADER_OF[format] : "unknown" };
+    const textTitle = format === "TEXT" || !r6.header_format;
+    if (textTitle && typeof r6.header === "string" && HAS_VARIABLE.test(r6.header)) choice.titleVariable = true;
+    const links = linkButtonsOf(r6.buttons);
+    if (links.length) choice.linkButtons = links;
+    byName2.set(name, choice);
   }
   return [...byName2.values()].sort((a3, b3) => a3.name.localeCompare(b3.name));
 }
@@ -3106,6 +3136,20 @@ function withTemplateHeader(vars, header) {
   const link = HEADER_KEYS.map((k2) => next[k2]).find((v2) => v2 !== void 0);
   for (const k2 of HEADER_KEYS) delete next[k2];
   if (header) next[`header_${header}`] = link ?? "";
+  return next;
+}
+function withoutTemplateSlots(vars) {
+  const next = { ...vars };
+  for (const k2 of Object.keys(next)) if (k2 === TITLE_KEY || LINK_KEY.test(k2)) delete next[k2];
+  return next;
+}
+function withTemplateSlots(vars, template, can) {
+  let next = withoutTemplateSlots(vars);
+  if (template.titleVariable && can.title) {
+    next = withTemplateHeader(next, null);
+    next[TITLE_KEY] = vars[TITLE_KEY] ?? "";
+  }
+  if (can.links) for (const { index } of template.linkButtons ?? []) next[linkKey(index)] = vars[linkKey(index)] ?? "";
   return next;
 }
 
@@ -3971,8 +4015,10 @@ function withoutHeader(vars) {
 }
 function dropHeaderOf(doc, index) {
   const vars = doc.steps[index]?.vars;
-  if (!vars || !readHeader(vars)) return doc;
-  return patchStep(doc, index, { vars: withoutHeader(vars) });
+  if (!vars) return doc;
+  const bare = withoutTemplateSlots(withoutHeader(vars));
+  if (Object.keys(bare).length === Object.keys(vars).length) return doc;
+  return patchStep(doc, index, { vars: bare });
 }
 function option(value, label, current) {
   return b2`<option value=${value} ?selected=${value === current}>${label}</option>`;
@@ -4028,6 +4074,8 @@ var ErpFlowsEditor = class extends i3 {
     this.tab = "editor";
     this.interactiveNotify = false;
     this.headerMedia = false;
+    this.headerText = false;
+    this.buttonUrl = false;
     this.openStep = null;
     this.grants = [];
     this.limitsOpen = [];
@@ -5763,6 +5811,8 @@ var ErpFlowsEditor = class extends i3 {
 
             ${this.renderTemplateHeader(step, index, vars)}
 
+            ${this.renderTemplateSlots(step, index, vars)}
+
             ${this.renderValue({
       field: "var-text",
       label: this.t("ui.notifyText"),
@@ -5787,9 +5837,11 @@ var ErpFlowsEditor = class extends i3 {
       const next = patchStep(this.document, index, { template });
       if (!template.trim()) {
         this.setDoc(dropHeaderOf(next, index));
-      } else if (picked && picked.header !== "unknown") {
+      } else if (picked) {
         const header = this.headerMedia ? picked.header : null;
-        this.setDoc(patchStep(next, index, { vars: withTemplateHeader(vars, header) }));
+        const media = picked.header === "unknown" ? vars : withTemplateHeader(vars, header === "unknown" ? null : header);
+        const slots = withTemplateSlots(media, picked, { title: this.headerText, links: this.buttonUrl });
+        this.setDoc(patchStep(next, index, { vars: slots }));
       } else {
         this.setDoc(next);
       }
@@ -5883,7 +5935,7 @@ var ErpFlowsEditor = class extends i3 {
     if (step.channel !== "whatsapp" || !String(step.template ?? "").trim()) return A;
     const known = this.knownTemplate(step);
     if (known && known.header !== "unknown") return this.renderDeducedHeader(index, vars, known);
-    if (!this.headerMedia) return A;
+    if (known?.titleVariable || !this.headerMedia) return A;
     const header = readHeader(vars);
     const write = (kind, link) => {
       const rest = withoutHeader(vars);
@@ -5915,6 +5967,42 @@ var ErpFlowsEditor = class extends i3 {
       template: true,
       onChange: (link) => write(header.kind, link)
     }) : A}
+    `;
+  }
+  /**
+   * **The gaps of a template the list knows** (hub#2110/#2111): the value of a title with a `{{1}}`
+   * and the end of each link button whose URL has one — composed in the same picker as the copy,
+   * because the appointment's date or the order's code is a field of the run. On a hub that cannot
+   * send them, a warning instead: the send would be refused by Meta, and she should know now.
+   */
+  renderTemplateSlots(step, index, vars) {
+    if (step.channel !== "whatsapp") return A;
+    const known = this.knownTemplate(step);
+    if (!known) return A;
+    const set = (key2, value) => this.setDoc(patchStep(this.document, index, { vars: { ...vars, [key2]: value } }));
+    const links = known.linkButtons ?? [];
+    return b2`
+      ${known.titleVariable ? this.headerText ? this.renderValue({
+      field: "header-text",
+      label: this.t("ui.notifyTitleValue"),
+      value: vars[TITLE_KEY] ?? "",
+      template: true,
+      onChange: (v2) => set(TITLE_KEY, v2)
+    }) : b2`<ok-inline-feedback tone="warning" data-field="header-text-unsupported"
+              >${this.t("ui.notifyTitleUnsupported")}</ok-inline-feedback
+            >` : A}
+      ${links.length && !this.buttonUrl ? b2`<ok-inline-feedback tone="warning" data-field="button-url-unsupported"
+            >${this.t("ui.notifyLinkUnsupported")}</ok-inline-feedback
+          >` : A}
+      ${this.buttonUrl ? links.map(
+      ({ index: n5, text: text2 }) => this.renderValue({
+        field: `button-url-${n5}`,
+        label: this.t("ui.notifyLinkValue", { button: text2 || String(n5 + 1) }),
+        value: vars[linkKey(n5)] ?? "",
+        template: true,
+        onChange: (v2) => set(linkKey(n5), v2)
+      })
+    ) : A}
     `;
   }
   /**
@@ -7002,6 +7090,12 @@ __decorateClass([
   n4({ attribute: false })
 ], ErpFlowsEditor.prototype, "headerMedia", 2);
 __decorateClass([
+  n4({ attribute: false })
+], ErpFlowsEditor.prototype, "headerText", 2);
+__decorateClass([
+  n4({ attribute: false })
+], ErpFlowsEditor.prototype, "buttonUrl", 2);
+__decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "openStep", 2);
 __decorateClass([
@@ -7171,6 +7265,9 @@ function schemaFacts(schema, coreVersion) {
     // Same rule again (hub#2101). The three keys landed together; asking for the first one is
     // asking for the release that sends them.
     headerMedia: !!at(schema, ["$defs", "step", "properties", "vars", "properties", "header_image"]),
+    // Same rule, one key per release: hub#2111 (the title) and hub#2110 (the link button).
+    headerText: !!at(schema, ["$defs", "step", "properties", "vars", "properties", "header_text"]),
+    buttonUrl: !!at(schema, ["$defs", "step", "properties", "vars", "patternProperties", "^button_url_[0-9]$"]),
     // Not `at(schema, …)` like every line above it, because there is nothing in the schema to
     // read: this one is answered by the version the same response carries, and by nothing else.
     // A caller that does not hand it over gets `false`, which is the same fail-closed default the
@@ -10482,6 +10579,10 @@ var es_default = {
     notifyHeader_document: "Documento",
     notifyHeaderHint: "Si Meta te aprob\xF3 esta plantilla con una imagen, un v\xEDdeo o un documento arriba, el\xEDgelo aqu\xED: sin \xE9l WhatsApp no env\xEDa el mensaje.",
     notifyHeaderLink: "Enlace al archivo",
+    notifyTitleValue: "Qu\xE9 va en el hueco del t\xEDtulo de la plantilla",
+    notifyTitleUnsupported: "Esta plantilla tiene un hueco en el t\xEDtulo y este hub todav\xEDa no puede rellenarlo. Actualiza el hub o elige una plantilla sin \xE9l.",
+    notifyLinkValue: "Final del enlace del bot\xF3n \xAB{button}\xBB",
+    notifyLinkUnsupported: "Esta plantilla tiene un bot\xF3n de enlace que cambia en cada mensaje y este hub todav\xEDa no puede rellenarlo. Actualiza el hub o elige una plantilla sin \xE9l.",
     notifyText: "El mensaje",
     notifyTo: "A qui\xE9n le llega",
     notifyToField: "De qu\xE9 columna",
@@ -11439,6 +11540,10 @@ var en_default = {
     notifyHeader_document: "Document",
     notifyHeaderHint: "If Meta approved this template with an image, video or document at the top, choose it here: without it WhatsApp does not send the message.",
     notifyHeaderLink: "Link to the file",
+    notifyTitleValue: "What goes in the gap of the template's title",
+    notifyTitleUnsupported: "This template has a gap in its title and this hub cannot fill it yet. Update the hub, or choose a template without one.",
+    notifyLinkValue: "End of the link of the \xAB{button}\xBB button",
+    notifyLinkUnsupported: "This template has a link button that changes with each message and this hub cannot fill it yet. Update the hub, or choose a template without one.",
     notifyText: "The message",
     notifyTo: "Who it goes to",
     notifyToField: "Which column",
@@ -12917,6 +13022,8 @@ var ErpFlowsApp = class extends i3 {
         .draft=${this.draftReview}
         .interactiveNotify=${this.facts.interactiveNotify}
         .headerMedia=${this.facts.headerMedia}
+        .headerText=${this.facts.headerText}
+        .buttonUrl=${this.facts.buttonUrl}
         @flows-back=${() => {
         this.editing = null;
         this.isNew = false;
