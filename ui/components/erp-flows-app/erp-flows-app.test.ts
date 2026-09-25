@@ -386,6 +386,7 @@ describe('what the hub can do reaches the screen that draws it (flows#75)', () =
     await el.updateComplete;
     return el.renderRoot.querySelector('erp-flows-editor') as HTMLElement & {
       interactiveNotify: boolean;
+      headerMedia: boolean;
     };
   };
 
@@ -405,5 +406,15 @@ describe('what the hub can do reaches the screen that draws it (flows#75)', () =
   it('hands it a NO for a hub whose schema never mentions them', async () => {
     const editor = await editorOf(withSchema({ $defs: { step: { properties: {} } } }));
     expect(editor?.interactiveNotify).toBe(false);
+  });
+
+  // hub#2101: the same wiring for a template's media header.
+  it('hands the editor what the hub said about template headers', async () => {
+    const declaring = withSchema({
+      $defs: { step: { properties: { vars: { properties: { header_image: {} } } } } },
+    });
+    expect((await editorOf(declaring))?.headerMedia).toBe(true);
+    document.body.replaceChildren();
+    expect((await editorOf(withSchema({ $defs: { step: { properties: {} } } })))?.headerMedia).toBe(false);
   });
 });
