@@ -71,6 +71,8 @@ export interface AiTools {
 export interface Step {
   id: string;
   kind: StepKind;
+  /** Any kind (hub#2066): the step runs only when this holds; otherwise it is skipped and the run carries on. */
+  run_if?: Condition;
   /** `command` */
   command?: string;
   params?: Record<string, unknown>;

@@ -477,3 +477,115 @@ describe('a message with options, in the preview (flows#75)', () => {
     expect(blanks.length).toBeGreaterThan(0);
   });
 });
+
+describe('a step that only runs when its `run_if` holds (flows#129, hub#2066)', () => {
+  const doc = (steps: unknown[]) => ({ schema_version: 1, triggers: [{ kind: 'manual' }], steps } as never);
+
+  it('shows a step whose guard does not hold as SKIPPED, and the walk carries on', () => {
+    // The kernel skips THIS step and the run continues — the opposite of a `condition`, which
+    // ends the run. A message that would never be sent must not be previewed as sent.
+    const out = simulate(
+      doc([
+        { id: 'call', kind: 'notify', channel: 'whatsapp', vars: { 1: '{{input.name}}' }, run_if: { 'input.failed': { eq: true } } },
+        { id: 'after', kind: 'command', command: 'x', params: {} },
+      ]),
+      { name: 'Marta', failed: false },
+    );
+    expect(out.steps.map((s) => s.outcome)).toEqual(['skipped', 'would-run']);
+    expect(out.steps[0].values).toEqual([]);
+    expect(out.steps[0].runIf?.failed).toEqual([{ path: 'input.failed', op: 'eq', expected: true }]);
+    expect(out.stoppedAt).toBeUndefined();
+  });
+
+  it('does not count a blank on a step that would be skipped', () => {
+    const out = simulate(
+      doc([{ id: 'n', kind: 'notify', vars: { 1: '{{input.missing}}' }, run_if: { 'input.go': { eq: true } } }]),
+      { go: false },
+    );
+    expect(out.blanks).toBe(0);
+  });
+
+  it('runs a step whose guard holds exactly as if it had none', () => {
+    const out = simulate(
+      doc([{ id: 'n', kind: 'command', command: 'x', params: { t: '{{input.name}}' }, run_if: { 'input.go': { eq: true } } }]),
+      { go: true, name: 'Marta' },
+    );
+    expect(out.steps[0].outcome).toBe('would-run');
+    expect(out.steps[0].maySkip).toBeUndefined();
+    expect(out.steps[0].values[0].text).toBe('Marta');
+  });
+
+  it('says a guard on the output of an earlier step MAY skip it, rather than guessing', () => {
+    // «avisa a la clienta, solo si el asistente falló»: whether the assistant failed is only known
+    // once it has run. Both answers are possible, so the step is shown with its values AND the doubt.
+    const out = simulate(
+      doc([
+        { id: 'assistant', kind: 'ai', prompt: 'hola' },
+        { id: 'call', kind: 'notify', vars: { 1: '{{input.name}}' }, run_if: { 'steps.assistant.failed': { eq: true } } },
+      ]),
+      { name: 'Marta' },
+    );
+    expect(out.steps[1].outcome).toBe('would-run');
+    expect(out.steps[1].maySkip).toBe(true);
+    expect(out.steps[1].values[0].text).toBe('Marta');
+  });
+
+  it('skips the step when ONE clause surely fails, even if another is uncertain — the guard is an AND', () => {
+    const out = simulate(
+      doc([
+        { id: 'assistant', kind: 'ai', prompt: 'hola' },
+        { id: 'call', kind: 'notify', vars: { 1: 'x' }, run_if: { 'steps.assistant.failed': { eq: true }, 'input.go': { eq: true } } },
+      ]),
+      { go: false },
+    );
+    expect(out.steps[1].outcome).toBe('skipped');
+    expect(out.steps[1].maySkip).toBeUndefined();
+  });
+
+  it('skips a guarded CONDITION instead of letting it end the run', () => {
+    const out = simulate(
+      doc([
+        { id: 'g', kind: 'condition', when: { 'input.total': { gte: 100 } }, run_if: { 'input.check': { eq: true } } },
+        { id: 's', kind: 'command', command: 'x', params: {} },
+      ]),
+      { total: 1, check: false },
+    );
+    expect(out.steps.map((s) => s.outcome)).toEqual(['skipped', 'would-run']);
+    expect(out.stoppedAt).toBeUndefined();
+  });
+
+  it('says a guarded CONDITION may be skipped when its `run_if` cannot be decided here', () => {
+    const out = simulate(
+      doc([
+        { id: 'assistant', kind: 'ai', prompt: 'hola' },
+        { id: 'g', kind: 'condition', when: { 'input.total': { gte: 100 } }, run_if: { 'steps.assistant.failed': { eq: true } } },
+      ]),
+      { total: 500 },
+    );
+    expect(out.steps[1].outcome).toBe('would-run');
+    expect(out.steps[1].maySkip).toBe(true);
+  });
+
+  it('lets a later step read `steps.<id>.skipped`, as the kernel writes it', () => {
+    const out = simulate(
+      doc([
+        { id: 'a', kind: 'command', command: 'x', params: {}, run_if: { 'input.go': { eq: true } } },
+        { id: 'b', kind: 'command', command: 'y', params: {}, run_if: { 'steps.a.skipped': { eq: true } } },
+      ]),
+      { go: false },
+    );
+    expect(out.steps[1].outcome).toBe('would-run');
+    expect(out.steps[1].maySkip).toBeUndefined();
+  });
+
+  it('marks a step after a stopping guard not reached, guard or not', () => {
+    const out = simulate(
+      doc([
+        { id: 'g', kind: 'condition', when: { 'input.total': { gte: 100 } } },
+        { id: 's', kind: 'command', command: 'x', params: {}, run_if: { 'input.go': { eq: true } } },
+      ]),
+      { total: 1, go: false },
+    );
+    expect(out.steps[1].outcome).toBe('not-reached');
+  });
+});

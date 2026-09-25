@@ -1154,6 +1154,42 @@ describe('«Probar» before activating (flows#2)', () => {
     expect(panel.textContent).toContain('ui.testStoppedIsWorking');
   });
 
+  it('shows a step whose `run_if` does not hold as SKIPPED, not as sent (flows#129)', async () => {
+    const el = await mount(
+      saleFlow([
+        { id: 's1', kind: 'command', command: 'x', params: {}, run_if: { 'input.total': { gte: 100000 } } },
+        { id: 's2', kind: 'command', command: 'y', params: {} },
+      ]),
+      withShape(),
+    );
+    const panel = await test(el);
+    const skipped = panel.querySelector('[data-node-outcome="s1"]');
+    expect(skipped?.getAttribute('data-outcome')).toBe('skipped');
+    expect(skipped?.textContent).toContain('ui.testSkipped');
+    // WHY it is skipped — the clause that did not hold — is the one thing the owner can act on.
+    expect(skipped?.querySelector('.clauses')?.textContent).toContain('ui.testClauseFailed');
+    expect(panel.querySelector('[data-node-outcome="s2"]')?.getAttribute('data-outcome')).toBe(
+      'would-run',
+    );
+    expect(panel.textContent).not.toContain('ui.testMaySkip');
+  });
+
+  it('says a step MAY be skipped when its `run_if` reads an earlier step (flows#129)', async () => {
+    const el = await mount(
+      saleFlow([
+        { id: 's1', kind: 'command', command: 'x', params: {} },
+        { id: 's2', kind: 'command', command: 'y', params: {}, run_if: { 'steps.s1.ok': { eq: false } } },
+      ]),
+      withShape(),
+    );
+    const panel = await test(el);
+    const guarded = panel.querySelector('[data-node-outcome="s2"]');
+    expect(guarded?.getAttribute('data-outcome')).toBe('would-run');
+    expect(guarded?.textContent).toContain('ui.testMaySkip');
+    expect(panel.querySelector('[data-node-outcome="s1"]')?.textContent).not.toContain('ui.testMaySkip');
+    expect(panel.textContent).not.toContain('ui.testSkipped');
+  });
+
   it('warns that a step would be REFUSED for a permission that is not granted', async () => {
     // The likeliest real failure, and one a preview can catch for free: a flow whose grants are
     // missing dies at the first step with `flow.grant_denied` and nothing else on any screen

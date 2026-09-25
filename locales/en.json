@@ -648,6 +648,8 @@
     "testHidden": "there is a value, and it is not shown here",
     "testNoRealData": "This has not happened in your hub recently, so there is no real example to try it with. The steps below are still the right ones, but there is nothing to fill them in with.",
     "testNotReached": "It would not get this far.",
+    "testSkipped": "Skipped this time: its \"only if\" does not hold with this data. The rest carries on.",
+    "testMaySkip": "May be skipped: its \"only if\" depends on something only known when the flow really runs.",
     "testNothingHappened": "Nothing here is real. No message is sent, nothing is charged and nothing is written down — this is only what your automation WOULD do.",
     "testPausesHere": "Waits here for somebody to answer. Testing does not answer for them: all three outcomes are still possible.",
     "testRun": "Try it",

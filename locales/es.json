@@ -648,6 +648,8 @@
     "testHidden": "sí hay un valor, pero aquí no se enseña",
     "testNoRealData": "Esto no ha pasado en tu hub últimamente, así que no hay un ejemplo real con el que probarlo. Los pasos de abajo siguen siendo los correctos, pero no hay con qué rellenarlos.",
     "testNotReached": "No llegaría hasta aquí.",
+    "testSkipped": "Esta vez se salta: su «solo si» no se cumple con estos datos. El resto sigue.",
+    "testMaySkip": "Podría saltarse: su «solo si» depende de algo que solo se sabe cuando el flujo se ejecuta de verdad.",
     "testNothingHappened": "Nada de esto es real. No se envía ningún mensaje, no se cobra nada y no se apunta nada: esto es solo lo que HARÍA tu automatización.",
     "testPausesHere": "Espera aquí a que alguien conteste. Probar no contesta por nadie: las tres salidas siguen siendo posibles.",
     "testRun": "Probar",
