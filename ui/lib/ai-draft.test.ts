@@ -136,6 +136,19 @@ describe('the contract is read off the LIVE schema, not remembered', () => {
     expect(schemaFacts(liveSchema).interactiveNotify).toBe(false);
   });
 
+  // hub#2101: a template's media header. Fail-closed like `interactive`: on a hub that never named
+  // the keys, `vars.header_image` travels as a BODY variable and Meta refuses the whole send.
+  it('offers the template header only where the hub named its keys', () => {
+    const declaring = JSON.parse(JSON.stringify(liveSchema));
+    declaring.$defs.step.properties.vars = {
+      $ref: '#/$defs/mapping',
+      properties: { header_image: {}, header_video: {}, header_document: {} },
+    };
+    expect(schemaFacts(declaring).headerMedia).toBe(true);
+    expect(schemaFacts(liveSchema).headerMedia).toBe(false);
+    expect(schemaFacts(undefined).headerMedia).toBe(false);
+  });
+
   it('hides them when the schema could not be read at all, unlike every other fact here', () => {
     expect(schemaFacts(undefined).interactiveNotify).toBe(false);
     expect(schemaFacts({ $defs: { step: {} } }).interactiveNotify).toBe(false);

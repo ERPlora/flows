@@ -3915,6 +3915,22 @@ function clamp(value, min, max, fallback) {
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, Math.round(value)));
 }
+var HEADER_KINDS = ["image", "video", "document"];
+var headerKey = (kind) => `header_${kind}`;
+function readHeader(vars) {
+  const kind = HEADER_KINDS.find((k2) => headerKey(k2) in vars);
+  return kind ? { kind, link: vars[headerKey(kind)] } : null;
+}
+function withoutHeader(vars) {
+  const next = { ...vars };
+  for (const kind of HEADER_KINDS) delete next[headerKey(kind)];
+  return next;
+}
+function dropHeaderOf(doc, index) {
+  const vars = doc.steps[index]?.vars;
+  if (!vars || !readHeader(vars)) return doc;
+  return patchStep(doc, index, { vars: withoutHeader(vars) });
+}
 function option(value, label, current) {
   return b2`<option value=${value} ?selected=${value === current}>${label}</option>`;
 }
@@ -3968,6 +3984,7 @@ var ErpFlowsEditor = class extends i3 {
     this.enableWarning = "";
     this.tab = "editor";
     this.interactiveNotify = false;
+    this.headerMedia = false;
     this.openStep = null;
     this.grants = [];
     this.limitsOpen = [];
@@ -5621,7 +5638,9 @@ var ErpFlowsEditor = class extends i3 {
       const channel = e4.target.value;
       const next = patchStep(this.document, index, { channel });
       if (channel !== "whatsapp") this.rememberTaps(step);
-      this.setDoc(channel === "whatsapp" ? next : setTapMode(next, index, false));
+      this.setDoc(
+        channel === "whatsapp" ? next : setTapMode(dropHeaderOf(next, index), index, false)
+      );
     }}
         >
           <!-- Two options, and sms is not one of them: it has no transport anywhere and is
@@ -5687,14 +5706,16 @@ var ErpFlowsEditor = class extends i3 {
                 data-field="template"
                 type="text"
                 .value=${String(step.template ?? "")}
-                @change=${(e4) => this.setDoc(
-      patchStep(this.document, index, {
-        template: e4.target.value
-      })
-    )}
+                @change=${(e4) => {
+      const template = e4.target.value;
+      const next = patchStep(this.document, index, { template });
+      this.setDoc(template.trim() ? next : dropHeaderOf(next, index));
+    }}
               />
               <span class="hint">${this.t("ui.notifyTemplateHint")}</span>
             </div>
+
+            ${this.renderTemplateHeader(step, index, vars)}
 
             ${this.renderValue({
       field: "var-text",
@@ -5703,6 +5724,50 @@ var ErpFlowsEditor = class extends i3 {
       onChange: (text2) => setVar("text", text2)
     })}
           `}
+    `;
+  }
+  /**
+   * **The media in the template's header** (hub#2101): a kind and a link, and nothing else.
+   *
+   * Only on a WhatsApp step that names a template, on a hub that declared the keys. The link is
+   * composed in the same picker as the copy — a customer's photo or a product picture is usually a
+   * field of the run — and written as a string, because Meta's `link` is one.
+   */
+  renderTemplateHeader(step, index, vars) {
+    if (!this.headerMedia || step.channel !== "whatsapp" || !String(step.template ?? "").trim()) {
+      return A;
+    }
+    const header = readHeader(vars);
+    const write = (kind, link) => {
+      const rest = withoutHeader(vars);
+      this.setDoc(
+        patchStep(this.document, index, {
+          vars: kind === "none" ? rest : { ...rest, [headerKey(kind)]: link ?? "" }
+        })
+      );
+    };
+    return b2`
+      <div class="field">
+        <label for="hk-${step.id}">${this.t("ui.notifyHeader")}</label>
+        <select
+          id="hk-${step.id}"
+          data-field="header-kind"
+          .value=${header?.kind ?? "none"}
+          @change=${(e4) => write(e4.target.value, header?.link)}
+        >
+          ${["none", ...HEADER_KINDS].map(
+      (k2) => option(k2, this.t(`ui.notifyHeader_${k2}`), header?.kind ?? "none")
+    )}
+        </select>
+        <span class="hint">${this.t("ui.notifyHeaderHint")}</span>
+      </div>
+      ${header ? this.renderValue({
+      field: "header-link",
+      label: this.t("ui.notifyHeaderLink"),
+      value: header.link ?? "",
+      template: true,
+      onChange: (link) => write(header.kind, link)
+    }) : A}
     `;
   }
   /**
@@ -6787,6 +6852,9 @@ __decorateClass([
   n4({ attribute: false })
 ], ErpFlowsEditor.prototype, "interactiveNotify", 2);
 __decorateClass([
+  n4({ attribute: false })
+], ErpFlowsEditor.prototype, "headerMedia", 2);
+__decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "openStep", 2);
 __decorateClass([
@@ -6950,6 +7018,9 @@ function schemaFacts(schema, coreVersion) {
     // definition down with it too. Measured on the published schemas: `v1.1.15` declares neither
     // of the two and `v1.1.16` declares both.
     aiOutput: !!at(schema, ["$defs", "step", "properties", "output"]),
+    // Same rule again (hub#2101). The three keys landed together; asking for the first one is
+    // asking for the release that sends them.
+    headerMedia: !!at(schema, ["$defs", "step", "properties", "vars", "properties", "header_image"]),
     // Not `at(schema, …)` like every line above it, because there is nothing in the schema to
     // read: this one is answered by the version the same response carries, and by nothing else.
     // A caller that does not hand it over gets `false`, which is the same fail-closed default the
@@ -10244,6 +10315,13 @@ var es_default = {
     notifyModeText: "Algo que les cuentas",
     notifyTemplate: "Nombre de la plantilla",
     notifyTemplateHint: "En WhatsApp, la plantilla que te aprob\xF3 Meta. En email hace de asunto, salvo que escribas uno t\xFA.",
+    notifyHeader: "Cabecera de la plantilla",
+    notifyHeader_none: "Sin archivo",
+    notifyHeader_image: "Imagen",
+    notifyHeader_video: "V\xEDdeo",
+    notifyHeader_document: "Documento",
+    notifyHeaderHint: "Si Meta te aprob\xF3 esta plantilla con una imagen, un v\xEDdeo o un documento arriba, el\xEDgelo aqu\xED: sin \xE9l WhatsApp no env\xEDa el mensaje.",
+    notifyHeaderLink: "Enlace al archivo",
     notifyText: "El mensaje",
     notifyTo: "A qui\xE9n le llega",
     notifyToField: "De qu\xE9 columna",
@@ -11184,6 +11262,13 @@ var en_default = {
     notifyModeText: "Something you tell them",
     notifyTemplate: "Template name",
     notifyTemplateHint: "On WhatsApp, the template Meta approved for you. On email it becomes the subject, unless you write one yourself.",
+    notifyHeader: "Template header",
+    notifyHeader_none: "No media",
+    notifyHeader_image: "Image",
+    notifyHeader_video: "Video",
+    notifyHeader_document: "Document",
+    notifyHeaderHint: "If Meta approved this template with an image, video or document at the top, choose it here: without it WhatsApp does not send the message.",
+    notifyHeaderLink: "Link to the file",
     notifyText: "The message",
     notifyTo: "Who it goes to",
     notifyToField: "Which column",
@@ -12661,6 +12746,7 @@ var ErpFlowsApp = class extends i3 {
         .tab=${this.editorTab}
         .draft=${this.draftReview}
         .interactiveNotify=${this.facts.interactiveNotify}
+        .headerMedia=${this.facts.headerMedia}
         @flows-back=${() => {
         this.editing = null;
         this.isNew = false;
