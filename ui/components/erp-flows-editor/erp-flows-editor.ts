@@ -16,6 +16,8 @@ import {
   setTapOptions,
   tapOptionProblems,
 } from '../../lib/whatsapp-options';
+import { loadWhatsappTemplates, withTemplateHeader } from '../../lib/whatsapp-templates';
+import type { WhatsappTemplateChoice, WhatsappTemplatesState } from '../../lib/whatsapp-templates';
 import type { TapKind, TapOptions } from '../../lib/whatsapp-options';
 import {
   DEFAULT_APPROVAL_TTL_SECONDS,
@@ -962,6 +964,12 @@ export class ErpFlowsEditor extends LitElement {
   };
 
   /** The secret NAMES this hub holds. Never a value: no endpoint returns one (ADR-0283 §4). */
+  /**
+   * The WhatsApp templates the business keeps in `whatsapp_inbox` (flows#132), asked the first time
+   * a WhatsApp step is opened — a property of the HUB, like the event catalogue, not of the step.
+   */
+  @state() private waTemplates: WhatsappTemplatesState = { status: 'idle', templates: [] };
+
   @state() private secrets: SecretInfo[] = [];
 
   @state() private secretName = '';
@@ -1062,6 +1070,7 @@ export class ErpFlowsEditor extends LitElement {
     if (changed.has('tab') && this.tab === 'test') this.tested = true;
     if (this.openStep === 'trigger') void this.ensureEventCatalog();
     if (this.openGuardComparesReplyStep()) void this.ensureHubFlows();
+    if (this.openStepSendsWhatsapp()) void this.ensureWaTemplates();
     this.pinEventSelect();
   }
 
@@ -1121,6 +1130,24 @@ export class ErpFlowsEditor extends LitElement {
   private openGuardComparesReplyStep(): boolean {
     const step = this.document.steps.find((s) => s.id === this.openStep);
     return step?.kind === 'condition' && REPLY_STEP_PATH in (step.when ?? {});
+  }
+
+  private openStepSendsWhatsapp(): boolean {
+    const step = this.document.steps.find((s) => s.id === this.openStep);
+    return step?.kind === 'notify' && step.channel === 'whatsapp';
+  }
+
+  private async ensureWaTemplates(): Promise<void> {
+    if (this.waTemplates.status !== 'idle' || !this.client) return;
+    this.waTemplates = { status: 'loading', templates: [] };
+    this.waTemplates = await loadWhatsappTemplates(this.client);
+  }
+
+  /** The template a WhatsApp step names, when the list the hub served has it. */
+  private knownTemplate(step: Step): WhatsappTemplateChoice | undefined {
+    if (this.waTemplates.status !== 'ready') return undefined;
+    const name = String(step.template ?? '').trim();
+    return this.waTemplates.templates.find((t) => t.name === name);
   }
 
   private async ensureHubFlows(): Promise<void> {
@@ -2325,23 +2352,7 @@ export class ErpFlowsEditor extends LitElement {
       ${taps && canTap
         ? this.renderTapOptions(step, index, taps)
         : html`
-            <div class="field">
-              <label for="tp-${step.id}">${this.t('ui.notifyTemplate')}</label>
-              <input
-                id="tp-${step.id}"
-                data-field="template"
-                type="text"
-                .value=${String(step.template ?? '')}
-                @change=${(e: Event) => {
-                  const template = (e.target as HTMLInputElement).value;
-                  const next = patchStep(this.document, index, { template });
-                  // A free text has no header: the kernel refuses one without its template, so
-                  // clearing the template takes the header with it (hub#2101).
-                  this.setDoc(template.trim() ? next : dropHeaderOf(next, index));
-                }}
-              />
-              <span class="hint">${this.t('ui.notifyTemplateHint')}</span>
-            </div>
+            ${this.renderTemplateField(step, index, vars)}
 
             ${this.renderTemplateHeader(step, index, vars)}
 
@@ -2356,6 +2367,122 @@ export class ErpFlowsEditor extends LitElement {
   }
 
   /**
+   * **Which template**: a list on WhatsApp (flows#132), a box on email — where the name is the
+   * subject — and a box too wherever the list cannot be read, so a hub without it keeps a step.
+   *
+   * A name that is not in the list is kept as an option of its own and said out loud, never
+   * dropped: the step was saved with it, and rewriting it behind her back would change what the
+   * flow sends without anyone choosing to.
+   */
+  private renderTemplateField(step: Step, index: number, vars: Record<string, unknown>) {
+    const current = String(step.template ?? '').trim();
+    const list = this.waTemplates;
+    const setTemplate = (template: string, picked?: WhatsappTemplateChoice): void => {
+      const next = patchStep(this.document, index, { template });
+      if (!template.trim()) {
+        // A free text has no header: the kernel refuses one without its template (hub#2101).
+        this.setDoc(dropHeaderOf(next, index));
+      } else if (picked) {
+        // The header comes WITH the template: the key its kind needs, or none. Not on a hub that
+        // cannot send one — there the key would travel as a body variable and Meta refuse it.
+        const header = this.headerMedia ? picked.header : null;
+        this.setDoc(patchStep(next, index, { vars: withTemplateHeader(vars, header) }));
+      } else {
+        this.setDoc(next);
+      }
+    };
+    if (step.channel !== 'whatsapp' || (list.status !== 'ready' && list.status !== 'loading')) {
+      return html`
+        ${step.channel === 'whatsapp' && list.status === 'error'
+          ? html`<ok-inline-feedback tone="warning" data-field="templates-error"
+              >${this.t('ui.notifyTemplatesError')}</ok-inline-feedback
+            >`
+          : nothing}
+        <div class="field">
+          <label for="tp-${step.id}">${this.t('ui.notifyTemplate')}</label>
+          <input
+            id="tp-${step.id}"
+            data-field="template"
+            type="text"
+            .value=${String(step.template ?? '')}
+            @change=${(e: Event) => setTemplate((e.target as HTMLInputElement).value)}
+          />
+          <span class="hint">${this.t('ui.notifyTemplateHint')}</span>
+        </div>
+      `;
+    }
+    const unknown = !!current && list.status === 'ready' && !list.templates.some((t) => t.name === current);
+    return html`
+      <div class="field">
+        <label for="tp-${step.id}">${this.t('ui.notifyTemplatePick')}</label>
+        <select
+          id="tp-${step.id}"
+          data-field="template-pick"
+          ?disabled=${list.status === 'loading'}
+          .value=${current}
+          @change=${(e: Event) => {
+            const name = (e.target as HTMLSelectElement).value;
+            setTemplate(name, list.templates.find((t) => t.name === name));
+          }}
+        >
+          ${option('', this.t('ui.notifyTemplateNone'), current)}
+          ${list.templates.map((t) => option(t.name, t.name, current))}
+          ${unknown
+            ? option(current, this.t('ui.notifyTemplateUnknownOption', { name: current }), current)
+            : nothing}
+        </select>
+        <span class="hint"
+          >${list.status === 'loading'
+            ? this.t('ui.notifyTemplatesLoading')
+            : this.t('ui.notifyTemplatePickHint')}</span
+        >
+      </div>
+      ${list.status === 'ready' && list.templates.length === 0
+        ? html`<ok-inline-feedback tone="info" data-field="templates-empty"
+            >${this.t('ui.notifyTemplatesEmpty')}</ok-inline-feedback
+          >`
+        : nothing}
+      ${unknown
+        ? html`<ok-inline-feedback tone="warning" data-field="template-unknown"
+            >${this.t('ui.notifyTemplateUnknown', { name: current })}</ok-inline-feedback
+          >`
+        : nothing}
+    `;
+  }
+
+  /**
+   * The header of a template the list knows: nothing to choose, only the file to attach (flows#132).
+   * On a hub that cannot send a header, a warning instead of a field the kernel would refuse.
+   */
+  private renderDeducedHeader(index: number, vars: Record<string, unknown>, known: WhatsappTemplateChoice) {
+    const kind = known.header;
+    if (!kind) return nothing;
+    const kindLabel = this.t(`ui.notifyHeader_${kind}`);
+    if (!this.headerMedia) {
+      return html`<ok-inline-feedback tone="warning" data-field="header-unsupported"
+        >${this.t('ui.notifyHeaderUnsupported', { kind: kindLabel })}</ok-inline-feedback
+      >`;
+    }
+    return html`
+      <span class="hint" data-field="header-deduced"
+        >${this.t('ui.notifyHeaderDeduced', { kind: kindLabel })}</span
+      >
+      ${this.renderValue({
+        field: 'header-link',
+        label: this.t('ui.notifyHeaderLink'),
+        value: readHeader(vars)?.link ?? '',
+        template: true,
+        onChange: (link) =>
+          this.setDoc(
+            patchStep(this.document, index, {
+              vars: { ...withoutHeader(vars), [headerKey(kind)]: link },
+            }),
+          ),
+      })}
+    `;
+  }
+
+  /**
    * **The media in the template's header** (hub#2101): a kind and a link, and nothing else.
    *
    * Only on a WhatsApp step that names a template, on a hub that declared the keys. The link is
@@ -2363,9 +2490,10 @@ export class ErpFlowsEditor extends LitElement {
    * field of the run — and written as a string, because Meta's `link` is one.
    */
   private renderTemplateHeader(step: Step, index: number, vars: Record<string, unknown>) {
-    if (!this.headerMedia || step.channel !== 'whatsapp' || !String(step.template ?? '').trim()) {
-      return nothing;
-    }
+    if (step.channel !== 'whatsapp' || !String(step.template ?? '').trim()) return nothing;
+    const known = this.knownTemplate(step);
+    if (known) return this.renderDeducedHeader(index, vars, known);
+    if (!this.headerMedia) return nothing;
     const header = readHeader(vars);
     const write = (kind: HeaderKind | 'none', link: unknown): void => {
       const rest = withoutHeader(vars);

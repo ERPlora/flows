@@ -285,6 +285,12 @@ export interface ModuleClient {
    */
   query?<T = unknown>(name: string, params?: Record<string, unknown>): Promise<T>;
   command?<T = unknown>(name: string, payload?: Record<string, unknown>): Promise<T>;
+  /**
+   * Every row of another module's list query, or `undefined` when that module is not installed
+   * (ADR-0127). Read for the WhatsApp templates the notify step offers (flows#132). Optional
+   * because an older shell's client has only `query`.
+   */
+  queryAllOptional?<T = unknown>(name: string, params?: Record<string, unknown>): Promise<T[] | undefined>;
   locale?: string;
   t?(catalog: Record<string, unknown>, key: string, params?: Record<string, unknown>): string;
   formatMoney?(amount: unknown): string;
