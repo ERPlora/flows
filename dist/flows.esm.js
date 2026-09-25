@@ -3818,7 +3818,8 @@ function stepValues(step, scope) {
   return out;
 }
 function simulate(doc, input) {
-  const scope = { input, event: input, steps: {} };
+  const stepsOut = {};
+  const scope = { input, event: input, steps: stepsOut };
   const trigger = doc.triggers?.[0];
   const triggerCondition = trigger?.kind === "event" && trigger.filter ? conditionResult(trigger.filter, scope) : void 0;
   const triggerMatched = triggerCondition ? triggerCondition.matched : true;
@@ -3830,6 +3831,15 @@ function simulate(doc, input) {
       steps.push({ id: step.id, kind: step.kind, outcome: "not-reached", values: [] });
       continue;
     }
+    let runIf;
+    if (step.run_if) {
+      runIf = conditionResult(step.run_if, scope);
+      if (runIf.failed.length > 0) {
+        steps.push({ id: step.id, kind: step.kind, outcome: "skipped", values: [], runIf });
+        stepsOut[step.id] = { skipped: true };
+        continue;
+      }
+    }
     if (step.kind === "condition") {
       const condition = conditionResult(step.when, scope);
       const passes = condition.matched || condition.uncertain;
@@ -3838,7 +3848,9 @@ function simulate(doc, input) {
         kind: step.kind,
         outcome: passes ? "would-run" : "stops-here",
         values: [],
-        condition
+        condition,
+        ...runIf ? { runIf } : {},
+        ...runIf?.uncertain ? { maySkip: true } : {}
       });
       if (!passes) {
         stopped = true;
@@ -3851,7 +3863,9 @@ function simulate(doc, input) {
       kind: step.kind,
       outcome: "would-run",
       values: stepValues(step, scope),
-      ...step.kind === "approval" ? { pauses: true } : {}
+      ...step.kind === "approval" ? { pauses: true } : {},
+      ...runIf ? { runIf } : {},
+      ...runIf?.uncertain ? { maySkip: true } : {}
     });
   }
   return {
@@ -4450,7 +4464,8 @@ var ErpFlowsEditor = class extends i3 {
     .pstep[data-outcome='trigger-blocked'] {
       border-left-color: var(--ok-warning, #ffc409);
     }
-    .pstep[data-outcome='not-reached'] {
+    .pstep[data-outcome='not-reached'],
+    .pstep[data-outcome='skipped'] {
       opacity: 0.6;
     }
     .pvalue {
@@ -6806,9 +6821,12 @@ var ErpFlowsEditor = class extends i3 {
           <span class="title">${spec ? describeStep(spec, this.t) : step.kind}</span>
           ${step.outcome === "stops-here" ? b2`<span class="verdict">${this.t("ui.testStoppedIsWorking")}</span>` : A}
           ${step.outcome === "not-reached" ? b2`<span class="muted">${this.t("ui.testNotReached")}</span>` : A}
+          ${step.outcome === "skipped" ? b2`<span class="muted">${this.t("ui.testSkipped")}</span>` : A}
           ${step.pauses ? b2`<span class="verdict">${this.t("ui.testPausesHere")}</span>` : A}
+          ${step.maySkip ? b2`<span class="verdict">${this.t("ui.testMaySkip")}</span>` : A}
           ${step.condition?.uncertain ? b2`<span class="verdict">${this.t("ui.testUncertain")}</span>` : A}
           ${step.outcome === "stops-here" ? this.renderFailedClauses(step.condition) : A}
+          ${step.outcome === "skipped" ? this.renderFailedClauses(step.runIf) : A}
           ${step.values.map(
         (value) => b2`<div class="pvalue" data-blank=${value.blank ? "true" : "false"}>
               <span class="pkey">${value.label}</span>
@@ -10730,6 +10748,8 @@ var es_default = {
     testHidden: "s\xED hay un valor, pero aqu\xED no se ense\xF1a",
     testNoRealData: "Esto no ha pasado en tu hub \xFAltimamente, as\xED que no hay un ejemplo real con el que probarlo. Los pasos de abajo siguen siendo los correctos, pero no hay con qu\xE9 rellenarlos.",
     testNotReached: "No llegar\xEDa hasta aqu\xED.",
+    testSkipped: "Esta vez se salta: su \xABsolo si\xBB no se cumple con estos datos. El resto sigue.",
+    testMaySkip: "Podr\xEDa saltarse: su \xABsolo si\xBB depende de algo que solo se sabe cuando el flujo se ejecuta de verdad.",
     testNothingHappened: "Nada de esto es real. No se env\xEDa ning\xFAn mensaje, no se cobra nada y no se apunta nada: esto es solo lo que HAR\xCDA tu automatizaci\xF3n.",
     testPausesHere: "Espera aqu\xED a que alguien conteste. Probar no contesta por nadie: las tres salidas siguen siendo posibles.",
     testRun: "Probar",
@@ -11691,6 +11711,8 @@ var en_default = {
     testHidden: "there is a value, and it is not shown here",
     testNoRealData: "This has not happened in your hub recently, so there is no real example to try it with. The steps below are still the right ones, but there is nothing to fill them in with.",
     testNotReached: "It would not get this far.",
+    testSkipped: 'Skipped this time: its "only if" does not hold with this data. The rest carries on.',
+    testMaySkip: 'May be skipped: its "only if" depends on something only known when the flow really runs.',
     testNothingHappened: "Nothing here is real. No message is sent, nothing is charged and nothing is written down \u2014 this is only what your automation WOULD do.",
     testPausesHere: "Waits here for somebody to answer. Testing does not answer for them: all three outcomes are still possible.",
     testRun: "Try it",
