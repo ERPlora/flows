@@ -230,6 +230,28 @@ describe('an activated recipe whose module ships a newer version (flows#136)', (
     await settle(el);
     expect(client.flows.restoreModuleTemplate).toHaveBeenCalledTimes(1);
   });
+
+  it('restores once when two taps land before the screen redraws', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const client = hub(OUTDATED, {
+      restoreModuleTemplate: vi.fn(async () => {
+        await gate;
+        return ownerFlow();
+      }),
+    });
+    const el = await mount(client);
+    await openCard(el);
+    await press(el, 'restore');
+    const yes = inCard(el, '[data-act="restore-yes"]') as HTMLButtonElement;
+    yes.click();
+    yes.click();
+    release();
+    await settle(el);
+    expect(client.flows.restoreModuleTemplate).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('an activated recipe the hub says nothing new about (flows#136)', () => {
