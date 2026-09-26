@@ -1010,7 +1010,10 @@ export class ErpFlowsGallery extends LitElement {
       ${this.renderSameTrigger(template)}
       ${this.renderRestore(template)}
       ${this.error
-        ? html`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+        ? html`<ok-inline-feedback
+            tone="danger"
+            icon="alert-circle-outline"
+            data-testid=${`flows-gallery-panel-error-${template.id}`}
             >${this.error}</ok-inline-feedback
           >`
         : nothing}
@@ -1034,12 +1037,20 @@ export class ErpFlowsGallery extends LitElement {
     const outdated = template.factory?.outdated === true;
     return html`
       ${outdated
-        ? html`<ok-inline-feedback tone="info" icon="sparkles-outline" data-outdated-notice
+        ? html`<ok-inline-feedback
+            tone="info"
+            icon="sparkles-outline"
+            data-outdated-notice
+            data-testid=${`flows-gallery-outdated-notice-${template.id}`}
             >${this.t('ui.tplOutdatedNotice')}</ok-inline-feedback
           >`
         : nothing}
       ${this.restoredId === template.id
-        ? html`<ok-inline-feedback tone="success" icon="checkmark-circle-outline" data-restored
+        ? html`<ok-inline-feedback
+            tone="success"
+            icon="checkmark-circle-outline"
+            data-restored
+            data-testid=${`flows-gallery-restored-${template.id}`}
             >${this.t('ui.tplRestored')}</ok-inline-feedback
           >`
         : nothing}
@@ -1050,6 +1061,7 @@ export class ErpFlowsGallery extends LitElement {
               type="button"
               class="danger"
               data-act="restore-yes"
+              data-testid=${`flows-gallery-restore-yes-${template.id}`}
               ?disabled=${this.restoring}
               @click=${() => void this.restore(template)}
             >
@@ -1059,6 +1071,7 @@ export class ErpFlowsGallery extends LitElement {
               type="button"
               class="quiet"
               data-act="restore-no"
+              data-testid=${`flows-gallery-restore-no-${template.id}`}
               @click=${() => {
                 this.confirmRestore = '';
               }}
@@ -1071,6 +1084,7 @@ export class ErpFlowsGallery extends LitElement {
               size="small"
               fill=${outdated ? nothing : 'outline'}
               data-act="restore"
+              data-testid=${`flows-gallery-restore-${template.id}`}
               @click=${() => {
                 this.confirmRestore = template.id;
               }}
@@ -1119,6 +1133,7 @@ export class ErpFlowsGallery extends LitElement {
       size="small"
       fill=${installed.state === 'absent' ? nothing : 'outline'}
       data-act="use"
+      data-testid=${`flows-gallery-use-${template.id}`}
       ?disabled=${this.busy}
       @click=${() => void this.use()}
     >
@@ -1130,7 +1145,12 @@ export class ErpFlowsGallery extends LitElement {
       </div>`;
     }
     return html`<div class="actions">
-      <ion-button size="small" data-act="view" @click=${() => this.view(template)}>
+      <ion-button
+        size="small"
+        data-act="view"
+        data-testid=${`flows-gallery-view-${template.id}`}
+        @click=${() => this.view(template)}
+      >
         ${this.t('ui.tplView')}
       </ion-button>
       ${use}
@@ -1172,6 +1192,7 @@ export class ErpFlowsGallery extends LitElement {
       tone="warning"
       icon="alert-circle-outline"
       data-same-trigger
+      data-testid=${`flows-gallery-same-trigger-${template.id}`}
       >${this.t(clashing.length === 1 ? 'ui.tplSameTrigger' : 'ui.tplSameTriggerMany', {
         flows: clashing.join(', '),
       })}</ok-inline-feedback
@@ -1194,6 +1215,7 @@ export class ErpFlowsGallery extends LitElement {
         class="pick"
         aria-expanded=${open ? 'true' : 'false'}
         aria-controls=${`panel-${template.id}`}
+        data-testid=${`flows-gallery-pick-${template.id}`}
         @click=${() => this.open(template.id)}
       >
         <ion-icon name=${template.icon} aria-hidden="true"></ion-icon>
@@ -1280,6 +1302,7 @@ export class ErpFlowsGallery extends LitElement {
           type="button"
           class="link"
           data-act="guide"
+          data-testid="flows-gallery-guide"
           @click=${() =>
             this.dispatchEvent(
               new CustomEvent('flows-open-guide', { bubbles: true, composed: true }),

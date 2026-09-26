@@ -189,6 +189,7 @@ export class ErpFlowsValue extends LitElement {
                 ><button
                   type="button"
                   aria-label=${this.removeLabel}
+                  data-testid="flows-value-part-remove"
                   @click=${() => this.removeAt(i)}
                 >
                   ×
@@ -198,6 +199,7 @@ export class ErpFlowsValue extends LitElement {
                 type="text"
                 .value=${part.text}
                 placeholder=${i === 0 ? this.placeholder : ''}
+                data-testid="flows-value-part-text"
                 @input=${(e: Event) => this.onText(i, (e.target as HTMLInputElement).value)}
               />`,
         )}
@@ -205,6 +207,7 @@ export class ErpFlowsValue extends LitElement {
           ? html`<button
               type="button"
               class="insert"
+              data-testid="flows-value-insert"
               @click=${() =>
                 this.dispatchEvent(
                   new CustomEvent('flows-pick-field', {

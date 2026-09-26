@@ -708,6 +708,7 @@ export class ErpFlowsApp extends LitElement {
                   size="small"
                   fill="outline"
                   data-act="review"
+                  data-testid=${`flows-app-draft-review-${item.id}`}
                   @click=${() => void this.openDraft(item)}
                 >
                   ${this.t('draft.review')}
@@ -717,6 +718,7 @@ export class ErpFlowsApp extends LitElement {
               type="button"
               class="icon-btn"
               data-act="dismiss"
+              data-testid=${`flows-app-draft-dismiss-${item.id}`}
               aria-label=${this.t('draft.dismiss')}
               @click=${() => void this.resolveDraft(item, 'dismissed')}
             >
@@ -887,6 +889,7 @@ export class ErpFlowsApp extends LitElement {
         class="search"
         type="search"
         data-act="search"
+        data-testid="flows-app-search"
         .value=${this.view.q}
         placeholder=${this.t('ui.listSearch')}
         aria-label=${this.t('ui.listSearch')}
@@ -895,6 +898,7 @@ export class ErpFlowsApp extends LitElement {
       <div class="filters">
         <select
           data-act="filter-state"
+          data-testid="flows-app-filter-state"
           aria-label=${this.t('ui.filterState')}
           .value=${this.view.state}
           @change=${(e: Event) =>
@@ -906,6 +910,7 @@ export class ErpFlowsApp extends LitElement {
         </select>
         <select
           data-act="filter-trigger"
+          data-testid="flows-app-filter-trigger"
           aria-label=${this.t('ui.filterTrigger')}
           .value=${this.view.trigger}
           @change=${(e: Event) =>
@@ -919,6 +924,7 @@ export class ErpFlowsApp extends LitElement {
         </select>
         <select
           data-act="sort"
+          data-testid="flows-app-sort"
           aria-label=${this.t('ui.sortBy')}
           .value=${this.view.sort}
           @change=${(e: Event) =>
@@ -938,16 +944,29 @@ export class ErpFlowsApp extends LitElement {
     if (!this.chosen.length) return nothing;
     return html`<div class="selection" data-selection>
       <span class="grow">${this.t('ui.selectedCount', { count: this.chosen.length })}</span>
-      <ion-button size="small" fill="outline" data-act="bulk-enable" @click=${() => void this.bulk(true)}>
+      <ion-button
+        size="small"
+        fill="outline"
+        data-act="bulk-enable"
+        data-testid="flows-app-bulk-enable"
+        @click=${() => void this.bulk(true)}
+      >
         ${this.t('ui.bulkEnable')}
       </ion-button>
-      <ion-button size="small" fill="outline" data-act="bulk-pause" @click=${() => void this.bulk(false)}>
+      <ion-button
+        size="small"
+        fill="outline"
+        data-act="bulk-pause"
+        data-testid="flows-app-bulk-pause"
+        @click=${() => void this.bulk(false)}
+      >
         ${this.t('ui.bulkPause')}
       </ion-button>
       <button
         type="button"
         class="icon-btn"
         data-act="selection-clear"
+        data-testid="flows-app-selection-clear"
         aria-label=${this.t('ui.selectionClear')}
         @click=${() => {
           this.chosen = [];
@@ -965,6 +984,7 @@ export class ErpFlowsApp extends LitElement {
         type="checkbox"
         class="pick"
         data-act="select"
+        data-testid=${`flows-app-row-select-${flow.id}`}
         aria-label=${this.t('ui.selectOne', { name: flow.name || this.t('ui.unnamed') })}
         .checked=${this.chosen.includes(flow.id)}
         @change=${(e: Event) => {
@@ -977,6 +997,7 @@ export class ErpFlowsApp extends LitElement {
       <button
         type="button"
         class="open"
+        data-testid=${`flows-app-row-${flow.id}`}
         @click=${() => {
           this.editing = flow;
           this.isNew = false;
@@ -991,6 +1012,7 @@ export class ErpFlowsApp extends LitElement {
           label=${flow.enabled ? this.t('ui.active') : this.t('ui.paused')}
         ></ok-status-pill>
         <ion-toggle
+          data-testid=${`flows-app-row-toggle-${flow.id}`}
           .checked=${flow.enabled}
           @ionChange=${(e: Event) =>
             void this.setEnabled(flow, !!(e.target as HTMLInputElement).checked)}
@@ -999,6 +1021,7 @@ export class ErpFlowsApp extends LitElement {
           type="button"
           class="icon-btn"
           data-act="duplicate"
+          data-testid=${`flows-app-row-duplicate-${flow.id}`}
           aria-label=${this.t('ui.duplicate')}
           title=${this.t('ui.duplicate')}
           @click=${() => void this.duplicate(flow)}
@@ -1009,6 +1032,7 @@ export class ErpFlowsApp extends LitElement {
           type="button"
           class="icon-btn"
           data-act="delete"
+          data-testid=${`flows-app-row-delete-${flow.id}`}
           aria-label=${this.t('ui.delete')}
           @click=${() => {
             this.confirmDelete = confirming ? '' : flow.id;
@@ -1029,13 +1053,20 @@ export class ErpFlowsApp extends LitElement {
                  destructive action as pale text next to an outlined «leave it» — the button you
                  must read before pressing, looking like the disabled one. These carry their own
                  colour out of the OutfitKit tokens and look the same in both modes. -->
-            <button type="button" class="danger" data-act="delete-yes" @click=${() => void this.removeFlow(flow)}>
+            <button
+              type="button"
+              class="danger"
+              data-act="delete-yes"
+              data-testid=${`flows-app-row-delete-yes-${flow.id}`}
+              @click=${() => void this.removeFlow(flow)}
+            >
               ${this.t('ui.deleteYes')}
             </button>
             <button
               type="button"
               class="quiet"
               data-act="delete-no"
+              data-testid=${`flows-app-row-delete-no-${flow.id}`}
               @click=${() => {
                 this.confirmDelete = '';
               }}
@@ -1062,6 +1093,7 @@ export class ErpFlowsApp extends LitElement {
           <button
             type="button"
             data-act="checkup-fix"
+            data-testid=${`flows-app-row-checkup-fix-${flow.id}-${problem.id}`}
             ?disabled=${!!this.repairing}
             @click=${() => void this.repair(flow, problem)}
           >
@@ -1081,6 +1113,7 @@ export class ErpFlowsApp extends LitElement {
             <button
               type="button"
               data-act="checkup-fix"
+              data-testid=${`flows-app-row-reply-fix-${flow.id}`}
               @click=${() => {
                 this.editing = flow;
                 this.isNew = false;
@@ -1119,7 +1152,10 @@ export class ErpFlowsApp extends LitElement {
     const gate = map[this.gate];
     if (!gate) {
       return html`<div class="gate">
-        <ok-inline-feedback tone="danger" icon="alert-circle-outline"
+        <ok-inline-feedback
+          tone="danger"
+          icon="alert-circle-outline"
+          data-testid="flows-app-gate-error"
           >${this.error || this.t('ui.errGeneric')}</ok-inline-feedback
         >
       </div>`;
@@ -1129,6 +1165,7 @@ export class ErpFlowsApp extends LitElement {
         icon=${gate.icon}
         heading=${this.t(gate.title)}
         message=${this.t(gate.message)}
+        data-testid="flows-app-gate-empty"
       ></ok-empty-state>
     </div>`;
   }
@@ -1145,7 +1182,7 @@ export class ErpFlowsApp extends LitElement {
       <h3 class="section">${this.t('ui.tplYours')}</h3>
       ${this.renderToolbar()} ${this.renderSelection()}
       ${this.notice
-        ? html`<ok-inline-feedback tone="success" icon="copy-outline" data-notice
+        ? html`<ok-inline-feedback tone="success" icon="copy-outline" data-notice data-testid="flows-app-notice"
             >${this.notice}</ok-inline-feedback
           >`
         : nothing}
@@ -1157,6 +1194,7 @@ export class ErpFlowsApp extends LitElement {
               size="small"
               fill="outline"
               data-act="clear-filters"
+              data-testid="flows-app-clear-filters"
               @click=${() => this.narrow({ q: '', state: 'all', trigger: 'all' })}
             >
               ${this.t('ui.listClear')}
@@ -1250,13 +1288,19 @@ export class ErpFlowsApp extends LitElement {
     return html`
       <div class="head">
         <span class="grow"></span>
-        <ion-button size="small" fill="outline" data-act="new" @click=${() => this.startNew()}>
+        <ion-button
+          size="small"
+          fill="outline"
+          data-act="new"
+          data-testid="flows-app-new"
+          @click=${() => this.startNew()}
+        >
           ${this.t('ui.newAutomation')}
         </ion-button>
       </div>
       <div class="body">
         ${this.error
-          ? html`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+          ? html`<ok-inline-feedback tone="danger" icon="alert-circle-outline" data-testid="flows-app-error"
               >${this.error}</ok-inline-feedback
             >`
           : nothing}

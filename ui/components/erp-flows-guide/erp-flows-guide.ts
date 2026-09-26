@@ -267,6 +267,7 @@ export class ErpFlowsGuide extends LitElement {
           type="button"
           class="back"
           data-act="back"
+          data-testid="flows-guide-close"
           @click=${() =>
             this.dispatchEvent(
               new CustomEvent('flows-guide-close', { bubbles: true, composed: true }),

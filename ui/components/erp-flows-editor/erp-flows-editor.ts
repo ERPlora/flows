@@ -1492,7 +1492,12 @@ export class ErpFlowsEditor extends LitElement {
     const draft = this.draft;
     if (!draft) return nothing;
     return html`<div class="list" style="margin-bottom:.75rem">
-      <ok-inline-feedback tone="warning" icon="sparkles-outline" data-draft-banner>
+      <ok-inline-feedback
+        tone="warning"
+        icon="sparkles-outline"
+        data-draft-banner
+        data-testid="flows-editor-draft-unconfirmed"
+      >
         ${this.t('draft.unconfirmed')}
       </ok-inline-feedback>
       ${draft.gaps.length
@@ -1524,6 +1529,7 @@ export class ErpFlowsEditor extends LitElement {
             type="button"
             class="open"
             aria-expanded=${open ? 'true' : 'false'}
+            data-testid="flows-editor-trigger-open"
             @click=${() => {
               this.openStep = open ? null : 'trigger';
             }}
@@ -1551,6 +1557,7 @@ export class ErpFlowsEditor extends LitElement {
         <select
           id="trigger-kind"
           data-field="trigger-kind"
+          data-testid="flows-editor-trigger-kind"
           .value=${trigger.kind}
           @change=${(e: Event) =>
             this.setTrigger({ kind: (e.target as HTMLSelectElement).value as Trigger['kind'] })}
@@ -1569,6 +1576,7 @@ export class ErpFlowsEditor extends LitElement {
             <input
               id="trigger-at"
               type="datetime-local"
+              data-testid="flows-editor-trigger-at"
               @change=${(e: Event) => {
                 const raw = (e.target as HTMLInputElement).value;
                 // The kernel wants RFC-3339 WITH an offset; `datetime-local` has none, so the
@@ -1613,6 +1621,7 @@ export class ErpFlowsEditor extends LitElement {
         <select
           id="trigger-every"
           data-field="cron-every"
+          data-testid="flows-editor-cron-every"
           .value=${schedule.every}
           @change=${(e: Event) =>
             write(retime(schedule, (e.target as HTMLSelectElement).value as Schedule['every']))}
@@ -1628,6 +1637,7 @@ export class ErpFlowsEditor extends LitElement {
             <select
               id="trigger-weekday"
               data-field="cron-weekday"
+              data-testid="flows-editor-cron-weekday"
               .value=${String(schedule.weekday)}
               @change=${(e: Event) =>
                 write({ ...schedule, weekday: Number((e.target as HTMLSelectElement).value) })}
@@ -1646,6 +1656,7 @@ export class ErpFlowsEditor extends LitElement {
             <select
               id="trigger-monthday"
               data-field="cron-monthday"
+              data-testid="flows-editor-cron-monthday"
               .value=${String(schedule.monthday)}
               @change=${(e: Event) =>
                 write({ ...schedule, monthday: Number((e.target as HTMLSelectElement).value) })}
@@ -1662,6 +1673,7 @@ export class ErpFlowsEditor extends LitElement {
         <input
           id="trigger-time"
           data-field="trigger-time"
+          data-testid="flows-editor-cron-time"
           type="time"
           .value=${schedule.time}
           @change=${(e: Event) =>
@@ -1678,13 +1690,17 @@ export class ErpFlowsEditor extends LitElement {
       <div class="field">
         <label>${this.t('ui.cronLabel')}</label>
         <code class="kept-cron" data-field="cron-raw">${cron}</code>
-        <ok-inline-feedback tone="warning" icon="information-circle-outline"
+        <ok-inline-feedback
+          tone="warning"
+          icon="information-circle-outline"
+          data-testid="flows-editor-cron-kept"
           >${this.t('ui.cronKept')}</ok-inline-feedback
         >
         <div class="adders" style="margin-left:0">
           <button
             type="button"
             data-act="cron-simplify"
+            data-testid="flows-editor-cron-simplify"
             @click=${() =>
               this.setTrigger({
                 cron: scheduleCron({ every: 'day', time: readCronTime(cron) ?? '09:00' }),
@@ -1722,6 +1738,7 @@ export class ErpFlowsEditor extends LitElement {
       tone="warning"
       icon="alert-circle-outline"
       data-catalog=${catalog.status}
+      data-testid="flows-editor-event-catalog-issue"
       >${message}</ok-inline-feedback
     >`;
   }
@@ -1737,6 +1754,7 @@ export class ErpFlowsEditor extends LitElement {
         <select
           id="trigger-event"
           data-field="trigger-event"
+          data-testid="flows-editor-trigger-event"
           .value=${chosen}
           @change=${(e: Event) => this.setTrigger({ event: (e.target as HTMLSelectElement).value })}
         >
@@ -1781,6 +1799,7 @@ export class ErpFlowsEditor extends LitElement {
         <input
           id="trigger-event-other"
           type="text"
+          data-testid="flows-editor-trigger-event-other"
           .value=${chosen}
           @change=${(e: Event) => this.setTrigger({ event: (e.target as HTMLInputElement).value.trim() })}
         />
@@ -1794,6 +1813,7 @@ export class ErpFlowsEditor extends LitElement {
       type="button"
       class="icon-btn"
       data-act="remove"
+      data-testid=${`flows-editor-step-remove-${step.id}`}
       aria-label=${this.t('ui.removeStep')}
       @click=${() => this.setDoc(removeStep(this.document, index))}
     >
@@ -1810,6 +1830,7 @@ export class ErpFlowsEditor extends LitElement {
             class="open"
             style="padding:.2rem .3rem"
             aria-expanded=${open ? 'true' : 'false'}
+            data-testid=${`flows-editor-step-open-${step.id}`}
             @click=${() => {
               this.openStep = open ? null : step.id;
             }}
@@ -1831,6 +1852,7 @@ export class ErpFlowsEditor extends LitElement {
             class="open"
             style="padding:.2rem .3rem"
             aria-expanded=${open ? 'true' : 'false'}
+            data-testid=${`flows-editor-step-open-${step.id}`}
             @click=${() => {
               this.openStep = open ? null : step.id;
             }}
@@ -1854,6 +1876,7 @@ export class ErpFlowsEditor extends LitElement {
             type="button"
             class="open"
             aria-expanded=${open ? 'true' : 'false'}
+            data-testid=${`flows-editor-step-open-${step.id}`}
             @click=${() => {
               this.openStep = open ? null : step.id;
               // The secret list is only ever needed here, and only once a panel is actually open.
@@ -1922,6 +1945,7 @@ export class ErpFlowsEditor extends LitElement {
     return html`<div class="value-row">
       <erp-flows-value
         data-field=${opts.field}
+        data-testid=${`flows-editor-value-${opts.field}`}
         .label=${opts.label}
         .parts=${valueToParts(opts.value)}
         .fieldLabel=${this.fieldLabel}
@@ -1937,6 +1961,7 @@ export class ErpFlowsEditor extends LitElement {
       ${opts.secrets && this.secrets.length
         ? html`<select
             data-act="insert-secret"
+            data-testid=${`flows-editor-insert-secret-${opts.field}`}
             aria-label=${this.t('ui.insertSecret')}
             .value=${''}
             @change=${(e: Event) => {
@@ -1977,6 +2002,7 @@ export class ErpFlowsEditor extends LitElement {
           <select
             id="m-${step.id}"
             data-field="method"
+            data-testid="flows-editor-http-method"
             .value=${String(step.method ?? 'GET')}
             @change=${(e: Event) =>
               this.setDoc(
@@ -2012,6 +2038,7 @@ export class ErpFlowsEditor extends LitElement {
             <label>${this.t('ui.paramName')}</label>
             <input
               type="text"
+              data-testid="flows-editor-header-name"
               .value=${key}
               @change=${(e: Event) =>
                 setHeaders(
@@ -2031,6 +2058,7 @@ export class ErpFlowsEditor extends LitElement {
           <button
             type="button"
             class="icon-btn"
+            data-testid="flows-editor-header-remove"
             aria-label=${this.t('ui.removePart', { label: key })}
             @click=${() => setHeaders(headers.filter((_, j) => j !== i))}
           >
@@ -2039,7 +2067,12 @@ export class ErpFlowsEditor extends LitElement {
         </div>`,
       )}
       <div class="adders" style="margin-left:0">
-        <button type="button" data-act="add-header" @click=${() => setHeaders([...headers, ['', '']])}>
+        <button
+          type="button"
+          data-act="add-header"
+          data-testid="flows-editor-http-add-header"
+          @click=${() => setHeaders([...headers, ['', '']])}
+        >
           ${this.t('ui.httpAddHeader')}
         </button>
       </div>
@@ -2057,6 +2090,7 @@ export class ErpFlowsEditor extends LitElement {
         <input
           id="t-${step.id}"
           data-field="timeout"
+          data-testid="flows-editor-http-timeout"
           type="number"
           min="1"
           max=${MAX_TIMEOUT_SECONDS}
@@ -2096,6 +2130,7 @@ export class ErpFlowsEditor extends LitElement {
             type="button"
             class="icon-btn"
             data-act="delete-secret"
+            data-testid=${`flows-editor-secret-remove-${s.name}`}
             aria-label=${this.t('ui.secretDelete', { name: s.name })}
             @click=${() => void this.deleteSecret(s.name)}
           >
@@ -2109,6 +2144,7 @@ export class ErpFlowsEditor extends LitElement {
           <input
             id="sn-${this.flow?.id ?? 'new'}"
             data-field="secret-name"
+            data-testid="flows-editor-secret-name"
             type="text"
             .value=${this.secretName}
             placeholder="STRIPE_KEY"
@@ -2122,6 +2158,7 @@ export class ErpFlowsEditor extends LitElement {
           <input
             id="sv-${this.flow?.id ?? 'new'}"
             data-field="secret-value"
+            data-testid="flows-editor-secret-value"
             type="password"
             autocomplete="off"
             .value=${this.secretValue}
@@ -2134,6 +2171,7 @@ export class ErpFlowsEditor extends LitElement {
           type="button"
           class="icon-btn"
           data-act="save-secret"
+          data-testid="flows-editor-secret-save"
           @click=${() => void this.saveSecret()}
         >
           ${this.t('ui.save')}
@@ -2184,6 +2222,7 @@ export class ErpFlowsEditor extends LitElement {
         <select
           id="p-${step.id}"
           data-field="policy"
+          data-testid="flows-editor-ai-policy"
           .value=${String(step.policy ?? 'manual')}
           @change=${(e: Event) =>
             this.setDoc(
@@ -2197,7 +2236,10 @@ export class ErpFlowsEditor extends LitElement {
         </select>
       </div>
       ${auto
-        ? html`<ok-inline-feedback tone="warning" icon="alert-circle-outline"
+        ? html`<ok-inline-feedback
+            tone="warning"
+            icon="alert-circle-outline"
+            data-testid="flows-editor-ai-policy-auto-warning"
             >${this.t('ui.aiPolicyAutoWarning')}</ok-inline-feedback
           >`
         : html`<span class="hint">${this.t('ui.aiPolicyManualHint')}</span>`}
@@ -2207,6 +2249,7 @@ export class ErpFlowsEditor extends LitElement {
         <input
           id="i-${step.id}"
           data-field="max-iters"
+          data-testid="flows-editor-ai-max-iters"
           type="number"
           min="1"
           max=${MAX_ITERS_CAP}
@@ -2238,6 +2281,7 @@ export class ErpFlowsEditor extends LitElement {
           <div class="field">
             <input
               type="text"
+              data-testid=${`flows-editor-ai-tool-${what}`}
               .value=${name}
               @change=${(e: Event) =>
                 update(
@@ -2248,6 +2292,7 @@ export class ErpFlowsEditor extends LitElement {
           <button
             type="button"
             class="icon-btn"
+            data-testid=${`flows-editor-ai-tool-remove-${what}`}
             aria-label=${this.t('ui.removePart', { label: name })}
             @click=${() => update(names.filter((_, j) => j !== i))}
           >
@@ -2256,7 +2301,12 @@ export class ErpFlowsEditor extends LitElement {
         </div>`,
       )}
       <div class="adders" style="margin-left:0">
-        <button type="button" data-act="add-${what}" @click=${() => update([...names, ''])}>
+        <button
+          type="button"
+          data-act="add-${what}"
+          data-testid=${`flows-editor-ai-tool-add-${what}`}
+          @click=${() => update([...names, ''])}
+        >
           ${this.t(what === 'query' ? 'ui.aiAddQuery' : 'ui.aiAddCommand')}
         </button>
       </div>
@@ -2288,6 +2338,7 @@ export class ErpFlowsEditor extends LitElement {
         <select
           id="ch-${step.id}"
           data-field="channel"
+          data-testid="flows-editor-notify-channel"
           .value=${String(step.channel ?? 'email')}
           @change=${(e: Event) => {
             const channel = (e.target as HTMLSelectElement).value as 'email' | 'whatsapp';
@@ -2316,7 +2367,10 @@ export class ErpFlowsEditor extends LitElement {
         </select>
       </div>
       ${step.channel === 'whatsapp'
-        ? html`<ok-inline-feedback tone="warning" icon="cash-outline"
+        ? html`<ok-inline-feedback
+            tone="warning"
+            icon="cash-outline"
+            data-testid="flows-editor-notify-whatsapp-cost"
             >${this.t('ui.notifyWhatsappCost')}</ok-inline-feedback
           >`
         : nothing}
@@ -2329,6 +2383,7 @@ export class ErpFlowsEditor extends LitElement {
           <input
             id="tq-${step.id}"
             data-field="to-query"
+            data-testid="flows-editor-notify-to-query"
             type="text"
             .value=${to.query ?? ''}
             @change=${(e: Event) => setTo({ query: (e.target as HTMLInputElement).value.trim() })}
@@ -2339,6 +2394,7 @@ export class ErpFlowsEditor extends LitElement {
           <input
             id="tf-${step.id}"
             data-field="to-field"
+            data-testid="flows-editor-notify-to-field"
             type="text"
             .value=${to.field ?? ''}
             @change=${(e: Event) => setTo({ field: (e.target as HTMLInputElement).value.trim() })}
@@ -2352,6 +2408,7 @@ export class ErpFlowsEditor extends LitElement {
             <select
               id="nm-${step.id}"
               data-field="notify-mode"
+              data-testid="flows-editor-notify-mode"
               .value=${taps ? 'options' : 'text'}
               @change=${(e: Event) => {
                 const wants = (e.target as HTMLSelectElement).value === 'options';
@@ -2421,7 +2478,10 @@ export class ErpFlowsEditor extends LitElement {
     if (step.channel !== 'whatsapp' || (list.status !== 'ready' && list.status !== 'loading')) {
       return html`
         ${step.channel === 'whatsapp' && list.status === 'error'
-          ? html`<ok-inline-feedback tone="warning" data-field="templates-error"
+          ? html`<ok-inline-feedback
+              tone="warning"
+              data-field="templates-error"
+              data-testid="flows-editor-notify-templates-error"
               >${this.t('ui.notifyTemplatesError')}</ok-inline-feedback
             >`
           : nothing}
@@ -2430,6 +2490,7 @@ export class ErpFlowsEditor extends LitElement {
           <input
             id="tp-${step.id}"
             data-field="template"
+            data-testid="flows-editor-notify-template"
             type="text"
             .value=${String(step.template ?? '')}
             @change=${(e: Event) => setTemplate((e.target as HTMLInputElement).value)}
@@ -2445,6 +2506,7 @@ export class ErpFlowsEditor extends LitElement {
         <select
           id="tp-${step.id}"
           data-field="template-pick"
+          data-testid="flows-editor-notify-template-pick"
           ?disabled=${list.status === 'loading'}
           .value=${current}
           @change=${(e: Event) => {
@@ -2465,12 +2527,18 @@ export class ErpFlowsEditor extends LitElement {
         >
       </div>
       ${list.status === 'ready' && list.templates.length === 0
-        ? html`<ok-inline-feedback tone="info" data-field="templates-empty"
+        ? html`<ok-inline-feedback
+            tone="info"
+            data-field="templates-empty"
+            data-testid="flows-editor-notify-templates-empty"
             >${this.t('ui.notifyTemplatesEmpty')}</ok-inline-feedback
           >`
         : nothing}
       ${unknown
-        ? html`<ok-inline-feedback tone="warning" data-field="template-unknown"
+        ? html`<ok-inline-feedback
+            tone="warning"
+            data-field="template-unknown"
+            data-testid="flows-editor-notify-template-unknown"
             >${this.t('ui.notifyTemplateUnknown', { name: current })}</ok-inline-feedback
           >`
         : nothing}
@@ -2486,7 +2554,10 @@ export class ErpFlowsEditor extends LitElement {
     if (!kind || kind === 'unknown') return nothing;
     const kindLabel = this.t(`ui.notifyHeader_${kind}`);
     if (!this.headerMedia) {
-      return html`<ok-inline-feedback tone="warning" data-field="header-unsupported"
+      return html`<ok-inline-feedback
+        tone="warning"
+        data-field="header-unsupported"
+        data-testid="flows-editor-notify-header-unsupported"
         >${this.t('ui.notifyHeaderUnsupported', { kind: kindLabel })}</ok-inline-feedback
       >`;
     }
@@ -2537,6 +2608,7 @@ export class ErpFlowsEditor extends LitElement {
         <select
           id="hk-${step.id}"
           data-field="header-kind"
+          data-testid="flows-editor-notify-header-kind"
           .value=${header?.kind ?? 'none'}
           @change=${(e: Event) =>
             write((e.target as HTMLSelectElement).value as HeaderKind | 'none', header?.link)}
@@ -2582,12 +2654,18 @@ export class ErpFlowsEditor extends LitElement {
               template: true,
               onChange: (v) => set(TITLE_KEY, v),
             })
-          : html`<ok-inline-feedback tone="warning" data-field="header-text-unsupported"
+          : html`<ok-inline-feedback
+              tone="warning"
+              data-field="header-text-unsupported"
+              data-testid="flows-editor-notify-header-text-unsupported"
               >${this.t('ui.notifyTitleUnsupported')}</ok-inline-feedback
             >`
         : nothing}
       ${links.length && !this.buttonUrl
-        ? html`<ok-inline-feedback tone="warning" data-field="button-url-unsupported"
+        ? html`<ok-inline-feedback
+            tone="warning"
+            data-field="button-url-unsupported"
+            data-testid="flows-editor-notify-button-url-unsupported"
             >${this.t('ui.notifyLinkUnsupported')}</ok-inline-feedback
           >`
         : nothing}
@@ -2630,6 +2708,7 @@ export class ErpFlowsEditor extends LitElement {
         <select
           id="tk-${step.id}"
           data-field="tap-kind"
+          data-testid="flows-editor-tap-kind"
           .value=${taps.kind}
           @change=${(e: Event) =>
             write({ ...taps, kind: (e.target as HTMLSelectElement).value as TapKind })}
@@ -2671,6 +2750,7 @@ export class ErpFlowsEditor extends LitElement {
                 <input
                   id="ti-${step.id}-${i}"
                   data-field="tap-id-${i}"
+                  data-testid="flows-editor-tap-id"
                   type="text"
                   .value=${opt.id}
                   @change=${(e: Event) =>
@@ -2681,6 +2761,7 @@ export class ErpFlowsEditor extends LitElement {
                 size="small"
                 fill="clear"
                 data-act="remove-tap-option-${i}"
+                data-testid="flows-editor-tap-option-remove"
                 aria-label=${this.t('ui.tapRemoveOption')}
                 @click=${() =>
                   write({ ...taps, options: taps.options.filter((_, at) => at !== i) })}
@@ -2715,6 +2796,7 @@ export class ErpFlowsEditor extends LitElement {
         size="small"
         fill="clear"
         data-act="add-tap-option"
+        data-testid="flows-editor-tap-option-add"
         @click=${() => write({ ...taps, options: [...taps.options, { id: '', title: '' }] })}
       >
         <ion-icon name="add-outline" slot="start"></ion-icon>
@@ -2723,7 +2805,10 @@ export class ErpFlowsEditor extends LitElement {
 
       ${problems.map(
         (p) =>
-          html`<ok-inline-feedback tone="warning" icon="alert-circle-outline"
+          html`<ok-inline-feedback
+            tone="warning"
+            icon="alert-circle-outline"
+            data-testid="flows-editor-tap-option-warning"
             >${this.t(p.key, p.params)}</ok-inline-feedback
           >`,
       )}
@@ -2739,6 +2824,7 @@ export class ErpFlowsEditor extends LitElement {
         <input
           id="d-${step.id}"
           type="number"
+          data-testid="flows-editor-delay-amount"
           min="0"
           .value=${String(Math.round(seconds / unit))}
           @change=${(e: Event) =>
@@ -2753,6 +2839,7 @@ export class ErpFlowsEditor extends LitElement {
         <label for="du-${step.id}">${this.t('ui.value')}</label>
         <select
           id="du-${step.id}"
+          data-testid="flows-editor-delay-unit"
           .value=${String(unit)}
           @change=${(e: Event) =>
             this.setDoc(
@@ -2816,6 +2903,7 @@ export class ErpFlowsEditor extends LitElement {
             <label>${this.t('ui.field')}</label>
             <input
               type="text"
+              data-testid="flows-editor-guard-field"
               .value=${this.fieldLabel(row.path) || ''}
               readonly
               @click=${(e: Event) => {
@@ -2837,6 +2925,7 @@ export class ErpFlowsEditor extends LitElement {
             <label>${this.t('ui.operator')}</label>
             <select
               data-field="operator"
+              data-testid="flows-editor-guard-operator"
               .value=${row.op}
               @change=${(e: Event) =>
                 update(
@@ -2856,13 +2945,18 @@ export class ErpFlowsEditor extends LitElement {
               ? html`${this.renderReplyStepSelect(row.value, row.op === 'eq' ? flowHalf : '', (key) =>
                     pickQuestion(i, key),
                   )}${ambiguous && row.op === 'eq'
-                    ? html`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-field="reply-step-ambiguous"
+                    ? html`<ok-inline-feedback
+                        tone="warning"
+                        icon="alert-circle-outline"
+                        data-field="reply-step-ambiguous"
+                        data-testid="flows-editor-reply-step-ambiguous"
                         >${this.t('ui.replyStepAmbiguous')}</ok-inline-feedback
                       >`
                     : nothing}`
               : html`<input
                   type="text"
                   data-field="guard-value"
+                  data-testid="flows-editor-guard-value"
                   .value=${row.value}
                   @change=${(e: Event) =>
                     update(
@@ -2878,6 +2972,7 @@ export class ErpFlowsEditor extends LitElement {
             <button
               type="button"
               class="icon-btn"
+              data-testid="flows-editor-guard-remove"
               aria-label=${this.t('ui.removeCondition')}
               @click=${() => remove(i)}
             >
@@ -2889,6 +2984,7 @@ export class ErpFlowsEditor extends LitElement {
       <div class="adders" style="margin-left:0">
         <button
           type="button"
+          data-testid="flows-editor-guard-add"
           @click=${() => update([...rows, { path: '', op: 'eq' as Operator, value: '' }])}
         >
           ${this.t('ui.addCondition')}
@@ -2912,7 +3008,7 @@ export class ErpFlowsEditor extends LitElement {
   private renderReplyStepSelect(current: string, currentFlow: string, onChange: (key: string) => void) {
     const { status } = this.hubFlows;
     if (status === 'idle' || status === 'loading') {
-      return html`<select data-field="reply-step" disabled>
+      return html`<select data-field="reply-step" data-testid="flows-editor-reply-step" disabled>
         <option value="">${this.t('ui.replyStepLoading')}</option>
       </select>`;
     }
@@ -2924,6 +3020,7 @@ export class ErpFlowsEditor extends LitElement {
     const selected = chosen ? questionKey(chosen.flowId, chosen.stepId) : questionKey(currentFlow, current);
     return html`<select
         data-field="reply-step"
+        data-testid="flows-editor-reply-step"
         .value=${selected}
         @change=${(e: Event) => onChange((e.target as HTMLSelectElement).value)}
       >
@@ -2937,13 +3034,18 @@ export class ErpFlowsEditor extends LitElement {
         )}
       </select>
       ${status === 'error'
-        ? html`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-field="reply-step-error"
+        ? html`<ok-inline-feedback
+              tone="warning"
+              icon="alert-circle-outline"
+              data-field="reply-step-error"
+              data-testid="flows-editor-reply-step-error"
               >${this.t('ui.replyStepLoadFailed')}</ok-inline-feedback
             >
             <ion-button
               size="small"
               fill="clear"
               data-act="reply-step-retry"
+              data-testid="flows-editor-reply-step-retry"
               @click=${() => {
                 this.hubFlows = { status: 'idle', flows: [] };
                 void this.ensureHubFlows();
@@ -2964,6 +3066,7 @@ export class ErpFlowsEditor extends LitElement {
         <input
           id="c-${step.id}"
           type="text"
+          data-testid="flows-editor-command"
           .value=${String(step.command ?? '')}
           @change=${(e: Event) =>
             this.setDoc(
@@ -2995,6 +3098,7 @@ export class ErpFlowsEditor extends LitElement {
         <input
           id="q-${step.id}"
           data-field="query"
+          data-testid="flows-editor-query"
           type="text"
           .value=${String(step.query ?? '')}
           @change=${(e: Event) =>
@@ -3012,6 +3116,7 @@ export class ErpFlowsEditor extends LitElement {
           <select
             id="qr-${step.id}"
             data-field="result"
+            data-testid="flows-editor-query-result"
             .value=${result}
             @change=${(e: Event) =>
               this.setDoc(
@@ -3030,6 +3135,7 @@ export class ErpFlowsEditor extends LitElement {
           <input
             id="ql-${step.id}"
             data-field="limit"
+            data-testid="flows-editor-query-limit"
             type="number"
             min="1"
             max=${MAX_QUERY_ROWS}
@@ -3103,6 +3209,7 @@ export class ErpFlowsEditor extends LitElement {
         <input
           id="ar-${step.id}"
           data-field="assignee-role"
+          data-testid="flows-editor-approval-role"
           type="text"
           list="roles-${step.id}"
           placeholder=${this.t('ui.approvalAssigneeAdmins')}
@@ -3130,6 +3237,7 @@ export class ErpFlowsEditor extends LitElement {
         <select
           id="ae-${step.id}"
           data-field="expires-in"
+          data-testid="flows-editor-approval-expires-in"
           .value=${String(expiresIn)}
           @change=${(e: Event) =>
             this.setDoc(
@@ -3154,6 +3262,7 @@ export class ErpFlowsEditor extends LitElement {
           <select
             id="aj-${step.id}"
             data-field="on-reject"
+            data-testid="flows-editor-approval-on-reject"
             .value=${onReject}
             @change=${(e: Event) =>
               this.setDoc(
@@ -3170,6 +3279,7 @@ export class ErpFlowsEditor extends LitElement {
           <select
             id="ax-${step.id}"
             data-field="on-expire"
+            data-testid="flows-editor-approval-on-expire"
             .value=${onExpire}
             @change=${(e: Event) =>
               this.setDoc(
@@ -3186,7 +3296,10 @@ export class ErpFlowsEditor extends LitElement {
            decision composes approved / rejected / expired without a fork. It is said the moment
            «continue» is picked, which is when it becomes true. -->
       ${continues
-        ? html`<ok-inline-feedback tone="info" icon="git-branch-outline"
+        ? html`<ok-inline-feedback
+            tone="info"
+            icon="git-branch-outline"
+            data-testid="flows-editor-approval-continue-hint"
             >${this.t('ui.approvalContinueHint', { path: `steps.${step.id}.decision` })}</ok-inline-feedback
           >`
         : nothing}
@@ -3209,6 +3322,7 @@ export class ErpFlowsEditor extends LitElement {
             <label>${this.t('ui.paramName')}</label>
             <input
               type="text"
+              data-testid="flows-editor-param-name"
               .value=${key}
               @change=${(e: Event) =>
                 setParams(
@@ -3232,6 +3346,7 @@ export class ErpFlowsEditor extends LitElement {
           <button
             type="button"
             class="icon-btn"
+            data-testid="flows-editor-param-remove"
             aria-label=${this.t('ui.removePart', { label: key })}
             @click=${() => setParams(params.filter((_, j) => j !== i))}
           >
@@ -3240,7 +3355,12 @@ export class ErpFlowsEditor extends LitElement {
         </div>`,
       )}
       <div class="adders" style="margin-left:0">
-        <button type="button" data-act="add-param" @click=${() => setParams([...params, ['', '']])}>
+        <button
+          type="button"
+          data-act="add-param"
+          data-testid="flows-editor-param-add"
+          @click=${() => setParams([...params, ['', '']])}
+        >
           ${this.t('ui.addParam')}
         </button>
       </div>
@@ -3282,6 +3402,7 @@ export class ErpFlowsEditor extends LitElement {
             ([kind, label]) => html`<button
               type="button"
               data-add=${kind}
+              data-testid=${`flows-editor-add-${kind}`}
               @click=${() => this.add(kind)}
             >
               ${this.t(label)}
@@ -3307,7 +3428,13 @@ export class ErpFlowsEditor extends LitElement {
         : nothing}
       ${missing.length
         ? html`<div class="adders" style="margin-left:0">
-            <button type="button" @click=${() => void this.grantAll()}>${this.t('ui.grantAll')}</button>
+            <button
+              type="button"
+              data-testid="flows-editor-grant-all"
+              @click=${() => void this.grantAll()}
+            >
+              ${this.t('ui.grantAll')}
+            </button>
           </div>`
         : nothing}
     </div>`;
@@ -3343,13 +3470,20 @@ export class ErpFlowsEditor extends LitElement {
               type="button"
               class="icon-btn"
               data-act="limits"
+              data-testid=${`flows-editor-grant-limits-${k}`}
               aria-expanded=${open ? 'true' : 'false'}
               @click=${() => this.toggleLimits(g)}
             >
               ${this.t('ui.grantLimits')}
             </button>`
           : nothing}
-        <button type="button" class="icon-btn" data-act="revoke" @click=${() => void this.revoke(g)}>
+        <button
+          type="button"
+          class="icon-btn"
+          data-act="revoke"
+          data-testid=${`flows-editor-grant-revoke-${k}`}
+          @click=${() => void this.revoke(g)}
+        >
           ${this.t('ui.revoke')}
         </button>
       </div>
@@ -3379,6 +3513,7 @@ export class ErpFlowsEditor extends LitElement {
             <input
               id="pf-${id}-${i}"
               data-field="pin-name"
+              data-testid=${`flows-editor-limit-name-${k}`}
               type="text"
               .value=${field}
               @change=${(e: Event) =>
@@ -3395,6 +3530,7 @@ export class ErpFlowsEditor extends LitElement {
             <input
               id="pv-${id}-${i}"
               data-field="pin-value"
+              data-testid=${`flows-editor-limit-value-${k}`}
               type="text"
               .value=${value}
               @change=${(e: Event) =>
@@ -3408,6 +3544,7 @@ export class ErpFlowsEditor extends LitElement {
             type="button"
             class="icon-btn"
             data-act="remove-limit"
+            data-testid=${`flows-editor-limit-remove-${k}`}
             aria-label=${this.t('ui.grantLimitRemove', { field: field || this.t('ui.grantLimitField') })}
             @click=${() => this.setLimitRows(g, rows.filter((_, j) => j !== i))}
           >
@@ -3419,6 +3556,7 @@ export class ErpFlowsEditor extends LitElement {
         <button
           type="button"
           data-act="add-limit"
+          data-testid=${`flows-editor-limit-add-${k}`}
           @click=${() => this.setLimitRows(g, [...rows, ['', '']])}
         >
           ${this.t('ui.grantLimitAdd')}
@@ -3426,6 +3564,7 @@ export class ErpFlowsEditor extends LitElement {
         <button
           type="button"
           data-act="save-limits"
+          data-testid=${`flows-editor-limit-save-${k}`}
           ?disabled=${saving}
           @click=${() => void this.saveLimits(g)}
         >
@@ -3458,11 +3597,17 @@ export class ErpFlowsEditor extends LitElement {
       <!-- First thing on the screen, and it stays there while it is read. Every other automation
            tool's «test» button runs the automation; an owner has every reason to assume this one
            does too, and the assumption is only expensive in one direction. -->
-      <ok-inline-feedback tone="info" icon="eye-outline"
+      <ok-inline-feedback
+        tone="info"
+        icon="eye-outline"
+        data-testid="flows-editor-preview-info"
         >${this.t('ui.testNothingHappened')}</ok-inline-feedback
       >
       ${!built.hasRealData
-        ? html`<ok-inline-feedback tone="warning" icon="help-circle-outline"
+        ? html`<ok-inline-feedback
+            tone="warning"
+            icon="help-circle-outline"
+            data-testid="flows-editor-preview-no-real-data"
             >${this.t('ui.testNoRealData')}</ok-inline-feedback
           >`
         : html`<span class="hint"
@@ -3472,7 +3617,10 @@ export class ErpFlowsEditor extends LitElement {
             })}</span
           >`}
       ${run.blanks
-        ? html`<ok-inline-feedback tone="warning" icon="alert-circle-outline"
+        ? html`<ok-inline-feedback
+            tone="warning"
+            icon="alert-circle-outline"
+            data-testid="flows-editor-preview-blanks"
             >${this.t(
               run.blanks === 1 ? 'ui.testBlanksFoundOne' : 'ui.testBlanksFound',
               { count: run.blanks },
@@ -3607,7 +3755,9 @@ export class ErpFlowsEditor extends LitElement {
         : nothing}
       ${trouble.messageKey
         ? html`<details>
-            <summary>${this.t('ui.troubleTechnical')}</summary>
+            <summary data-testid=${`flows-editor-run-trouble-${String(run.id ?? '')}`}>
+              ${this.t('ui.troubleTechnical')}
+            </summary>
             <code>${trouble.technical}</code>
           </details>`
         : nothing}
@@ -3628,6 +3778,7 @@ export class ErpFlowsEditor extends LitElement {
           type="button"
           class="icon-btn"
           data-act="copy-run"
+          data-testid=${`flows-editor-run-copy-${String(run.id ?? '')}`}
           aria-label=${this.t('ui.runCopyId')}
           title=${this.t('ui.runCopyId')}
           @click=${() => void this.copyRunId(String(run.id ?? ''))}
@@ -3638,6 +3789,7 @@ export class ErpFlowsEditor extends LitElement {
           type="button"
           class="icon-btn"
           data-act="open-run"
+          data-testid=${`flows-editor-run-open-${String(run.id ?? '')}`}
           aria-expanded=${steps ? 'true' : 'false'}
           @click=${() => void this.toggleRun(String(run.id))}
         >
@@ -3705,6 +3857,7 @@ export class ErpFlowsEditor extends LitElement {
           type="button"
           class="icon-btn"
           aria-label=${this.t('ui.back')}
+          data-testid="flows-editor-back"
           @click=${() =>
             this.dispatchEvent(new CustomEvent('flows-back', { bubbles: true, composed: true }))}
         >
@@ -3713,6 +3866,7 @@ export class ErpFlowsEditor extends LitElement {
         <input
           class="name"
           type="text"
+          data-testid="flows-editor-name"
           .value=${this.name}
           placeholder=${this.t('ui.unnamed')}
           @input=${(e: Event) => {
@@ -3724,6 +3878,7 @@ export class ErpFlowsEditor extends LitElement {
           label=${this.enabled ? this.t('ui.active') : this.t('ui.paused')}
         ></ok-status-pill>
         <ion-toggle
+          data-testid="flows-editor-enabled"
           .checked=${this.enabled}
           @ionChange=${(e: Event) => this.onEnable(!!(e.target as HTMLInputElement).checked)}
         ></ion-toggle>
@@ -3733,13 +3888,18 @@ export class ErpFlowsEditor extends LitElement {
           size="small"
           fill="outline"
           data-act="test"
+          data-testid="flows-editor-test"
           @click=${() => {
             this.tab = 'test';
           }}
         >
           ${this.t('ui.testRun')}
         </ion-button>
-        <ion-button size="small" ?disabled=${this.saving} @click=${() => void this.save()}>
+        <ion-button
+          size="small"
+          data-testid="flows-editor-save"
+          ?disabled=${this.saving}
+          @click=${() => void this.save()}
           ${this.saving ? this.t('ui.saving') : this.t('ui.save')}
         </ion-button>
       </div>
@@ -3753,6 +3913,7 @@ export class ErpFlowsEditor extends LitElement {
             aria-controls="tabpanel"
             aria-selected=${this.tab === tab ? 'true' : 'false'}
             tabindex=${this.tab === tab ? '0' : '-1'}
+            data-testid=${`flows-editor-tab-${tab}`}
             @click=${() => {
               this.tab = tab;
             }}
@@ -3764,17 +3925,27 @@ export class ErpFlowsEditor extends LitElement {
 
       <div class="body" role="tabpanel" id="tabpanel" aria-labelledby=${`tab-${this.tab}`}>
         ${this.error
-          ? html`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+          ? html`<ok-inline-feedback
+              tone="danger"
+              icon="alert-circle-outline"
+              data-testid="flows-editor-form-error"
               >${this.error}</ok-inline-feedback
             >`
           : nothing}
         ${this.notice
-          ? html`<ok-inline-feedback tone="success" icon="checkmark-circle-outline"
+          ? html`<ok-inline-feedback
+              tone="success"
+              icon="checkmark-circle-outline"
+              data-testid="flows-editor-notice"
               >${this.notice}</ok-inline-feedback
             >`
           : nothing}
         ${this.enableWarning
-          ? html`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-enable-warning
+          ? html`<ok-inline-feedback
+              tone="warning"
+              icon="alert-circle-outline"
+              data-enable-warning
+              data-testid="flows-editor-enable-warning"
               >${this.enableWarning}</ok-inline-feedback
             >`
           : nothing}
@@ -3789,6 +3960,7 @@ export class ErpFlowsEditor extends LitElement {
       </div>
 
       <erp-flows-field-picker
+        data-testid="flows-editor-field-picker"
         .open=${this.pickerOpen}
         .shape=${this.shape}
         .root=${this.pickerRoot}

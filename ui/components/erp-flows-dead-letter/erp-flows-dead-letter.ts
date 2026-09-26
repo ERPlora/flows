@@ -432,13 +432,20 @@ export class ErpFlowsDeadLetter extends LitElement {
         })}
         · ${this.when(row.created_at)} ·
         <code>${row.id}</code>
-        <button type="button" data-act="copy" @click=${() => void this.copy(row.id)}>
+        <button
+          type="button"
+          data-act="copy"
+          data-testid=${`flows-dead-letter-copy-${row.id}`}
+          @click=${() => void this.copy(row.id)}
+        >
           ${this.t('ui.runCopyId')}
         </button>
       </span>
       ${trouble.technical
         ? html`<details>
-            <summary>${this.t('ui.troubleTechnical')}</summary>
+            <summary data-testid=${`flows-dead-letter-technical-${row.id}`}>
+              ${this.t('ui.troubleTechnical')}
+            </summary>
             <pre>${trouble.technical}</pre>
           </details>`
         : nothing}
@@ -454,6 +461,7 @@ export class ErpFlowsDeadLetter extends LitElement {
                 (key) => html`<button
                   type="button"
                   data-act="reason-preset"
+                  data-testid="flows-dead-letter-reason-preset"
                   @click=${() => {
                     this.reason = this.t(key);
                   }}
@@ -465,6 +473,7 @@ export class ErpFlowsDeadLetter extends LitElement {
             <input
               type="text"
               data-field="discard-reason"
+              data-testid=${`flows-dead-letter-reason-${row.id}`}
               maxlength=${MAX_REASON}
               .value=${this.reason}
               aria-label=${this.t('ui.deadDiscardReasonLabel')}
@@ -477,6 +486,7 @@ export class ErpFlowsDeadLetter extends LitElement {
               <button
                 type="button"
                 data-act="discard-confirm"
+                data-testid=${`flows-dead-letter-discard-confirm-${row.id}`}
                 ?disabled=${busy}
                 @click=${() => void this.discard(row)}
               >
@@ -485,6 +495,7 @@ export class ErpFlowsDeadLetter extends LitElement {
               <button
                 type="button"
                 data-act="discard-cancel"
+                data-testid=${`flows-dead-letter-discard-cancel-${row.id}`}
                 @click=${() => {
                   this.confirming = '';
                   this.reason = '';
@@ -499,6 +510,7 @@ export class ErpFlowsDeadLetter extends LitElement {
               ? html`<button
                   type="button"
                   data-act="retry"
+                  data-testid=${`flows-dead-letter-retry-${row.id}`}
                   ?disabled=${busy}
                   @click=${() => void this.retry(row)}
                 >
@@ -508,6 +520,7 @@ export class ErpFlowsDeadLetter extends LitElement {
             <button
               type="button"
               data-act="discard"
+              data-testid=${`flows-dead-letter-discard-${row.id}`}
               @click=${() => {
                 this.confirming = row.id;
               }}
@@ -554,7 +567,10 @@ export class ErpFlowsDeadLetter extends LitElement {
     if (this.status === 'denied') {
       return html`<div class="list">
         <h3 class="section">${this.t('ui.deadTitle')}</h3>
-        <ok-inline-feedback tone="warning" icon="lock-closed-outline"
+        <ok-inline-feedback
+          tone="warning"
+          icon="lock-closed-outline"
+          data-testid="flows-dead-letter-denied"
           >${this.t('ui.deadDenied')}</ok-inline-feedback
         >
       </div>`;
@@ -567,6 +583,7 @@ export class ErpFlowsDeadLetter extends LitElement {
           ? html`<button
               type="button"
               data-act="retry-all"
+              data-testid="flows-dead-letter-retry-all"
               ?disabled=${this.busy.includes('*')}
               @click=${() => void this.retryAll()}
             >
@@ -575,7 +592,10 @@ export class ErpFlowsDeadLetter extends LitElement {
           : nothing}
       </div>
       ${this.error
-        ? html`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+        ? html`<ok-inline-feedback
+            tone="danger"
+            icon="alert-circle-outline"
+            data-testid="flows-dead-letter-load-error"
             >${this.error}</ok-inline-feedback
           >`
         : nothing}
