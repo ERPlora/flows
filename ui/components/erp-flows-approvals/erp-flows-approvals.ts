@@ -282,7 +282,7 @@ export class ErpFlowsApprovals extends LitElement {
     return html`<div class="list">
       <h3 class="section">${this.t('ui.approvalsTitle')}</h3>
       ${this.error
-        ? html`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+        ? html`<ok-inline-feedback tone="danger" icon="alert-circle-outline" data-testid="flows-approvals-error"
             >${this.error}</ok-inline-feedback
           >`
         : nothing}
@@ -316,6 +316,7 @@ export class ErpFlowsApprovals extends LitElement {
             : html`<span class="meta">${this.t('ui.approvalExpires', { when })}</span>`}
           <textarea
             data-field="comment"
+            data-testid=${`flows-approvals-comment-${row.id}`}
             rows="1"
             aria-label=${this.t('ui.approvalComment')}
             placeholder=${this.t('ui.approvalComment')}
@@ -328,6 +329,7 @@ export class ErpFlowsApprovals extends LitElement {
             <button
               type="button"
               data-act="approve"
+              data-testid=${`flows-approvals-approve-${row.id}`}
               ?disabled=${this.busy.includes(row.id)}
               @click=${() => void this.decide(row, 'approve')}
             >
@@ -339,6 +341,7 @@ export class ErpFlowsApprovals extends LitElement {
             <button
               type="button"
               data-act="reject"
+              data-testid=${`flows-approvals-reject-${row.id}`}
               ?disabled=${this.busy.includes(row.id)}
               @click=${() => void this.decide(row, 'reject')}
             >

@@ -227,6 +227,7 @@ export class ErpFlowsFieldPicker extends LitElement {
         type="button"
         class="field"
         aria-disabled=${skipped ? 'true' : 'false'}
+        data-testid=${`flows-field-picker-field-${field.path}`}
         @click=${() => this.pick(field)}
       >
         <span class="name">${fieldPhrase(field.path, this.t)}</span>
@@ -240,6 +241,7 @@ export class ErpFlowsFieldPicker extends LitElement {
     const fields = this.matchingFields;
     return html`<div
       class="scrim"
+      data-testid="flows-field-picker-scrim"
       @click=${(e: Event) => {
         if (e.target === e.currentTarget) this.close();
       }}
@@ -247,7 +249,14 @@ export class ErpFlowsFieldPicker extends LitElement {
       <div class="panel" role="dialog" aria-label=${this.t('ui.pickFieldTitle')}>
         <header>
           <h2>${this.t('ui.pickFieldTitle')}</h2>
-          <button type="button" aria-label=${this.t('ui.close')} @click=${() => this.close()}>×</button>
+          <button
+            type="button"
+            aria-label=${this.t('ui.close')}
+            data-testid="flows-field-picker-close"
+            @click=${() => this.close()}
+          >
+            ×
+          </button>
         </header>
         ${this.eventLabel
           ? html`<div class="from">${this.t('ui.pickFieldFrom', { event: this.eventLabel })}</div>`
@@ -261,6 +270,7 @@ export class ErpFlowsFieldPicker extends LitElement {
                   type="search"
                   .value=${this.query}
                   placeholder=${this.t('ui.pickFieldSearch')}
+                  data-testid="flows-field-picker-search"
                   @input=${(e: Event) => {
                     this.query = (e.target as HTMLInputElement).value;
                   }}
