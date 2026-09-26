@@ -640,3 +640,52 @@ describe('the sentence a served recipe gives each permission (flows#114)', () =>
     expect(card.grantPhrases).toEqual({});
   });
 });
+
+/**
+ * **Whether the owner's copy of a recipe is behind what its module ships** (flows#136, hub#2059).
+ *
+ * The hub answers `installed: { flow_id, enabled, outdated }` per family it already built a flow
+ * from. `outdated` has THREE honest answers and a fourth shape: `true`, `false`, `null` («this hub
+ * cannot tell» — a flow built before it remembered the recipe) and absent (a hub older than
+ * hub#2059). The last two must read the same, and neither may read as «up to date».
+ */
+describe('the recipe the owner already activated, and whether its module improved it (flows#136)', () => {
+  const installed = (value: unknown) => moduleTemplates([row({ installed: value })], 'en')[0];
+
+  it('carries which flow the hub built from it and that it is behind', () => {
+    expect(installed({ flow_id: 'f1', enabled: true, outdated: true }).factory).toEqual({
+      flowId: 'f1',
+      outdated: true,
+    });
+  });
+
+  it('says it is up to date only when the hub says so', () => {
+    expect(installed({ flow_id: 'f1', enabled: false, outdated: false }).factory).toEqual({
+      flowId: 'f1',
+      outdated: false,
+    });
+  });
+
+  it('reads «cannot tell» and a hub that never computed it as the same unknown', () => {
+    expect(installed({ flow_id: 'f1', enabled: true, outdated: null }).factory).toEqual({
+      flowId: 'f1',
+      outdated: null,
+    });
+    expect(installed({ flow_id: 'f1', enabled: true }).factory).toEqual({
+      flowId: 'f1',
+      outdated: null,
+    });
+    expect(installed({ flow_id: 'f1', enabled: true, outdated: 'yes' }).factory).toEqual({
+      flowId: 'f1',
+      outdated: null,
+    });
+  });
+
+  it('has no factory copy when the hub built none, or answers something it cannot read', () => {
+    expect(installed(null).factory).toBeUndefined();
+    expect(moduleTemplates([row()], 'en')[0].factory).toBeUndefined();
+    expect(installed({ enabled: true, outdated: true }).factory).toBeUndefined();
+    expect(installed({ flow_id: '  ', outdated: true }).factory).toBeUndefined();
+    expect(installed('f1').factory).toBeUndefined();
+  });
+});

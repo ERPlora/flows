@@ -159,6 +159,17 @@ export interface FlowsApi {
    * flows.templates === 'function'` is false — which is the answer, not a crash.
    */
   templates?(): Promise<HubFlowTemplate[]>;
+  /**
+   * Rebuilds an owner's flow from the module's CURRENT recipe (`POST
+   * …/templates/{module}/{family}/restore`, hub#2059, flows#136).
+   *
+   * Same id, same history — only the definition, permissions and `enabled/paused` state change:
+   * `enabled` is KEPT, never reset, and whatever the owner tailored on top of the factory recipe is
+   * replaced by it. **Optional** for the same reason {@link templates} is: added after the §9 list
+   * was frozen, so a hub that predates it hands out a client with no such method, and `typeof
+   * flows.restoreModuleTemplate === 'function'` is the probe.
+   */
+  restoreModuleTemplate?(module: string, family: string): Promise<Flow>;
 }
 
 /**
@@ -179,6 +190,13 @@ export interface HubFlowTemplate {
   documents?: Record<string, unknown>;
   grants?: unknown;
   requires?: Record<string, string>;
+  /**
+   * Whether the owner already switched this recipe on, and whether the module has since shipped
+   * a better one (hub#2059, flows#136). `null` = the hub already built a flow from it but cannot
+   * tell if the module moved on; absent/`null` altogether = never built. `unknown` on every field
+   * on purpose — the reader ({@link moduleTemplates}, in `module-templates.ts`) checks each one.
+   */
+  installed?: { flow_id?: unknown; enabled?: unknown; outdated?: unknown } | null;
 }
 
 /**
