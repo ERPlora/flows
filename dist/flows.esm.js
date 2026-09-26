@@ -2010,6 +2010,7 @@ var ErpFlowsValue = class extends i3 {
                 ><button
                   type="button"
                   aria-label=${this.removeLabel}
+                  data-testid="flows-value-part-remove"
                   @click=${() => this.removeAt(i4)}
                 >
                   ×
@@ -2018,12 +2019,14 @@ var ErpFlowsValue = class extends i3 {
                 type="text"
                 .value=${part.text}
                 placeholder=${i4 === 0 ? this.placeholder : ""}
+                data-testid="flows-value-part-text"
                 @input=${(e4) => this.onText(i4, e4.target.value)}
               />`
     )}
         ${this.canPickFields ? b2`<button
               type="button"
               class="insert"
+              data-testid="flows-value-insert"
               @click=${() => this.dispatchEvent(
       new CustomEvent("flows-pick-field", {
         detail: { name: this.name },
@@ -2480,6 +2483,7 @@ var ErpFlowsFieldPicker = class extends i3 {
         type="button"
         class="field"
         aria-disabled=${skipped ? "true" : "false"}
+        data-testid=${`flows-field-picker-field-${field.path}`}
         @click=${() => this.pick(field)}
       >
         <span class="name">${fieldPhrase(field.path, this.t)}</span>
@@ -2492,6 +2496,7 @@ var ErpFlowsFieldPicker = class extends i3 {
     const fields = this.matchingFields;
     return b2`<div
       class="scrim"
+      data-testid="flows-field-picker-scrim"
       @click=${(e4) => {
       if (e4.target === e4.currentTarget) this.close();
     }}
@@ -2499,7 +2504,14 @@ var ErpFlowsFieldPicker = class extends i3 {
       <div class="panel" role="dialog" aria-label=${this.t("ui.pickFieldTitle")}>
         <header>
           <h2>${this.t("ui.pickFieldTitle")}</h2>
-          <button type="button" aria-label=${this.t("ui.close")} @click=${() => this.close()}>×</button>
+          <button
+            type="button"
+            aria-label=${this.t("ui.close")}
+            data-testid="flows-field-picker-close"
+            @click=${() => this.close()}
+          >
+            ×
+          </button>
         </header>
         ${this.eventLabel ? b2`<div class="from">${this.t("ui.pickFieldFrom", { event: this.eventLabel })}</div>` : A}
         ${this.shape && this.shape.samples === 0 ? b2`<div class="notice">${this.t("ui.pickFieldNoSamples")}</div>` : A}
@@ -2508,6 +2520,7 @@ var ErpFlowsFieldPicker = class extends i3 {
                   type="search"
                   .value=${this.query}
                   placeholder=${this.t("ui.pickFieldSearch")}
+                  data-testid="flows-field-picker-search"
                   @input=${(e4) => {
       this.query = e4.target.value;
     }}
@@ -5054,7 +5067,12 @@ var ErpFlowsEditor = class extends i3 {
     const draft = this.draft;
     if (!draft) return A;
     return b2`<div class="list" style="margin-bottom:.75rem">
-      <ok-inline-feedback tone="warning" icon="sparkles-outline" data-draft-banner>
+      <ok-inline-feedback
+        tone="warning"
+        icon="sparkles-outline"
+        data-draft-banner
+        data-testid="flows-editor-draft-unconfirmed"
+      >
         ${this.t("draft.unconfirmed")}
       </ok-inline-feedback>
       ${draft.gaps.length ? b2`<div>
@@ -5081,6 +5099,7 @@ var ErpFlowsEditor = class extends i3 {
             type="button"
             class="open"
             aria-expanded=${open ? "true" : "false"}
+            data-testid="flows-editor-trigger-open"
             @click=${() => {
       this.openStep = open ? null : "trigger";
     }}
@@ -5107,6 +5126,7 @@ var ErpFlowsEditor = class extends i3 {
         <select
           id="trigger-kind"
           data-field="trigger-kind"
+          data-testid="flows-editor-trigger-kind"
           .value=${trigger.kind}
           @change=${(e4) => this.setTrigger({ kind: e4.target.value })}
         >
@@ -5123,6 +5143,7 @@ var ErpFlowsEditor = class extends i3 {
             <input
               id="trigger-at"
               type="datetime-local"
+              data-testid="flows-editor-trigger-at"
               @change=${(e4) => {
       const raw = e4.target.value;
       this.setTrigger({ at: raw ? new Date(raw).toISOString() : "" });
@@ -5161,6 +5182,7 @@ var ErpFlowsEditor = class extends i3 {
         <select
           id="trigger-every"
           data-field="cron-every"
+          data-testid="flows-editor-cron-every"
           .value=${schedule.every}
           @change=${(e4) => write(retime(schedule, e4.target.value))}
         >
@@ -5174,6 +5196,7 @@ var ErpFlowsEditor = class extends i3 {
             <select
               id="trigger-weekday"
               data-field="cron-weekday"
+              data-testid="flows-editor-cron-weekday"
               .value=${String(schedule.weekday)}
               @change=${(e4) => write({ ...schedule, weekday: Number(e4.target.value) })}
             >
@@ -5189,6 +5212,7 @@ var ErpFlowsEditor = class extends i3 {
             <select
               id="trigger-monthday"
               data-field="cron-monthday"
+              data-testid="flows-editor-cron-monthday"
               .value=${String(schedule.monthday)}
               @change=${(e4) => write({ ...schedule, monthday: Number(e4.target.value) })}
             >
@@ -5203,6 +5227,7 @@ var ErpFlowsEditor = class extends i3 {
         <input
           id="trigger-time"
           data-field="trigger-time"
+          data-testid="flows-editor-cron-time"
           type="time"
           .value=${schedule.time}
           @change=${(e4) => write({ ...schedule, time: e4.target.value || schedule.time })}
@@ -5217,13 +5242,17 @@ var ErpFlowsEditor = class extends i3 {
       <div class="field">
         <label>${this.t("ui.cronLabel")}</label>
         <code class="kept-cron" data-field="cron-raw">${cron}</code>
-        <ok-inline-feedback tone="warning" icon="information-circle-outline"
+        <ok-inline-feedback
+          tone="warning"
+          icon="information-circle-outline"
+          data-testid="flows-editor-cron-kept"
           >${this.t("ui.cronKept")}</ok-inline-feedback
         >
         <div class="adders" style="margin-left:0">
           <button
             type="button"
             data-act="cron-simplify"
+            data-testid="flows-editor-cron-simplify"
             @click=${() => this.setTrigger({
       cron: scheduleCron({ every: "day", time: readCronTime(cron) ?? "09:00" })
     })}
@@ -5252,6 +5281,7 @@ var ErpFlowsEditor = class extends i3 {
       tone="warning"
       icon="alert-circle-outline"
       data-catalog=${catalog.status}
+      data-testid="flows-editor-event-catalog-issue"
       >${message}</ok-inline-feedback
     >`;
   }
@@ -5266,6 +5296,7 @@ var ErpFlowsEditor = class extends i3 {
         <select
           id="trigger-event"
           data-field="trigger-event"
+          data-testid="flows-editor-trigger-event"
           .value=${chosen}
           @change=${(e4) => this.setTrigger({ event: e4.target.value })}
         >
@@ -5304,6 +5335,7 @@ var ErpFlowsEditor = class extends i3 {
         <input
           id="trigger-event-other"
           type="text"
+          data-testid="flows-editor-trigger-event-other"
           .value=${chosen}
           @change=${(e4) => this.setTrigger({ event: e4.target.value.trim() })}
         />
@@ -5316,6 +5348,7 @@ var ErpFlowsEditor = class extends i3 {
       type="button"
       class="icon-btn"
       data-act="remove"
+      data-testid=${`flows-editor-step-remove-${step.id}`}
       aria-label=${this.t("ui.removeStep")}
       @click=${() => this.setDoc(removeStep(this.document, index))}
     >
@@ -5331,6 +5364,7 @@ var ErpFlowsEditor = class extends i3 {
             class="open"
             style="padding:.2rem .3rem"
             aria-expanded=${open ? "true" : "false"}
+            data-testid=${`flows-editor-step-open-${step.id}`}
             @click=${() => {
         this.openStep = open ? null : step.id;
       }}
@@ -5351,6 +5385,7 @@ var ErpFlowsEditor = class extends i3 {
             class="open"
             style="padding:.2rem .3rem"
             aria-expanded=${open ? "true" : "false"}
+            data-testid=${`flows-editor-step-open-${step.id}`}
             @click=${() => {
         this.openStep = open ? null : step.id;
       }}
@@ -5373,6 +5408,7 @@ var ErpFlowsEditor = class extends i3 {
             type="button"
             class="open"
             aria-expanded=${open ? "true" : "false"}
+            data-testid=${`flows-editor-step-open-${step.id}`}
             @click=${() => {
       this.openStep = open ? null : step.id;
       if (this.openStep === step.id && step.kind === "http") void this.loadSecrets();
@@ -5415,6 +5451,7 @@ var ErpFlowsEditor = class extends i3 {
     return b2`<div class="value-row">
       <erp-flows-value
         data-field=${opts.field}
+        data-testid=${`flows-editor-value-${opts.field}`}
         .label=${opts.label}
         .parts=${valueToParts(opts.value)}
         .fieldLabel=${this.fieldLabel}
@@ -5429,6 +5466,7 @@ var ErpFlowsEditor = class extends i3 {
            teach a syntax that makes the document unsavable. -->
       ${opts.secrets && this.secrets.length ? b2`<select
             data-act="insert-secret"
+            data-testid=${`flows-editor-insert-secret-${opts.field}`}
             aria-label=${this.t("ui.insertSecret")}
             .value=${""}
             @change=${(e4) => {
@@ -5464,6 +5502,7 @@ var ErpFlowsEditor = class extends i3 {
           <select
             id="m-${step.id}"
             data-field="method"
+            data-testid="flows-editor-http-method"
             .value=${String(step.method ?? "GET")}
             @change=${(e4) => this.setDoc(
       patchStep(this.document, index, { method: e4.target.value })
@@ -5496,6 +5535,7 @@ var ErpFlowsEditor = class extends i3 {
             <label>${this.t("ui.paramName")}</label>
             <input
               type="text"
+              data-testid="flows-editor-header-name"
               .value=${key2}
               @change=${(e4) => setHeaders(
         headers.map(
@@ -5514,6 +5554,7 @@ var ErpFlowsEditor = class extends i3 {
           <button
             type="button"
             class="icon-btn"
+            data-testid="flows-editor-header-remove"
             aria-label=${this.t("ui.removePart", { label: key2 })}
             @click=${() => setHeaders(headers.filter((_2, j) => j !== i4))}
           >
@@ -5522,7 +5563,12 @@ var ErpFlowsEditor = class extends i3 {
         </div>`
     )}
       <div class="adders" style="margin-left:0">
-        <button type="button" data-act="add-header" @click=${() => setHeaders([...headers, ["", ""]])}>
+        <button
+          type="button"
+          data-act="add-header"
+          data-testid="flows-editor-http-add-header"
+          @click=${() => setHeaders([...headers, ["", ""]])}
+        >
           ${this.t("ui.httpAddHeader")}
         </button>
       </div>
@@ -5540,6 +5586,7 @@ var ErpFlowsEditor = class extends i3 {
         <input
           id="t-${step.id}"
           data-field="timeout"
+          data-testid="flows-editor-http-timeout"
           type="number"
           min="1"
           max=${MAX_TIMEOUT_SECONDS}
@@ -5577,6 +5624,7 @@ var ErpFlowsEditor = class extends i3 {
             type="button"
             class="icon-btn"
             data-act="delete-secret"
+            data-testid=${`flows-editor-secret-remove-${s4.name}`}
             aria-label=${this.t("ui.secretDelete", { name: s4.name })}
             @click=${() => void this.deleteSecret(s4.name)}
           >
@@ -5590,6 +5638,7 @@ var ErpFlowsEditor = class extends i3 {
           <input
             id="sn-${this.flow?.id ?? "new"}"
             data-field="secret-name"
+            data-testid="flows-editor-secret-name"
             type="text"
             .value=${this.secretName}
             placeholder="STRIPE_KEY"
@@ -5603,6 +5652,7 @@ var ErpFlowsEditor = class extends i3 {
           <input
             id="sv-${this.flow?.id ?? "new"}"
             data-field="secret-value"
+            data-testid="flows-editor-secret-value"
             type="password"
             autocomplete="off"
             .value=${this.secretValue}
@@ -5615,6 +5665,7 @@ var ErpFlowsEditor = class extends i3 {
           type="button"
           class="icon-btn"
           data-act="save-secret"
+          data-testid="flows-editor-secret-save"
           @click=${() => void this.saveSecret()}
         >
           ${this.t("ui.save")}
@@ -5669,6 +5720,7 @@ var ErpFlowsEditor = class extends i3 {
         <select
           id="p-${step.id}"
           data-field="policy"
+          data-testid="flows-editor-ai-policy"
           .value=${String(step.policy ?? "manual")}
           @change=${(e4) => this.setDoc(
       patchStep(this.document, index, {
@@ -5680,7 +5732,10 @@ var ErpFlowsEditor = class extends i3 {
           ${option("auto", this.t("ui.aiPolicyAuto"), String(step.policy ?? "manual"))}
         </select>
       </div>
-      ${auto ? b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline"
+      ${auto ? b2`<ok-inline-feedback
+            tone="warning"
+            icon="alert-circle-outline"
+            data-testid="flows-editor-ai-policy-auto-warning"
             >${this.t("ui.aiPolicyAutoWarning")}</ok-inline-feedback
           >` : b2`<span class="hint">${this.t("ui.aiPolicyManualHint")}</span>`}
 
@@ -5689,6 +5744,7 @@ var ErpFlowsEditor = class extends i3 {
         <input
           id="i-${step.id}"
           data-field="max-iters"
+          data-testid="flows-editor-ai-max-iters"
           type="number"
           min="1"
           max=${MAX_ITERS_CAP}
@@ -5713,6 +5769,7 @@ var ErpFlowsEditor = class extends i3 {
           <div class="field">
             <input
               type="text"
+              data-testid=${`flows-editor-ai-tool-${what}`}
               .value=${name}
               @change=${(e4) => update(
         names.map((n5, j) => j === i4 ? e4.target.value.trim() : n5)
@@ -5722,6 +5779,7 @@ var ErpFlowsEditor = class extends i3 {
           <button
             type="button"
             class="icon-btn"
+            data-testid=${`flows-editor-ai-tool-remove-${what}`}
             aria-label=${this.t("ui.removePart", { label: name })}
             @click=${() => update(names.filter((_2, j) => j !== i4))}
           >
@@ -5730,7 +5788,12 @@ var ErpFlowsEditor = class extends i3 {
         </div>`
     )}
       <div class="adders" style="margin-left:0">
-        <button type="button" data-act="add-${what}" @click=${() => update([...names, ""])}>
+        <button
+          type="button"
+          data-act="add-${what}"
+          data-testid=${`flows-editor-ai-tool-add-${what}`}
+          @click=${() => update([...names, ""])}
+        >
           ${this.t(what === "query" ? "ui.aiAddQuery" : "ui.aiAddCommand")}
         </button>
       </div>
@@ -5756,6 +5819,7 @@ var ErpFlowsEditor = class extends i3 {
         <select
           id="ch-${step.id}"
           data-field="channel"
+          data-testid="flows-editor-notify-channel"
           .value=${String(step.channel ?? "email")}
           @change=${(e4) => {
       const channel = e4.target.value;
@@ -5774,7 +5838,10 @@ var ErpFlowsEditor = class extends i3 {
     )}
         </select>
       </div>
-      ${step.channel === "whatsapp" ? b2`<ok-inline-feedback tone="warning" icon="cash-outline"
+      ${step.channel === "whatsapp" ? b2`<ok-inline-feedback
+            tone="warning"
+            icon="cash-outline"
+            data-testid="flows-editor-notify-whatsapp-cost"
             >${this.t("ui.notifyWhatsappCost")}</ok-inline-feedback
           >` : A}
 
@@ -5786,6 +5853,7 @@ var ErpFlowsEditor = class extends i3 {
           <input
             id="tq-${step.id}"
             data-field="to-query"
+            data-testid="flows-editor-notify-to-query"
             type="text"
             .value=${to.query ?? ""}
             @change=${(e4) => setTo({ query: e4.target.value.trim() })}
@@ -5796,6 +5864,7 @@ var ErpFlowsEditor = class extends i3 {
           <input
             id="tf-${step.id}"
             data-field="to-field"
+            data-testid="flows-editor-notify-to-field"
             type="text"
             .value=${to.field ?? ""}
             @change=${(e4) => setTo({ field: e4.target.value.trim() })}
@@ -5808,6 +5877,7 @@ var ErpFlowsEditor = class extends i3 {
             <select
               id="nm-${step.id}"
               data-field="notify-mode"
+              data-testid="flows-editor-notify-mode"
               .value=${taps ? "options" : "text"}
               @change=${(e4) => {
       const wants = e4.target.value === "options";
@@ -5863,7 +5933,10 @@ var ErpFlowsEditor = class extends i3 {
     };
     if (step.channel !== "whatsapp" || list.status !== "ready" && list.status !== "loading") {
       return b2`
-        ${step.channel === "whatsapp" && list.status === "error" ? b2`<ok-inline-feedback tone="warning" data-field="templates-error"
+        ${step.channel === "whatsapp" && list.status === "error" ? b2`<ok-inline-feedback
+              tone="warning"
+              data-field="templates-error"
+              data-testid="flows-editor-notify-templates-error"
               >${this.t("ui.notifyTemplatesError")}</ok-inline-feedback
             >` : A}
         <div class="field">
@@ -5871,6 +5944,7 @@ var ErpFlowsEditor = class extends i3 {
           <input
             id="tp-${step.id}"
             data-field="template"
+            data-testid="flows-editor-notify-template"
             type="text"
             .value=${String(step.template ?? "")}
             @change=${(e4) => setTemplate(e4.target.value)}
@@ -5886,6 +5960,7 @@ var ErpFlowsEditor = class extends i3 {
         <select
           id="tp-${step.id}"
           data-field="template-pick"
+          data-testid="flows-editor-notify-template-pick"
           ?disabled=${list.status === "loading"}
           .value=${current}
           @change=${(e4) => {
@@ -5901,10 +5976,16 @@ var ErpFlowsEditor = class extends i3 {
           >${list.status === "loading" ? this.t("ui.notifyTemplatesLoading") : this.t("ui.notifyTemplatePickHint")}</span
         >
       </div>
-      ${list.status === "ready" && list.templates.length === 0 ? b2`<ok-inline-feedback tone="info" data-field="templates-empty"
+      ${list.status === "ready" && list.templates.length === 0 ? b2`<ok-inline-feedback
+            tone="info"
+            data-field="templates-empty"
+            data-testid="flows-editor-notify-templates-empty"
             >${this.t("ui.notifyTemplatesEmpty")}</ok-inline-feedback
           >` : A}
-      ${unknown ? b2`<ok-inline-feedback tone="warning" data-field="template-unknown"
+      ${unknown ? b2`<ok-inline-feedback
+            tone="warning"
+            data-field="template-unknown"
+            data-testid="flows-editor-notify-template-unknown"
             >${this.t("ui.notifyTemplateUnknown", { name: current })}</ok-inline-feedback
           >` : A}
     `;
@@ -5918,7 +5999,10 @@ var ErpFlowsEditor = class extends i3 {
     if (!kind || kind === "unknown") return A;
     const kindLabel = this.t(`ui.notifyHeader_${kind}`);
     if (!this.headerMedia) {
-      return b2`<ok-inline-feedback tone="warning" data-field="header-unsupported"
+      return b2`<ok-inline-feedback
+        tone="warning"
+        data-field="header-unsupported"
+        data-testid="flows-editor-notify-header-unsupported"
         >${this.t("ui.notifyHeaderUnsupported", { kind: kindLabel })}</ok-inline-feedback
       >`;
     }
@@ -5966,6 +6050,7 @@ var ErpFlowsEditor = class extends i3 {
         <select
           id="hk-${step.id}"
           data-field="header-kind"
+          data-testid="flows-editor-notify-header-kind"
           .value=${header?.kind ?? "none"}
           @change=${(e4) => write(e4.target.value, header?.link)}
         >
@@ -6003,10 +6088,16 @@ var ErpFlowsEditor = class extends i3 {
       value: vars[TITLE_KEY] ?? "",
       template: true,
       onChange: (v2) => set(TITLE_KEY, v2)
-    }) : b2`<ok-inline-feedback tone="warning" data-field="header-text-unsupported"
+    }) : b2`<ok-inline-feedback
+              tone="warning"
+              data-field="header-text-unsupported"
+              data-testid="flows-editor-notify-header-text-unsupported"
               >${this.t("ui.notifyTitleUnsupported")}</ok-inline-feedback
             >` : A}
-      ${links.length && !this.buttonUrl ? b2`<ok-inline-feedback tone="warning" data-field="button-url-unsupported"
+      ${links.length && !this.buttonUrl ? b2`<ok-inline-feedback
+            tone="warning"
+            data-field="button-url-unsupported"
+            data-testid="flows-editor-notify-button-url-unsupported"
             >${this.t("ui.notifyLinkUnsupported")}</ok-inline-feedback
           >` : A}
       ${this.buttonUrl ? links.map(
@@ -6044,6 +6135,7 @@ var ErpFlowsEditor = class extends i3 {
         <select
           id="tk-${step.id}"
           data-field="tap-kind"
+          data-testid="flows-editor-tap-kind"
           .value=${taps.kind}
           @change=${(e4) => write({ ...taps, kind: e4.target.value })}
         >
@@ -6082,6 +6174,7 @@ var ErpFlowsEditor = class extends i3 {
                 <input
                   id="ti-${step.id}-${i4}"
                   data-field="tap-id-${i4}"
+                  data-testid="flows-editor-tap-id"
                   type="text"
                   .value=${opt.id}
                   @change=${(e4) => patchOption(i4, { id: e4.target.value.trim() })}
@@ -6091,6 +6184,7 @@ var ErpFlowsEditor = class extends i3 {
                 size="small"
                 fill="clear"
                 data-act="remove-tap-option-${i4}"
+                data-testid="flows-editor-tap-option-remove"
                 aria-label=${this.t("ui.tapRemoveOption")}
                 @click=${() => write({ ...taps, options: taps.options.filter((_2, at2) => at2 !== i4) })}
               >
@@ -6122,6 +6216,7 @@ var ErpFlowsEditor = class extends i3 {
         size="small"
         fill="clear"
         data-act="add-tap-option"
+        data-testid="flows-editor-tap-option-add"
         @click=${() => write({ ...taps, options: [...taps.options, { id: "", title: "" }] })}
       >
         <ion-icon name="add-outline" slot="start"></ion-icon>
@@ -6129,7 +6224,10 @@ var ErpFlowsEditor = class extends i3 {
       </ion-button>
 
       ${problems.map(
-      (p3) => b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline"
+      (p3) => b2`<ok-inline-feedback
+            tone="warning"
+            icon="alert-circle-outline"
+            data-testid="flows-editor-tap-option-warning"
             >${this.t(p3.key, p3.params)}</ok-inline-feedback
           >`
     )}
@@ -6144,6 +6242,7 @@ var ErpFlowsEditor = class extends i3 {
         <input
           id="d-${step.id}"
           type="number"
+          data-testid="flows-editor-delay-amount"
           min="0"
           .value=${String(Math.round(seconds / unit))}
           @change=${(e4) => this.setDoc(
@@ -6157,6 +6256,7 @@ var ErpFlowsEditor = class extends i3 {
         <label for="du-${step.id}">${this.t("ui.value")}</label>
         <select
           id="du-${step.id}"
+          data-testid="flows-editor-delay-unit"
           .value=${String(unit)}
           @change=${(e4) => this.setDoc(
       patchStep(this.document, index, {
@@ -6207,6 +6307,7 @@ var ErpFlowsEditor = class extends i3 {
             <label>${this.t("ui.field")}</label>
             <input
               type="text"
+              data-testid="flows-editor-guard-field"
               .value=${this.fieldLabel(row.path) || ""}
               readonly
               @click=${(e4) => {
@@ -6228,6 +6329,7 @@ var ErpFlowsEditor = class extends i3 {
             <label>${this.t("ui.operator")}</label>
             <select
               data-field="operator"
+              data-testid="flows-editor-guard-operator"
               .value=${row.op}
               @change=${(e4) => update(
         rows.map(
@@ -6246,11 +6348,16 @@ var ErpFlowsEditor = class extends i3 {
         row.value,
         row.op === "eq" ? flowHalf : "",
         (key2) => pickQuestion(i4, key2)
-      )}${ambiguous && row.op === "eq" ? b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-field="reply-step-ambiguous"
+      )}${ambiguous && row.op === "eq" ? b2`<ok-inline-feedback
+                        tone="warning"
+                        icon="alert-circle-outline"
+                        data-field="reply-step-ambiguous"
+                        data-testid="flows-editor-reply-step-ambiguous"
                         >${this.t("ui.replyStepAmbiguous")}</ok-inline-feedback
                       >` : A}` : b2`<input
                   type="text"
                   data-field="guard-value"
+                  data-testid="flows-editor-guard-value"
                   .value=${row.value}
                   @change=${(e4) => update(
         rows.map(
@@ -6265,6 +6372,7 @@ var ErpFlowsEditor = class extends i3 {
             <button
               type="button"
               class="icon-btn"
+              data-testid="flows-editor-guard-remove"
               aria-label=${this.t("ui.removeCondition")}
               @click=${() => remove(i4)}
             >
@@ -6276,6 +6384,7 @@ var ErpFlowsEditor = class extends i3 {
       <div class="adders" style="margin-left:0">
         <button
           type="button"
+          data-testid="flows-editor-guard-add"
           @click=${() => update([...rows, { path: "", op: "eq", value: "" }])}
         >
           ${this.t("ui.addCondition")}
@@ -6298,7 +6407,7 @@ var ErpFlowsEditor = class extends i3 {
   renderReplyStepSelect(current, currentFlow, onChange) {
     const { status } = this.hubFlows;
     if (status === "idle" || status === "loading") {
-      return b2`<select data-field="reply-step" disabled>
+      return b2`<select data-field="reply-step" data-testid="flows-editor-reply-step" disabled>
         <option value="">${this.t("ui.replyStepLoading")}</option>
       </select>`;
     }
@@ -6307,6 +6416,7 @@ var ErpFlowsEditor = class extends i3 {
     const selected = chosen ? questionKey(chosen.flowId, chosen.stepId) : questionKey(currentFlow, current);
     return b2`<select
         data-field="reply-step"
+        data-testid="flows-editor-reply-step"
         .value=${selected}
         @change=${(e4) => onChange(e4.target.value)}
       >
@@ -6319,13 +6429,18 @@ var ErpFlowsEditor = class extends i3 {
       }), selected)
     )}
       </select>
-      ${status === "error" ? b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-field="reply-step-error"
+      ${status === "error" ? b2`<ok-inline-feedback
+              tone="warning"
+              icon="alert-circle-outline"
+              data-field="reply-step-error"
+              data-testid="flows-editor-reply-step-error"
               >${this.t("ui.replyStepLoadFailed")}</ok-inline-feedback
             >
             <ion-button
               size="small"
               fill="clear"
               data-act="reply-step-retry"
+              data-testid="flows-editor-reply-step-retry"
               @click=${() => {
       this.hubFlows = { status: "idle", flows: [] };
       void this.ensureHubFlows();
@@ -6342,6 +6457,7 @@ var ErpFlowsEditor = class extends i3 {
         <input
           id="c-${step.id}"
           type="text"
+          data-testid="flows-editor-command"
           .value=${String(step.command ?? "")}
           @change=${(e4) => this.setDoc(
       patchStep(this.document, index, { command: e4.target.value.trim() })
@@ -6371,6 +6487,7 @@ var ErpFlowsEditor = class extends i3 {
         <input
           id="q-${step.id}"
           data-field="query"
+          data-testid="flows-editor-query"
           type="text"
           .value=${String(step.query ?? "")}
           @change=${(e4) => this.setDoc(
@@ -6387,6 +6504,7 @@ var ErpFlowsEditor = class extends i3 {
           <select
             id="qr-${step.id}"
             data-field="result"
+            data-testid="flows-editor-query-result"
             .value=${result}
             @change=${(e4) => this.setDoc(
       patchStep(this.document, index, {
@@ -6404,6 +6522,7 @@ var ErpFlowsEditor = class extends i3 {
           <input
             id="ql-${step.id}"
             data-field="limit"
+            data-testid="flows-editor-query-limit"
             type="number"
             min="1"
             max=${MAX_QUERY_ROWS}
@@ -6472,6 +6591,7 @@ var ErpFlowsEditor = class extends i3 {
         <input
           id="ar-${step.id}"
           data-field="assignee-role"
+          data-testid="flows-editor-approval-role"
           type="text"
           list="roles-${step.id}"
           placeholder=${this.t("ui.approvalAssigneeAdmins")}
@@ -6497,6 +6617,7 @@ var ErpFlowsEditor = class extends i3 {
         <select
           id="ae-${step.id}"
           data-field="expires-in"
+          data-testid="flows-editor-approval-expires-in"
           .value=${String(expiresIn)}
           @change=${(e4) => this.setDoc(
       patchStep(this.document, index, {
@@ -6520,6 +6641,7 @@ var ErpFlowsEditor = class extends i3 {
           <select
             id="aj-${step.id}"
             data-field="on-reject"
+            data-testid="flows-editor-approval-on-reject"
             .value=${onReject}
             @change=${(e4) => this.setDoc(
       patchStep(this.document, index, {
@@ -6535,6 +6657,7 @@ var ErpFlowsEditor = class extends i3 {
           <select
             id="ax-${step.id}"
             data-field="on-expire"
+            data-testid="flows-editor-approval-on-expire"
             .value=${onExpire}
             @change=${(e4) => this.setDoc(
       patchStep(this.document, index, {
@@ -6549,7 +6672,10 @@ var ErpFlowsEditor = class extends i3 {
       <!-- v1 is LINEAR and this pair is what replaces branching: continue + a guard on the
            decision composes approved / rejected / expired without a fork. It is said the moment
            «continue» is picked, which is when it becomes true. -->
-      ${continues ? b2`<ok-inline-feedback tone="info" icon="git-branch-outline"
+      ${continues ? b2`<ok-inline-feedback
+            tone="info"
+            icon="git-branch-outline"
+            data-testid="flows-editor-approval-continue-hint"
             >${this.t("ui.approvalContinueHint", { path: `steps.${step.id}.decision` })}</ok-inline-feedback
           >` : A}
       <span class="hint" data-field="approval-outputs"
@@ -6569,6 +6695,7 @@ var ErpFlowsEditor = class extends i3 {
             <label>${this.t("ui.paramName")}</label>
             <input
               type="text"
+              data-testid="flows-editor-param-name"
               .value=${key2}
               @change=${(e4) => setParams(
         params.map(
@@ -6590,6 +6717,7 @@ var ErpFlowsEditor = class extends i3 {
           <button
             type="button"
             class="icon-btn"
+            data-testid="flows-editor-param-remove"
             aria-label=${this.t("ui.removePart", { label: key2 })}
             @click=${() => setParams(params.filter((_2, j) => j !== i4))}
           >
@@ -6598,7 +6726,12 @@ var ErpFlowsEditor = class extends i3 {
         </div>`
     )}
       <div class="adders" style="margin-left:0">
-        <button type="button" data-act="add-param" @click=${() => setParams([...params, ["", ""]])}>
+        <button
+          type="button"
+          data-act="add-param"
+          data-testid="flows-editor-param-add"
+          @click=${() => setParams([...params, ["", ""]])}
+        >
           ${this.t("ui.addParam")}
         </button>
       </div>
@@ -6632,6 +6765,7 @@ var ErpFlowsEditor = class extends i3 {
       ([kind, label]) => b2`<button
               type="button"
               data-add=${kind}
+              data-testid=${`flows-editor-add-${kind}`}
               @click=${() => this.add(kind)}
             >
               ${this.t(label)}
@@ -6653,7 +6787,13 @@ var ErpFlowsEditor = class extends i3 {
       ${this.grants.map((g3) => this.renderGrant(g3))}
       ${!missing.length && !this.grants.length ? b2`<span class="muted">${this.t("ui.grantsNone")}</span>` : A}
       ${missing.length ? b2`<div class="adders" style="margin-left:0">
-            <button type="button" @click=${() => void this.grantAll()}>${this.t("ui.grantAll")}</button>
+            <button
+              type="button"
+              data-testid="flows-editor-grant-all"
+              @click=${() => void this.grantAll()}
+            >
+              ${this.t("ui.grantAll")}
+            </button>
           </div>` : A}
     </div>`;
   }
@@ -6682,12 +6822,19 @@ var ErpFlowsEditor = class extends i3 {
               type="button"
               class="icon-btn"
               data-act="limits"
+              data-testid=${`flows-editor-grant-limits-${k2}`}
               aria-expanded=${open ? "true" : "false"}
               @click=${() => this.toggleLimits(g3)}
             >
               ${this.t("ui.grantLimits")}
             </button>` : A}
-        <button type="button" class="icon-btn" data-act="revoke" @click=${() => void this.revoke(g3)}>
+        <button
+          type="button"
+          class="icon-btn"
+          data-act="revoke"
+          data-testid=${`flows-editor-grant-revoke-${k2}`}
+          @click=${() => void this.revoke(g3)}
+        >
           ${this.t("ui.revoke")}
         </button>
       </div>
@@ -6714,6 +6861,7 @@ var ErpFlowsEditor = class extends i3 {
             <input
               id="pf-${id}-${i4}"
               data-field="pin-name"
+              data-testid=${`flows-editor-limit-name-${k2}`}
               type="text"
               .value=${field}
               @change=${(e4) => this.setLimitRows(
@@ -6729,6 +6877,7 @@ var ErpFlowsEditor = class extends i3 {
             <input
               id="pv-${id}-${i4}"
               data-field="pin-value"
+              data-testid=${`flows-editor-limit-value-${k2}`}
               type="text"
               .value=${value}
               @change=${(e4) => this.setLimitRows(
@@ -6741,6 +6890,7 @@ var ErpFlowsEditor = class extends i3 {
             type="button"
             class="icon-btn"
             data-act="remove-limit"
+            data-testid=${`flows-editor-limit-remove-${k2}`}
             aria-label=${this.t("ui.grantLimitRemove", { field: field || this.t("ui.grantLimitField") })}
             @click=${() => this.setLimitRows(g3, rows.filter((_2, j) => j !== i4))}
           >
@@ -6752,6 +6902,7 @@ var ErpFlowsEditor = class extends i3 {
         <button
           type="button"
           data-act="add-limit"
+          data-testid=${`flows-editor-limit-add-${k2}`}
           @click=${() => this.setLimitRows(g3, [...rows, ["", ""]])}
         >
           ${this.t("ui.grantLimitAdd")}
@@ -6759,6 +6910,7 @@ var ErpFlowsEditor = class extends i3 {
         <button
           type="button"
           data-act="save-limits"
+          data-testid=${`flows-editor-limit-save-${k2}`}
           ?disabled=${saving}
           @click=${() => void this.saveLimits(g3)}
         >
@@ -6789,10 +6941,16 @@ var ErpFlowsEditor = class extends i3 {
       <!-- First thing on the screen, and it stays there while it is read. Every other automation
            tool's «test» button runs the automation; an owner has every reason to assume this one
            does too, and the assumption is only expensive in one direction. -->
-      <ok-inline-feedback tone="info" icon="eye-outline"
+      <ok-inline-feedback
+        tone="info"
+        icon="eye-outline"
+        data-testid="flows-editor-preview-info"
         >${this.t("ui.testNothingHappened")}</ok-inline-feedback
       >
-      ${!built.hasRealData ? b2`<ok-inline-feedback tone="warning" icon="help-circle-outline"
+      ${!built.hasRealData ? b2`<ok-inline-feedback
+            tone="warning"
+            icon="help-circle-outline"
+            data-testid="flows-editor-preview-no-real-data"
             >${this.t("ui.testNoRealData")}</ok-inline-feedback
           >` : b2`<span class="hint"
             >${this.t("ui.testUsingReal", {
@@ -6800,7 +6958,10 @@ var ErpFlowsEditor = class extends i3 {
       count: this.shape?.samples ?? 0
     })}</span
           >`}
-      ${run2.blanks ? b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline"
+      ${run2.blanks ? b2`<ok-inline-feedback
+            tone="warning"
+            icon="alert-circle-outline"
+            data-testid="flows-editor-preview-blanks"
             >${this.t(
       run2.blanks === 1 ? "ui.testBlanksFoundOne" : "ui.testBlanksFound",
       { count: run2.blanks }
@@ -6901,7 +7062,9 @@ var ErpFlowsEditor = class extends i3 {
       >
       ${trouble.actionKey ? b2`<span class="do">${this.t(trouble.actionKey)}</span>` : A}
       ${trouble.messageKey ? b2`<details>
-            <summary>${this.t("ui.troubleTechnical")}</summary>
+            <summary data-testid=${`flows-editor-run-trouble-${String(run2.id ?? "")}`}>
+              ${this.t("ui.troubleTechnical")}
+            </summary>
             <code>${trouble.technical}</code>
           </details>` : A}
     </div>`;
@@ -6920,6 +7083,7 @@ var ErpFlowsEditor = class extends i3 {
           type="button"
           class="icon-btn"
           data-act="copy-run"
+          data-testid=${`flows-editor-run-copy-${String(run2.id ?? "")}`}
           aria-label=${this.t("ui.runCopyId")}
           title=${this.t("ui.runCopyId")}
           @click=${() => void this.copyRunId(String(run2.id ?? ""))}
@@ -6930,6 +7094,7 @@ var ErpFlowsEditor = class extends i3 {
           type="button"
           class="icon-btn"
           data-act="open-run"
+          data-testid=${`flows-editor-run-open-${String(run2.id ?? "")}`}
           aria-expanded=${steps ? "true" : "false"}
           @click=${() => void this.toggleRun(String(run2.id))}
         >
@@ -6987,6 +7152,7 @@ var ErpFlowsEditor = class extends i3 {
           type="button"
           class="icon-btn"
           aria-label=${this.t("ui.back")}
+          data-testid="flows-editor-back"
           @click=${() => this.dispatchEvent(new CustomEvent("flows-back", { bubbles: true, composed: true }))}
         >
           ←
@@ -6994,6 +7160,7 @@ var ErpFlowsEditor = class extends i3 {
         <input
           class="name"
           type="text"
+          data-testid="flows-editor-name"
           .value=${this.name}
           placeholder=${this.t("ui.unnamed")}
           @input=${(e4) => {
@@ -7005,6 +7172,7 @@ var ErpFlowsEditor = class extends i3 {
           label=${this.enabled ? this.t("ui.active") : this.t("ui.paused")}
         ></ok-status-pill>
         <ion-toggle
+          data-testid="flows-editor-enabled"
           .checked=${this.enabled}
           @ionChange=${(e4) => this.onEnable(!!e4.target.checked)}
         ></ion-toggle>
@@ -7014,13 +7182,18 @@ var ErpFlowsEditor = class extends i3 {
           size="small"
           fill="outline"
           data-act="test"
+          data-testid="flows-editor-test"
           @click=${() => {
       this.tab = "test";
     }}
         >
           ${this.t("ui.testRun")}
         </ion-button>
-        <ion-button size="small" ?disabled=${this.saving} @click=${() => void this.save()}>
+        <ion-button
+          size="small"
+          data-testid="flows-editor-save"
+          ?disabled=${this.saving}
+          @click=${() => void this.save()}
           ${this.saving ? this.t("ui.saving") : this.t("ui.save")}
         </ion-button>
       </div>
@@ -7034,6 +7207,7 @@ var ErpFlowsEditor = class extends i3 {
             aria-controls="tabpanel"
             aria-selected=${this.tab === tab ? "true" : "false"}
             tabindex=${this.tab === tab ? "0" : "-1"}
+            data-testid=${`flows-editor-tab-${tab}`}
             @click=${() => {
         this.tab = tab;
       }}
@@ -7044,13 +7218,23 @@ var ErpFlowsEditor = class extends i3 {
       </div>
 
       <div class="body" role="tabpanel" id="tabpanel" aria-labelledby=${`tab-${this.tab}`}>
-        ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+        ${this.error ? b2`<ok-inline-feedback
+              tone="danger"
+              icon="alert-circle-outline"
+              data-testid="flows-editor-form-error"
               >${this.error}</ok-inline-feedback
             >` : A}
-        ${this.notice ? b2`<ok-inline-feedback tone="success" icon="checkmark-circle-outline"
+        ${this.notice ? b2`<ok-inline-feedback
+              tone="success"
+              icon="checkmark-circle-outline"
+              data-testid="flows-editor-notice"
               >${this.notice}</ok-inline-feedback
             >` : A}
-        ${this.enableWarning ? b2`<ok-inline-feedback tone="warning" icon="alert-circle-outline" data-enable-warning
+        ${this.enableWarning ? b2`<ok-inline-feedback
+              tone="warning"
+              icon="alert-circle-outline"
+              data-enable-warning
+              data-testid="flows-editor-enable-warning"
               >${this.enableWarning}</ok-inline-feedback
             >` : A}
         ${this.renderDraftBanner()}
@@ -7058,6 +7242,7 @@ var ErpFlowsEditor = class extends i3 {
       </div>
 
       <erp-flows-field-picker
+        data-testid="flows-editor-field-picker"
         .open=${this.pickerOpen}
         .shape=${this.shape}
         .root=${this.pickerRoot}
@@ -8788,7 +8973,10 @@ var ErpFlowsGallery = class extends i3 {
 
       ${this.renderSameTrigger(template)}
       ${this.renderRestore(template)}
-      ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+      ${this.error ? b2`<ok-inline-feedback
+            tone="danger"
+            icon="alert-circle-outline"
+            data-testid=${`flows-gallery-panel-error-${template.id}`}
             >${this.error}</ok-inline-feedback
           >` : A}
 
@@ -8809,10 +8997,18 @@ var ErpFlowsGallery = class extends i3 {
     if (!this.canRestore(template)) return A;
     const outdated = template.factory?.outdated === true;
     return b2`
-      ${outdated ? b2`<ok-inline-feedback tone="info" icon="sparkles-outline" data-outdated-notice
+      ${outdated ? b2`<ok-inline-feedback
+            tone="info"
+            icon="sparkles-outline"
+            data-outdated-notice
+            data-testid=${`flows-gallery-outdated-notice-${template.id}`}
             >${this.t("ui.tplOutdatedNotice")}</ok-inline-feedback
           >` : A}
-      ${this.restoredId === template.id ? b2`<ok-inline-feedback tone="success" icon="checkmark-circle-outline" data-restored
+      ${this.restoredId === template.id ? b2`<ok-inline-feedback
+            tone="success"
+            icon="checkmark-circle-outline"
+            data-restored
+            data-testid=${`flows-gallery-restored-${template.id}`}
             >${this.t("ui.tplRestored")}</ok-inline-feedback
           >` : A}
       ${this.confirmRestore === template.id ? b2`<div class="confirm" data-restore-confirm>
@@ -8821,6 +9017,7 @@ var ErpFlowsGallery = class extends i3 {
               type="button"
               class="danger"
               data-act="restore-yes"
+              data-testid=${`flows-gallery-restore-yes-${template.id}`}
               ?disabled=${this.restoring}
               @click=${() => void this.restore(template)}
             >
@@ -8830,6 +9027,7 @@ var ErpFlowsGallery = class extends i3 {
               type="button"
               class="quiet"
               data-act="restore-no"
+              data-testid=${`flows-gallery-restore-no-${template.id}`}
               @click=${() => {
       this.confirmRestore = "";
     }}
@@ -8841,6 +9039,7 @@ var ErpFlowsGallery = class extends i3 {
               size="small"
               fill=${outdated ? A : "outline"}
               data-act="restore"
+              data-testid=${`flows-gallery-restore-${template.id}`}
               @click=${() => {
       this.confirmRestore = template.id;
     }}
@@ -8887,6 +9086,7 @@ var ErpFlowsGallery = class extends i3 {
       size="small"
       fill=${installed.state === "absent" ? A : "outline"}
       data-act="use"
+      data-testid=${`flows-gallery-use-${template.id}`}
       ?disabled=${this.busy}
       @click=${() => void this.use()}
     >
@@ -8898,7 +9098,12 @@ var ErpFlowsGallery = class extends i3 {
       </div>`;
     }
     return b2`<div class="actions">
-      <ion-button size="small" data-act="view" @click=${() => this.view(template)}>
+      <ion-button
+        size="small"
+        data-act="view"
+        data-testid=${`flows-gallery-view-${template.id}`}
+        @click=${() => this.view(template)}
+      >
         ${this.t("ui.tplView")}
       </ion-button>
       ${use}
@@ -8933,6 +9138,7 @@ var ErpFlowsGallery = class extends i3 {
       tone="warning"
       icon="alert-circle-outline"
       data-same-trigger
+      data-testid=${`flows-gallery-same-trigger-${template.id}`}
       >${this.t(clashing.length === 1 ? "ui.tplSameTrigger" : "ui.tplSameTriggerMany", {
       flows: clashing.join(", ")
     })}</ok-inline-feedback
@@ -8952,6 +9158,7 @@ var ErpFlowsGallery = class extends i3 {
         class="pick"
         aria-expanded=${open ? "true" : "false"}
         aria-controls=${`panel-${template.id}`}
+        data-testid=${`flows-gallery-pick-${template.id}`}
         @click=${() => this.open(template.id)}
       >
         <ion-icon name=${template.icon} aria-hidden="true"></ion-icon>
@@ -9028,6 +9235,7 @@ var ErpFlowsGallery = class extends i3 {
           type="button"
           class="link"
           data-act="guide"
+          data-testid="flows-gallery-guide"
           @click=${() => this.dispatchEvent(
       new CustomEvent("flows-open-guide", { bubbles: true, composed: true })
     )}
@@ -9298,6 +9506,7 @@ var ErpFlowsGuide = class extends i3 {
           type="button"
           class="back"
           data-act="back"
+          data-testid="flows-guide-close"
           @click=${() => this.dispatchEvent(
       new CustomEvent("flows-guide-close", { bubbles: true, composed: true })
     )}
@@ -9566,7 +9775,7 @@ var ErpFlowsApprovals = class extends i3 {
   render() {
     return b2`<div class="list">
       <h3 class="section">${this.t("ui.approvalsTitle")}</h3>
-      ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+      ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline" data-testid="flows-approvals-error"
             >${this.error}</ok-inline-feedback
           >` : A}
       ${!this.rows.length ? b2`<span class="muted">${this.t("ui.approvalsEmpty")}</span>` : b2`<span class="muted">${this.t("ui.approvalsIntro")}</span>`}
@@ -9591,6 +9800,7 @@ var ErpFlowsApprovals = class extends i3 {
                 >` : b2`<span class="meta">${this.t("ui.approvalExpires", { when })}</span>`}
           <textarea
             data-field="comment"
+            data-testid=${`flows-approvals-comment-${row.id}`}
             rows="1"
             aria-label=${this.t("ui.approvalComment")}
             placeholder=${this.t("ui.approvalComment")}
@@ -9603,6 +9813,7 @@ var ErpFlowsApprovals = class extends i3 {
             <button
               type="button"
               data-act="approve"
+              data-testid=${`flows-approvals-approve-${row.id}`}
               ?disabled=${this.busy.includes(row.id)}
               @click=${() => void this.decide(row, "approve")}
             >
@@ -9614,6 +9825,7 @@ var ErpFlowsApprovals = class extends i3 {
             <button
               type="button"
               data-act="reject"
+              data-testid=${`flows-approvals-reject-${row.id}`}
               ?disabled=${this.busy.includes(row.id)}
               @click=${() => void this.decide(row, "reject")}
             >
@@ -9980,12 +10192,19 @@ var ErpFlowsDeadLetter = class extends i3 {
     })}
         · ${this.when(row.created_at)} ·
         <code>${row.id}</code>
-        <button type="button" data-act="copy" @click=${() => void this.copy(row.id)}>
+        <button
+          type="button"
+          data-act="copy"
+          data-testid=${`flows-dead-letter-copy-${row.id}`}
+          @click=${() => void this.copy(row.id)}
+        >
           ${this.t("ui.runCopyId")}
         </button>
       </span>
       ${trouble.technical ? b2`<details>
-            <summary>${this.t("ui.troubleTechnical")}</summary>
+            <summary data-testid=${`flows-dead-letter-technical-${row.id}`}>
+              ${this.t("ui.troubleTechnical")}
+            </summary>
             <pre>${trouble.technical}</pre>
           </details>` : A}
       ${this.confirming === row.id ? b2`<div class="confirm" data-confirm=${row.id}>
@@ -9999,6 +10218,7 @@ var ErpFlowsDeadLetter = class extends i3 {
       (key2) => b2`<button
                   type="button"
                   data-act="reason-preset"
+                  data-testid="flows-dead-letter-reason-preset"
                   @click=${() => {
         this.reason = this.t(key2);
       }}
@@ -10010,6 +10230,7 @@ var ErpFlowsDeadLetter = class extends i3 {
             <input
               type="text"
               data-field="discard-reason"
+              data-testid=${`flows-dead-letter-reason-${row.id}`}
               maxlength=${MAX_REASON}
               .value=${this.reason}
               aria-label=${this.t("ui.deadDiscardReasonLabel")}
@@ -10022,6 +10243,7 @@ var ErpFlowsDeadLetter = class extends i3 {
               <button
                 type="button"
                 data-act="discard-confirm"
+                data-testid=${`flows-dead-letter-discard-confirm-${row.id}`}
                 ?disabled=${busy}
                 @click=${() => void this.discard(row)}
               >
@@ -10030,6 +10252,7 @@ var ErpFlowsDeadLetter = class extends i3 {
               <button
                 type="button"
                 data-act="discard-cancel"
+                data-testid=${`flows-dead-letter-discard-cancel-${row.id}`}
                 @click=${() => {
       this.confirming = "";
       this.reason = "";
@@ -10042,6 +10265,7 @@ var ErpFlowsDeadLetter = class extends i3 {
             ${canRetry ? b2`<button
                   type="button"
                   data-act="retry"
+                  data-testid=${`flows-dead-letter-retry-${row.id}`}
                   ?disabled=${busy}
                   @click=${() => void this.retry(row)}
                 >
@@ -10050,6 +10274,7 @@ var ErpFlowsDeadLetter = class extends i3 {
             <button
               type="button"
               data-act="discard"
+              data-testid=${`flows-dead-letter-discard-${row.id}`}
               @click=${() => {
       this.confirming = row.id;
     }}
@@ -10090,7 +10315,10 @@ var ErpFlowsDeadLetter = class extends i3 {
     if (this.status === "denied") {
       return b2`<div class="list">
         <h3 class="section">${this.t("ui.deadTitle")}</h3>
-        <ok-inline-feedback tone="warning" icon="lock-closed-outline"
+        <ok-inline-feedback
+          tone="warning"
+          icon="lock-closed-outline"
+          data-testid="flows-dead-letter-denied"
           >${this.t("ui.deadDenied")}</ok-inline-feedback
         >
       </div>`;
@@ -10102,13 +10330,17 @@ var ErpFlowsDeadLetter = class extends i3 {
         ${this.retryable.length > 1 ? b2`<button
               type="button"
               data-act="retry-all"
+              data-testid="flows-dead-letter-retry-all"
               ?disabled=${this.busy.includes("*")}
               @click=${() => void this.retryAll()}
             >
               ${this.t("ui.deadRetryAll", { count: this.retryable.length })}
             </button>` : A}
       </div>
-      ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+      ${this.error ? b2`<ok-inline-feedback
+            tone="danger"
+            icon="alert-circle-outline"
+            data-testid="flows-dead-letter-load-error"
             >${this.error}</ok-inline-feedback
           >` : A}
       ${this.notice ? b2`<span class="muted">${this.notice}</span>` : A}
@@ -12765,6 +12997,7 @@ var ErpFlowsApp = class extends i3 {
                   size="small"
                   fill="outline"
                   data-act="review"
+                  data-testid=${`flows-app-draft-review-${item.id}`}
                   @click=${() => void this.openDraft(item)}
                 >
                   ${this.t("draft.review")}
@@ -12773,6 +13006,7 @@ var ErpFlowsApp = class extends i3 {
               type="button"
               class="icon-btn"
               data-act="dismiss"
+              data-testid=${`flows-app-draft-dismiss-${item.id}`}
               aria-label=${this.t("draft.dismiss")}
               @click=${() => void this.resolveDraft(item, "dismissed")}
             >
@@ -12923,6 +13157,7 @@ var ErpFlowsApp = class extends i3 {
         class="search"
         type="search"
         data-act="search"
+        data-testid="flows-app-search"
         .value=${this.view.q}
         placeholder=${this.t("ui.listSearch")}
         aria-label=${this.t("ui.listSearch")}
@@ -12931,6 +13166,7 @@ var ErpFlowsApp = class extends i3 {
       <div class="filters">
         <select
           data-act="filter-state"
+          data-testid="flows-app-filter-state"
           aria-label=${this.t("ui.filterState")}
           .value=${this.view.state}
           @change=${(e4) => this.narrow({ state: e4.target.value })}
@@ -12941,6 +13177,7 @@ var ErpFlowsApp = class extends i3 {
         </select>
         <select
           data-act="filter-trigger"
+          data-testid="flows-app-filter-trigger"
           aria-label=${this.t("ui.filterTrigger")}
           .value=${this.view.trigger}
           @change=${(e4) => this.narrow({ trigger: e4.target.value })}
@@ -12953,6 +13190,7 @@ var ErpFlowsApp = class extends i3 {
         </select>
         <select
           data-act="sort"
+          data-testid="flows-app-sort"
           aria-label=${this.t("ui.sortBy")}
           .value=${this.view.sort}
           @change=${(e4) => this.narrow({ sort: e4.target.value })}
@@ -12970,16 +13208,29 @@ var ErpFlowsApp = class extends i3 {
     if (!this.chosen.length) return A;
     return b2`<div class="selection" data-selection>
       <span class="grow">${this.t("ui.selectedCount", { count: this.chosen.length })}</span>
-      <ion-button size="small" fill="outline" data-act="bulk-enable" @click=${() => void this.bulk(true)}>
+      <ion-button
+        size="small"
+        fill="outline"
+        data-act="bulk-enable"
+        data-testid="flows-app-bulk-enable"
+        @click=${() => void this.bulk(true)}
+      >
         ${this.t("ui.bulkEnable")}
       </ion-button>
-      <ion-button size="small" fill="outline" data-act="bulk-pause" @click=${() => void this.bulk(false)}>
+      <ion-button
+        size="small"
+        fill="outline"
+        data-act="bulk-pause"
+        data-testid="flows-app-bulk-pause"
+        @click=${() => void this.bulk(false)}
+      >
         ${this.t("ui.bulkPause")}
       </ion-button>
       <button
         type="button"
         class="icon-btn"
         data-act="selection-clear"
+        data-testid="flows-app-selection-clear"
         aria-label=${this.t("ui.selectionClear")}
         @click=${() => {
       this.chosen = [];
@@ -12996,6 +13247,7 @@ var ErpFlowsApp = class extends i3 {
         type="checkbox"
         class="pick"
         data-act="select"
+        data-testid=${`flows-app-row-select-${flow.id}`}
         aria-label=${this.t("ui.selectOne", { name: flow.name || this.t("ui.unnamed") })}
         .checked=${this.chosen.includes(flow.id)}
         @change=${(e4) => {
@@ -13006,6 +13258,7 @@ var ErpFlowsApp = class extends i3 {
       <button
         type="button"
         class="open"
+        data-testid=${`flows-app-row-${flow.id}`}
         @click=${() => {
       this.editing = flow;
       this.isNew = false;
@@ -13020,6 +13273,7 @@ var ErpFlowsApp = class extends i3 {
           label=${flow.enabled ? this.t("ui.active") : this.t("ui.paused")}
         ></ok-status-pill>
         <ion-toggle
+          data-testid=${`flows-app-row-toggle-${flow.id}`}
           .checked=${flow.enabled}
           @ionChange=${(e4) => void this.setEnabled(flow, !!e4.target.checked)}
         ></ion-toggle>
@@ -13027,6 +13281,7 @@ var ErpFlowsApp = class extends i3 {
           type="button"
           class="icon-btn"
           data-act="duplicate"
+          data-testid=${`flows-app-row-duplicate-${flow.id}`}
           aria-label=${this.t("ui.duplicate")}
           title=${this.t("ui.duplicate")}
           @click=${() => void this.duplicate(flow)}
@@ -13037,6 +13292,7 @@ var ErpFlowsApp = class extends i3 {
           type="button"
           class="icon-btn"
           data-act="delete"
+          data-testid=${`flows-app-row-delete-${flow.id}`}
           aria-label=${this.t("ui.delete")}
           @click=${() => {
       this.confirmDelete = confirming ? "" : flow.id;
@@ -13056,13 +13312,20 @@ var ErpFlowsApp = class extends i3 {
                  destructive action as pale text next to an outlined «leave it» — the button you
                  must read before pressing, looking like the disabled one. These carry their own
                  colour out of the OutfitKit tokens and look the same in both modes. -->
-            <button type="button" class="danger" data-act="delete-yes" @click=${() => void this.removeFlow(flow)}>
+            <button
+              type="button"
+              class="danger"
+              data-act="delete-yes"
+              data-testid=${`flows-app-row-delete-yes-${flow.id}`}
+              @click=${() => void this.removeFlow(flow)}
+            >
               ${this.t("ui.deleteYes")}
             </button>
             <button
               type="button"
               class="quiet"
               data-act="delete-no"
+              data-testid=${`flows-app-row-delete-no-${flow.id}`}
               @click=${() => {
       this.confirmDelete = "";
     }}
@@ -13088,6 +13351,7 @@ var ErpFlowsApp = class extends i3 {
           <button
             type="button"
             data-act="checkup-fix"
+            data-testid=${`flows-app-row-checkup-fix-${flow.id}-${problem.id}`}
             ?disabled=${!!this.repairing}
             @click=${() => void this.repair(flow, problem)}
           >
@@ -13106,6 +13370,7 @@ var ErpFlowsApp = class extends i3 {
             <button
               type="button"
               data-act="checkup-fix"
+              data-testid=${`flows-app-row-reply-fix-${flow.id}`}
               @click=${() => {
       this.editing = flow;
       this.isNew = false;
@@ -13141,7 +13406,10 @@ var ErpFlowsApp = class extends i3 {
     const gate = map[this.gate];
     if (!gate) {
       return b2`<div class="gate">
-        <ok-inline-feedback tone="danger" icon="alert-circle-outline"
+        <ok-inline-feedback
+          tone="danger"
+          icon="alert-circle-outline"
+          data-testid="flows-app-gate-error"
           >${this.error || this.t("ui.errGeneric")}</ok-inline-feedback
         >
       </div>`;
@@ -13151,6 +13419,7 @@ var ErpFlowsApp = class extends i3 {
         icon=${gate.icon}
         heading=${this.t(gate.title)}
         message=${this.t(gate.message)}
+        data-testid="flows-app-gate-empty"
       ></ok-empty-state>
     </div>`;
   }
@@ -13165,7 +13434,7 @@ var ErpFlowsApp = class extends i3 {
     return b2`<div class="list">
       <h3 class="section">${this.t("ui.tplYours")}</h3>
       ${this.renderToolbar()} ${this.renderSelection()}
-      ${this.notice ? b2`<ok-inline-feedback tone="success" icon="copy-outline" data-notice
+      ${this.notice ? b2`<ok-inline-feedback tone="success" icon="copy-outline" data-notice data-testid="flows-app-notice"
             >${this.notice}</ok-inline-feedback
           >` : A}
       ${rows.length ? rows.map((flow) => this.renderRow(flow)) : b2`<div class="empty-filter">
@@ -13174,6 +13443,7 @@ var ErpFlowsApp = class extends i3 {
               size="small"
               fill="outline"
               data-act="clear-filters"
+              data-testid="flows-app-clear-filters"
               @click=${() => this.narrow({ q: "", state: "all", trigger: "all" })}
             >
               ${this.t("ui.listClear")}
@@ -13258,12 +13528,18 @@ var ErpFlowsApp = class extends i3 {
     return b2`
       <div class="head">
         <span class="grow"></span>
-        <ion-button size="small" fill="outline" data-act="new" @click=${() => this.startNew()}>
+        <ion-button
+          size="small"
+          fill="outline"
+          data-act="new"
+          data-testid="flows-app-new"
+          @click=${() => this.startNew()}
+        >
           ${this.t("ui.newAutomation")}
         </ion-button>
       </div>
       <div class="body">
-        ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
+        ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline" data-testid="flows-app-error"
               >${this.error}</ok-inline-feedback
             >` : A}
         ${this.approvalCount ? b2`<erp-flows-approvals
