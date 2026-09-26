@@ -112,6 +112,16 @@ export interface FlowTemplate {
    */
   source?: { readonly module: string; readonly family: string };
   /**
+   * The flow the hub already built from this SERVED card, and whether its module has since
+   * shipped a better recipe (hub#2059, flows#136).
+   *
+   * Present only on a served card the owner already switched on — a card nobody has activated has
+   * no factory copy to fall back to. `outdated: null` means the hub cannot tell (an older core, or
+   * one that has not computed it yet); read it exactly like {@link HubFlowTemplate.installed},
+   * because it is that same field, one hop later.
+   */
+  factory?: { readonly flowId: string; readonly outdated: boolean | null };
+  /**
    * The permissions a SERVED card will ask for, as the module declared them in `<family>.grants.json`.
    *
    * A card written here derives them from its own document ({@link templateGrants}); a served one

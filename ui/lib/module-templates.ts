@@ -52,6 +52,7 @@ interface ServedRow {
   documents?: unknown;
   grants?: unknown;
   requires?: unknown;
+  installed?: unknown;
 }
 
 const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
@@ -168,6 +169,25 @@ function usable(doc: FlowDoc): boolean {
 }
 
 /**
+ * **Whether the owner already switched this recipe on, and whether it is behind** (hub#2059,
+ * flows#136).
+ *
+ * `installed` is the hub's own read of ITS data, not something to second-guess: `null`, absent, a
+ * bare string, or an object with no usable `flow_id` all mean the same thing — nobody has built a
+ * flow from this card yet — and are dropped the same way, with no `factory` on the card at all.
+ * `outdated` is trusted only when it actually is a boolean; anything else (missing, `null`, a stray
+ * value a newer hub might one day send) reads as `null` — cannot tell — the same meaning the hub's
+ * own `installed.outdated` already carries one hop earlier.
+ */
+function factoryOf(installed: unknown): FlowTemplate['factory'] {
+  if (!installed || typeof installed !== 'object') return undefined;
+  const flowId = text((installed as { flow_id?: unknown }).flow_id);
+  if (!flowId) return undefined;
+  const outdated = (installed as { outdated?: unknown }).outdated;
+  return { flowId, outdated: typeof outdated === 'boolean' ? outdated : null };
+}
+
+/**
  * The cards a hub's answer becomes, in the order it served them.
  *
  * `rows` is whatever came back — this is the far side of a network call to a hub that may be
@@ -198,9 +218,11 @@ export function moduleTemplates(rows: unknown, locale: string | undefined): Flow
       ...neededBy(doc),
       ...(pinsAQuery(grants) ? (['queryPin'] as const) : []),
     ];
+    const factory = factoryOf(row.installed);
     out.push({
       id,
       source: { module, family },
+      ...(factory ? { factory } : {}),
       name: text(doc.name) || family,
       icon: MODULE_TEMPLATE_ICON,
       blanks: [],

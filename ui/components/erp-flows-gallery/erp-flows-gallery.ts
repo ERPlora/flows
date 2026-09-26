@@ -336,6 +336,42 @@ export class ErpFlowsGallery extends LitElement {
       font-size: 0.88rem;
       line-height: 1.45;
     }
+    /* Full width so it pushes the row apart instead of squeezing in beside the other controls —
+       this is a question, and one that has to be hunted for is one people answer without reading
+       (copied from erp-flows-app's delete confirm, flows#136). */
+    .confirm {
+      flex: 1 0 100%;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0.5rem 0.75rem;
+      border-top: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
+      background: var(--ok-surface-muted, rgba(0, 0, 0, 0.03));
+    }
+    .confirm .grow {
+      flex: 1 1 100%;
+      font-size: 0.9rem;
+    }
+    .confirm button {
+      font: inherit;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border-radius: var(--ok-radius-pill, 999px);
+      padding: 0 1rem;
+      min-height: 2.5rem;
+    }
+    .confirm button.danger {
+      border: 1px solid transparent;
+      background: var(--ok-danger, var(--ion-color-danger, #c0392b));
+      color: var(--ok-danger-contrast, var(--ion-color-danger-contrast, #fff));
+      font-weight: 600;
+    }
+    .confirm button.quiet {
+      border: 1px solid var(--ok-border, #d7d5cc);
+      background: transparent;
+      color: inherit;
+    }
   `;
 
   @property({ attribute: false }) client: ModuleClient | null = null;
@@ -396,6 +432,15 @@ export class ErpFlowsGallery extends LitElement {
   @state() private busy = false;
 
   @state() private error = '';
+
+  /** The id of the card asking «are you sure?» before it restores the factory recipe (flows#136). */
+  @state() private confirmRestore = '';
+
+  /** Whether a restore is in flight, so a second tap on «Restore» cannot fire a second call. */
+  @state() private restoring = false;
+
+  /** The id of the card whose restore just succeeded — cleared the moment a different one opens. */
+  @state() private restoredId = '';
 
   /**
    * The card the last shortcut named, so {@link reveal} knows what to bring on screen once it
@@ -755,6 +800,11 @@ export class ErpFlowsGallery extends LitElement {
   open(id: string): void {
     this.picked = this.landsOn(this.picked) === this.landsOn(id) ? null : id;
     this.error = '';
+    // A restore question or a «done» notice belongs to the card it happened on, not to whichever
+    // one is open next — carrying it over would ask to restore, or celebrate restoring, the wrong
+    // automation (flows#136).
+    this.confirmRestore = '';
+    this.restoredId = '';
   }
 
   /**
@@ -848,6 +898,65 @@ export class ErpFlowsGallery extends LitElement {
     }
   }
 
+  /**
+   * Whether this card can offer «restore the factory version» at all (hub#2059, flows#136).
+   *
+   * All three have to hold: the card is a SERVED one — a written card has no module recipe to fall
+   * back to; the hub said it already built a flow from it ({@link FlowTemplate.factory}) — nothing
+   * to restore for a recipe nobody switched on; and the client actually carries the door, because a
+   * hub older than hub#2059 hands out a `flows` with no such method at all.
+   */
+  private canRestore(template: FlowTemplate): boolean {
+    return (
+      !!template.source &&
+      !!template.factory &&
+      typeof this.client?.flows?.restoreModuleTemplate === 'function'
+    );
+  }
+
+  /**
+   * Rebuilds the owner's flow from the module's current recipe, through the gallery's own door
+   * (`restoreModuleTemplate`, hub#2059, flows#136) — never by acting as the module that owns it.
+   *
+   * The flow keeps its id, its history and whether it is on or off; only the definition and the
+   * permissions come from the factory copy, so this cannot silently switch a paused automation on. `flow.not_found` is the one refusal worth its
+   * own sentence: the flow the owner is looking at is already gone, and the fix is to activate the
+   * recipe again, not to retry this button. Every other refusal gets the generic one — the raw
+   * message is the hub's, in words nobody outside a repository reads, and repeating it here would
+   * be the same mistake the error path of {@link use} deliberately does NOT make for this action.
+   */
+  private async restore(template: FlowTemplate): Promise<void> {
+    if (this.restoring) return;
+    this.restoring = true;
+    this.error = '';
+    this.restoredId = '';
+    try {
+      const call = this.client!.flows.restoreModuleTemplate!;
+      const flow = await call.call(this.client!.flows, template.source!.module, template.source!.family);
+      // The hub just rebuilt it from the current recipe, so THIS card is caught up — no second
+      // round trip to `templates()` just to learn what the call itself already told us.
+      this.served = this.served.map((tpl) =>
+        tpl.id === template.id && tpl.factory ? { ...tpl, factory: { ...tpl.factory, outdated: false } } : tpl,
+      );
+      if (flow?.id) {
+        // `commands` is this screen's own read of the grants, asked for separately — the restore
+        // reply carries none of that, so keeping it is what stops the badge reverting to
+        // «unfinished» for a flow whose permissions never moved.
+        this.existing = this.existing.map((old) =>
+          old.id === flow.id ? { ...old, ...flow, commands: old.commands } : old,
+        );
+      }
+      this.confirmRestore = '';
+      this.restoredId = template.id;
+    } catch (e) {
+      this.error =
+        errorCode(e) === 'flow.not_found' ? this.t('ui.errRestoreGone') : this.t('ui.errRestoreFailed');
+      this.confirmRestore = '';
+    } finally {
+      this.restoring = false;
+    }
+  }
+
   private renderPanel(template: FlowTemplate) {
     const grants = templateGrants(template, this.t);
     return html`<div class="panel" id=${`panel-${template.id}`}>
@@ -899,6 +1008,7 @@ export class ErpFlowsGallery extends LitElement {
       </div>
 
       ${this.renderSameTrigger(template)}
+      ${this.renderRestore(template)}
       ${this.error
         ? html`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
             >${this.error}</ok-inline-feedback
@@ -907,6 +1017,68 @@ export class ErpFlowsGallery extends LitElement {
 
       ${this.renderActions(template)}
     </div>`;
+  }
+
+  /**
+   * **«There is a new version» — and the way back to it** (hub#2059, flows#136).
+   *
+   * Only for a card {@link canRestore} agrees on: the notice comes first, because a card that is
+   * merely up to date has nothing to say here and just offers the button quietly. The button gives
+   * way to the confirm question the moment it is tapped — restoring throws away the owner's own
+   * edits, which is exactly the kind of step that must never fire on the first tap — and to the
+   * «done» notice once it has actually happened, without hiding the button: the factory copy is
+   * still there to go back to even after a first restore.
+   */
+  private renderRestore(template: FlowTemplate) {
+    if (!this.canRestore(template)) return nothing;
+    const outdated = template.factory?.outdated === true;
+    return html`
+      ${outdated
+        ? html`<ok-inline-feedback tone="info" icon="sparkles-outline" data-outdated-notice
+            >${this.t('ui.tplOutdatedNotice')}</ok-inline-feedback
+          >`
+        : nothing}
+      ${this.restoredId === template.id
+        ? html`<ok-inline-feedback tone="success" icon="checkmark-circle-outline" data-restored
+            >${this.t('ui.tplRestored')}</ok-inline-feedback
+          >`
+        : nothing}
+      ${this.confirmRestore === template.id
+        ? html`<div class="confirm" data-restore-confirm>
+            <span class="grow">${this.t('ui.tplRestoreConfirm')}</span>
+            <button
+              type="button"
+              class="danger"
+              data-act="restore-yes"
+              ?disabled=${this.restoring}
+              @click=${() => void this.restore(template)}
+            >
+              ${this.t('ui.tplRestoreYes')}
+            </button>
+            <button
+              type="button"
+              class="quiet"
+              data-act="restore-no"
+              @click=${() => {
+                this.confirmRestore = '';
+              }}
+            >
+              ${this.t('ui.tplRestoreNo')}
+            </button>
+          </div>`
+        : html`<div class="actions">
+            <ion-button
+              size="small"
+              fill=${outdated ? nothing : 'outline'}
+              data-act="restore"
+              @click=${() => {
+                this.confirmRestore = template.id;
+              }}
+            >
+              ${this.t('ui.tplRestore')}
+            </ion-button>
+          </div>`}
+    `;
   }
 
   /**
@@ -1030,6 +1202,9 @@ export class ErpFlowsGallery extends LitElement {
           ${summary ? html`<span class="summary">${summary}</span>` : nothing}
         </span>
         ${this.renderInstalledPill(state)}
+        ${this.canRestore(template) && template.factory?.outdated === true
+          ? html`<ok-status-pill tone="info" data-outdated label=${this.t('ui.tplOutdated')}></ok-status-pill>`
+          : nothing}
       </button>
       ${open ? this.renderPanel(template) : nothing}
     </div>`;

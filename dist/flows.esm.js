@@ -8001,6 +8001,13 @@ function pinsAQuery(grants) {
 function usable(doc) {
   return doc.steps.length > 0;
 }
+function factoryOf(installed) {
+  if (!installed || typeof installed !== "object") return void 0;
+  const flowId = text(installed.flow_id);
+  if (!flowId) return void 0;
+  const outdated = installed.outdated;
+  return { flowId, outdated: typeof outdated === "boolean" ? outdated : null };
+}
 function moduleTemplates(rows, locale) {
   if (!Array.isArray(rows)) return [];
   const out = [];
@@ -8024,9 +8031,11 @@ function moduleTemplates(rows, locale) {
       ...neededBy(doc),
       ...pinsAQuery(grants) ? ["queryPin"] : []
     ];
+    const factory = factoryOf(row.installed);
     out.push({
       id,
       source: { module, family },
+      ...factory ? { factory } : {},
       name: text(doc.name) || family,
       icon: MODULE_TEMPLATE_ICON,
       blanks: [],
@@ -8077,6 +8086,9 @@ var ErpFlowsGallery = class extends i3 {
     this.modules = "ok";
     this.busy = false;
     this.error = "";
+    this.confirmRestore = "";
+    this.restoring = false;
+    this.restoredId = "";
     /**
      * The card the last shortcut named, so {@link reveal} knows what to bring on screen once it
      * exists.
@@ -8293,6 +8305,42 @@ var ErpFlowsGallery = class extends i3 {
       color: var(--ok-muted, #6b6a63);
       font-size: 0.88rem;
       line-height: 1.45;
+    }
+    /* Full width so it pushes the row apart instead of squeezing in beside the other controls —
+       this is a question, and one that has to be hunted for is one people answer without reading
+       (copied from erp-flows-app's delete confirm, flows#136). */
+    .confirm {
+      flex: 1 0 100%;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      padding: 0.5rem 0.75rem;
+      border-top: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
+      background: var(--ok-surface-muted, rgba(0, 0, 0, 0.03));
+    }
+    .confirm .grow {
+      flex: 1 1 100%;
+      font-size: 0.9rem;
+    }
+    .confirm button {
+      font: inherit;
+      font-size: 0.9rem;
+      cursor: pointer;
+      border-radius: var(--ok-radius-pill, 999px);
+      padding: 0 1rem;
+      min-height: 2.5rem;
+    }
+    .confirm button.danger {
+      border: 1px solid transparent;
+      background: var(--ok-danger, var(--ion-color-danger, #c0392b));
+      color: var(--ok-danger-contrast, var(--ion-color-danger-contrast, #fff));
+      font-weight: 600;
+    }
+    .confirm button.quiet {
+      border: 1px solid var(--ok-border, #d7d5cc);
+      background: transparent;
+      color: inherit;
     }
   `;
   }
@@ -8572,6 +8620,8 @@ var ErpFlowsGallery = class extends i3 {
   open(id) {
     this.picked = this.landsOn(this.picked) === this.landsOn(id) ? null : id;
     this.error = "";
+    this.confirmRestore = "";
+    this.restoredId = "";
   }
   /**
    * Grants the permissions this card LIMITS, as limited as it declared them (flows#80).
@@ -8650,6 +8700,53 @@ var ErpFlowsGallery = class extends i3 {
       this.busy = false;
     }
   }
+  /**
+   * Whether this card can offer «restore the factory version» at all (hub#2059, flows#136).
+   *
+   * All three have to hold: the card is a SERVED one — a written card has no module recipe to fall
+   * back to; the hub said it already built a flow from it ({@link FlowTemplate.factory}) — nothing
+   * to restore for a recipe nobody switched on; and the client actually carries the door, because a
+   * hub older than hub#2059 hands out a `flows` with no such method at all.
+   */
+  canRestore(template) {
+    return !!template.source && !!template.factory && typeof this.client?.flows?.restoreModuleTemplate === "function";
+  }
+  /**
+   * Rebuilds the owner's flow from the module's current recipe, through the gallery's own door
+   * (`restoreModuleTemplate`, hub#2059, flows#136) — never by acting as the module that owns it.
+   *
+   * The flow keeps its id, its history and whether it is on or off; only the definition and the
+   * permissions come from the factory copy, so this cannot silently switch a paused automation on. `flow.not_found` is the one refusal worth its
+   * own sentence: the flow the owner is looking at is already gone, and the fix is to activate the
+   * recipe again, not to retry this button. Every other refusal gets the generic one — the raw
+   * message is the hub's, in words nobody outside a repository reads, and repeating it here would
+   * be the same mistake the error path of {@link use} deliberately does NOT make for this action.
+   */
+  async restore(template) {
+    if (this.restoring) return;
+    this.restoring = true;
+    this.error = "";
+    this.restoredId = "";
+    try {
+      const call = this.client.flows.restoreModuleTemplate;
+      const flow = await call.call(this.client.flows, template.source.module, template.source.family);
+      this.served = this.served.map(
+        (tpl) => tpl.id === template.id && tpl.factory ? { ...tpl, factory: { ...tpl.factory, outdated: false } } : tpl
+      );
+      if (flow?.id) {
+        this.existing = this.existing.map(
+          (old) => old.id === flow.id ? { ...old, ...flow, commands: old.commands } : old
+        );
+      }
+      this.confirmRestore = "";
+      this.restoredId = template.id;
+    } catch (e4) {
+      this.error = errorCode(e4) === "flow.not_found" ? this.t("ui.errRestoreGone") : this.t("ui.errRestoreFailed");
+      this.confirmRestore = "";
+    } finally {
+      this.restoring = false;
+    }
+  }
   renderPanel(template) {
     const grants = templateGrants(template, this.t);
     return b2`<div class="panel" id=${`panel-${template.id}`}>
@@ -8690,12 +8787,68 @@ var ErpFlowsGallery = class extends i3 {
       </div>
 
       ${this.renderSameTrigger(template)}
+      ${this.renderRestore(template)}
       ${this.error ? b2`<ok-inline-feedback tone="danger" icon="alert-circle-outline"
             >${this.error}</ok-inline-feedback
           >` : A}
 
       ${this.renderActions(template)}
     </div>`;
+  }
+  /**
+   * **«There is a new version» — and the way back to it** (hub#2059, flows#136).
+   *
+   * Only for a card {@link canRestore} agrees on: the notice comes first, because a card that is
+   * merely up to date has nothing to say here and just offers the button quietly. The button gives
+   * way to the confirm question the moment it is tapped — restoring throws away the owner's own
+   * edits, which is exactly the kind of step that must never fire on the first tap — and to the
+   * «done» notice once it has actually happened, without hiding the button: the factory copy is
+   * still there to go back to even after a first restore.
+   */
+  renderRestore(template) {
+    if (!this.canRestore(template)) return A;
+    const outdated = template.factory?.outdated === true;
+    return b2`
+      ${outdated ? b2`<ok-inline-feedback tone="info" icon="sparkles-outline" data-outdated-notice
+            >${this.t("ui.tplOutdatedNotice")}</ok-inline-feedback
+          >` : A}
+      ${this.restoredId === template.id ? b2`<ok-inline-feedback tone="success" icon="checkmark-circle-outline" data-restored
+            >${this.t("ui.tplRestored")}</ok-inline-feedback
+          >` : A}
+      ${this.confirmRestore === template.id ? b2`<div class="confirm" data-restore-confirm>
+            <span class="grow">${this.t("ui.tplRestoreConfirm")}</span>
+            <button
+              type="button"
+              class="danger"
+              data-act="restore-yes"
+              ?disabled=${this.restoring}
+              @click=${() => void this.restore(template)}
+            >
+              ${this.t("ui.tplRestoreYes")}
+            </button>
+            <button
+              type="button"
+              class="quiet"
+              data-act="restore-no"
+              @click=${() => {
+      this.confirmRestore = "";
+    }}
+            >
+              ${this.t("ui.tplRestoreNo")}
+            </button>
+          </div>` : b2`<div class="actions">
+            <ion-button
+              size="small"
+              fill=${outdated ? A : "outline"}
+              data-act="restore"
+              @click=${() => {
+      this.confirmRestore = template.id;
+    }}
+            >
+              ${this.t("ui.tplRestore")}
+            </ion-button>
+          </div>`}
+    `;
   }
   /**
    * **What the button offers, once the hub already runs this card** (flows#60).
@@ -8807,6 +8960,7 @@ var ErpFlowsGallery = class extends i3 {
           ${summary ? b2`<span class="summary">${summary}</span>` : A}
         </span>
         ${this.renderInstalledPill(state)}
+        ${this.canRestore(template) && template.factory?.outdated === true ? b2`<ok-status-pill tone="info" data-outdated label=${this.t("ui.tplOutdated")}></ok-status-pill>` : A}
       </button>
       ${open ? this.renderPanel(template) : A}
     </div>`;
@@ -8916,6 +9070,15 @@ __decorateClass([
 __decorateClass([
   r5()
 ], ErpFlowsGallery.prototype, "error", 2);
+__decorateClass([
+  r5()
+], ErpFlowsGallery.prototype, "confirmRestore", 2);
+__decorateClass([
+  r5()
+], ErpFlowsGallery.prototype, "restoring", 2);
+__decorateClass([
+  r5()
+], ErpFlowsGallery.prototype, "restoredId", 2);
 define("erp-flows-gallery", ErpFlowsGallery);
 
 // ui/components/erp-flows-guide/erp-flows-guide.ts
@@ -10258,6 +10421,8 @@ var es_default = {
     enableUntested: "Todav\xEDa no la has probado: en la pesta\xF1a Probar puedes ver qu\xE9 har\xEDa antes de que se dispare sola.",
     errGeneric: "Algo ha fallado. No se ha guardado nada.",
     errLimitNotApplied: "La receta se instal\xF3 y qued\xF3 apagada, sin ning\xFAn permiso concedido: este hub no pudo guardar el l\xEDmite que necesita. Encenderla con el permiso abierto la dejar\xEDa hacer m\xE1s de lo que promete. No le concedas el permiso a mano en Permisos: eso vuelve a dejarlo abierto. D\xE9jala como est\xE1: la receta funcionar\xE1 sola cuando este hub se actualice.",
+    errRestoreFailed: "No se pudo restaurar la automatizaci\xF3n. No se ha cambiado nada; int\xE9ntalo de nuevo en un momento.",
+    errRestoreGone: "Esta automatizaci\xF3n ya no existe aqu\xED, as\xED que no hay nada que restaurar. Vuelve a activarla desde su app.",
     evAppointmentCancelled: "se cancela una cita",
     evAppointmentCompleted: "se termina una cita",
     evAppointmentCreated: "se reserva una cita",
@@ -10775,6 +10940,13 @@ var es_default = {
     tplModulesOldCore: "Este hub todav\xEDa no ofrece las automatizaciones que vienen con tus aplicaciones. Lo har\xE1 tras su pr\xF3xima actualizaci\xF3n.",
     tplModulesUnavailable: "No se han podido cargar las automatizaciones que vienen con tus aplicaciones. Las de abajo siguen aqu\xED; recarga la pantalla para volver a intentarlo.",
     tplNoBlanks: "No hay nada que rellenar. Est\xE1 lista tal cual.",
+    tplOutdated: "Versi\xF3n nueva",
+    tplOutdatedNotice: "Hay una versi\xF3n nueva de esta automatizaci\xF3n.",
+    tplRestore: "Restaurar la de f\xE1brica",
+    tplRestoreConfirm: "Se sustituir\xE1n tus cambios en esta automatizaci\xF3n por la versi\xF3n nueva. Seguir\xE1 encendida o apagada como est\xE9 ahora.",
+    tplRestoreNo: "Dejar la m\xEDa",
+    tplRestoreYes: "Restaurar",
+    tplRestored: "Hecho: esta automatizaci\xF3n ya es la versi\xF3n de f\xE1brica.",
     tplSameTrigger: "Ojo: \xAB{flows}\xBB ya se dispara con lo mismo. Si a\xF1ades esta tambi\xE9n, se ejecutar\xE1n LAS DOS cada vez \u2014 dos citas y dos mensajes a la misma clienta. Apaga antes la otra, salvo que quieras las dos de verdad.",
     tplSameTriggerMany: "Ojo: \xAB{flows}\xBB ya se disparan con lo mismo. Si a\xF1ades esta tambi\xE9n, se ejecutar\xE1n TODAS cada vez \u2014 varias citas y varios mensajes a la misma clienta. Apaga antes las otras, salvo que las quieras todas de verdad.",
     tplStepsTitle: "Qu\xE9 hace, paso a paso",
@@ -11221,6 +11393,8 @@ var en_default = {
     enableUntested: "You have not tried it yet: the Try it tab shows what it would do before it runs on its own.",
     errGeneric: "Something went wrong. Nothing was saved.",
     errLimitNotApplied: "The recipe was installed and left switched off, with no permission granted: this hub could not store the limit it needs. Turning it on with the wide permission would let it do more than the recipe promises. Do not grant it by hand in Permissions: that puts the wide permission back. Leave it as it is \u2014 the recipe will start working on its own once this hub is updated.",
+    errRestoreFailed: "The automation could not be restored. Nothing was changed; try again in a moment.",
+    errRestoreGone: "This automation no longer exists here, so there is nothing to restore. Activate it again from its app.",
     evAppointmentCancelled: "an appointment is cancelled",
     evAppointmentCompleted: "an appointment is finished",
     evAppointmentCreated: "an appointment is booked",
@@ -11738,6 +11912,13 @@ var en_default = {
     tplModulesOldCore: "This hub does not yet offer the automations that come with your apps. It will after its next update.",
     tplModulesUnavailable: "The automations that come with your apps could not be loaded. The ones below are still here; reload the screen to try again.",
     tplNoBlanks: "Nothing to fill in. It is ready as it is.",
+    tplOutdated: "New version",
+    tplOutdatedNotice: "There is a new version of this automation.",
+    tplRestore: "Restore the factory version",
+    tplRestoreConfirm: "Your changes to this automation will be replaced by the new version. It stays on or off exactly as it is now.",
+    tplRestoreNo: "Keep mine",
+    tplRestoreYes: "Restore",
+    tplRestored: "Done: this automation is now the factory version.",
     tplSameTrigger: "Careful: \xAB{flows}\xBB already runs on the same thing happening. If you add this one too, BOTH will run every time \u2014 two appointments, two messages to the same customer. Turn the other one off first unless you really want both.",
     tplSameTriggerMany: "Careful: \xAB{flows}\xBB already run on the same thing happening. If you add this one too, they will ALL run every time \u2014 several appointments, several messages to the same customer. Turn the others off first unless you really want them all.",
     tplStepsTitle: "What it does, step by step",
