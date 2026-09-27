@@ -6,7 +6,7 @@ import '@erplora/outfitkit/ok-inline-feedback';
 import '@erplora/outfitkit/ok-status-pill';
 import '../erp-flows-editor/erp-flows-editor';
 import '../erp-flows-gallery/erp-flows-gallery';
-import { namesTemplate } from '../erp-flows-gallery/erp-flows-gallery';
+import { namesTemplate, shortcutServed } from '../erp-flows-gallery/erp-flows-gallery';
 import '../erp-flows-guide/erp-flows-guide';
 import '../erp-flows-approvals/erp-flows-approvals';
 import '../erp-flows-dead-letter/erp-flows-dead-letter';
@@ -429,11 +429,15 @@ export class ErpFlowsApp extends LitElement {
    * A navigation that names NO card is left alone on purpose — the Back button, a jump to another
    * module, the shell tidying the address. Closing the editor on any of those would throw away
    * what the owner was writing, which is a worse bug than the one this fixes.
+   *
+   * And so is one whose card was already served from this same history entry (flows#141): the
+   * address still names it, but nobody tapped it again — a real tap pushes a fresh entry. Stepping
+   * aside there is how an open draft kept being swapped for the gallery while the owner worked.
    */
   private readonly onShortcut = (): void => {
     let named = false;
     try {
-      named = namesTemplate(window.location.search);
+      named = namesTemplate(window.location.search) && !shortcutServed(window.location.search);
     } catch {
       return; // No address bar, no shortcut. Nothing to step aside from.
     }

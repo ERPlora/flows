@@ -3,6 +3,7 @@ import './erp-flows-app';
 import type { ErpFlowsApp } from './erp-flows-app';
 import { QUERY_GRANT_PIN_CORE } from '../../lib/ai-draft';
 import { moduleTemplateId } from '../../lib/module-templates';
+import { shortcutServed } from '../erp-flows-gallery/erp-flows-gallery';
 
 /**
  * **A shortcut that names a card wins over whatever this screen was doing** (flows#58).
@@ -164,11 +165,21 @@ function landOn(search: string): void {
   window.history.replaceState({}, '', `/m/flows/automations${search}`);
 }
 
-/** The same tap again: same address, so all the module ever gets is the event. */
-async function tapTheShortcutAgain(el: ErpFlowsApp): Promise<void> {
+/** A navigation the page hears, with whatever address is in the bar right now. */
+async function hearANavigation(el: ErpFlowsApp): Promise<void> {
   window.dispatchEvent(new PopStateEvent('popstate'));
   await settle(el);
   await settle(el);
+}
+
+/**
+ * The same tap again, made the way the emitter makes it (`whatsapp_inbox`'s `go()`): it PUSHES the
+ * address and then fires `popstate`. Pushing matters since flows#141 — a card is served once per
+ * history entry, so a `popstate` alone on the entry that already served it is not a tap.
+ */
+async function tapTheShortcutAgain(el: ErpFlowsApp): Promise<void> {
+  landOn(`?template=${LINKED}`);
+  await hearANavigation(el);
 }
 
 const gallery = (el: ErpFlowsApp): Element | null => el.renderRoot.querySelector('erp-flows-gallery');
@@ -263,7 +274,7 @@ describe('coming back through the same shortcut with the editor open (flows#58)'
     expect(guide(el), 'the guide did not open — this test is driving the wrong control').toBeTruthy();
 
     landOn(`?template=${LINKED}`);
-    await tapTheShortcutAgain(el);
+    await hearANavigation(el);
 
     expect(guide(el), 'the shortcut was swallowed by the guide').toBeNull();
     expect(openCard(el)).toBeTruthy();
@@ -280,15 +291,15 @@ describe('coming back through the same shortcut with the editor open (flows#58)'
     await useTheCard(el);
 
     landOn('');
-    await tapTheShortcutAgain(el);
+    await hearANavigation(el);
     expect(editor(el), 'a navigation with no card closed the editor').toBeTruthy();
 
     landOn('?status=paused');
-    await tapTheShortcutAgain(el);
+    await hearANavigation(el);
     expect(editor(el), 'somebody else’s parameter closed the editor').toBeTruthy();
 
     landOn('?template=');
-    await tapTheShortcutAgain(el);
+    await hearANavigation(el);
     expect(editor(el), 'an empty parameter closed the editor').toBeTruthy();
   });
 
@@ -303,7 +314,7 @@ describe('coming back through the same shortcut with the editor open (flows#58)'
     await useTheCard(el);
 
     landOn('?template=a-template-that-never-existed');
-    await tapTheShortcutAgain(el);
+    await hearANavigation(el);
 
     expect(editor(el), 'an unknown card left the owner in the editor').toBeNull();
     expect(gallery(el)).toBeTruthy();
@@ -322,5 +333,105 @@ describe('coming back through the same shortcut with the editor open (flows#58)'
     await settle(el);
 
     expect(editor(el), 'a detached screen answered a navigation').toBeTruthy();
+  });
+});
+
+/**
+ * **A shortcut is an order, served once — not a place the screen keeps returning to** (flows#141).
+ *
+ * The complaint, from the seat: the owner came in through «Configurar» (`?template=<id>`), pressed
+ * «Usar esta», went back, and opened the new automation — «Sin terminar» — from «Tus
+ * automatizaciones». The detail with its tabs came up, and seconds later the gallery with the
+ * template's card took its place; then the detail again; and «Usar esta» vanished from under the
+ * pointer. Nobody tapped a shortcut in between. The address simply still named the card, so every
+ * navigation the page heard afterwards — and every remount — served it again.
+ *
+ * The emitter pushes the address on EVERY tap (`whatsapp_inbox`'s `go()`: `pushState` + `popstate`),
+ * so serving a card once per history ENTRY costs a re-tap nothing: the next tap is a new entry. The
+ * mark lives in `history.state`, never in the address — rewriting the address behind the shell's
+ * router made the next `popstate` re-create the whole screen, which lost the draft all the same.
+ */
+describe('opening a draft after coming in through a shortcut (flows#141)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+    landOn('');
+  });
+
+  afterEach(() => {
+    landOn('');
+  });
+
+  /** A hub that keeps what it creates, so the new automation is a row in «Tus automatizaciones». */
+  function keepingClient() {
+    const client = fakeClient();
+    const rows: Array<Record<string, unknown>> = [...FLOWS];
+    client.flows.list = vi.fn(async () => rows as never);
+    client.flows.create = vi.fn(async (f: unknown) => {
+      const made = { id: 'created-1', enabled: false, ...(f as object) };
+      rows.push(made);
+      return made as never;
+    });
+    return client;
+  }
+
+  const row = (el: ErpFlowsApp, id: string): Element | null =>
+    el.renderRoot.querySelector(`[data-testid="flows-app-row-${id}"]`);
+
+  async function backToTheList(el: ErpFlowsApp): Promise<void> {
+    editor(el)!.dispatchEvent(new CustomEvent('flows-back', { bubbles: true, composed: true }));
+    await settle(el);
+    await settle(el);
+  }
+
+  it('keeps the draft on screen when a later navigation names no new shortcut', async () => {
+    landOn(`?template=${LINKED}`);
+    const el = await mount(keepingClient());
+    await useTheCard(el);
+    expect(editor(el), '«Usar esta» did not open the new automation — this test drives the wrong flow').toBeTruthy();
+    await backToTheList(el);
+    expect(gallery(el), 'Back did not return to the list').toBeTruthy();
+
+    await click(el, row(el, 'created-1'));
+    expect(editor(el), 'the draft’s row did not open its detail').toBeTruthy();
+
+    // Nothing tapped a shortcut: the page merely heard a navigation, as it does all day.
+    await hearANavigation(el);
+
+    expect(editor(el), 'the draft was swapped for the gallery by a shortcut served minutes ago').toBeTruthy();
+    expect(gallery(el), 'the gallery took the draft’s place').toBeNull();
+  });
+
+  it('marks the served card on its history entry, and leaves the address and the router alone', async () => {
+    landOn(`?template=${LINKED}&status=paused#top`);
+    window.history.replaceState({ router: 'kept' }, '', window.location.href);
+    expect(shortcutServed(window.location.search), 'a fresh entry already reads as served').toBe(false);
+    const el = await mount();
+    expect(openCard(el), 'the shortcut did not open its card — this test drives the wrong flow').toBeTruthy();
+
+    expect(shortcutServed(window.location.search), 'the served card was not recorded on its entry').toBe(true);
+    // Rewriting the address behind the shell's router is what re-created the screen in the bench.
+    expect(window.location.pathname).toBe('/m/flows/automations');
+    expect(window.location.search).toBe(`?template=${LINKED}&status=paused`);
+    expect(window.location.hash).toBe('#top');
+    // The shell's router keeps its own bookkeeping in `history.state`; wiping it breaks Back.
+    expect((window.history.state as Record<string, unknown>).router).toBe('kept');
+  });
+
+  it('marks an id this hub has no card for too, once the catalogue has answered', async () => {
+    landOn('?template=a-template-that-never-existed');
+    const el = await mount();
+    expect(gallery(el)).toBeTruthy();
+    expect(shortcutServed(window.location.search), 'a dead link is left to be served forever').toBe(true);
+  });
+
+  it('does not re-open the card when the shell re-creates the screen later', async () => {
+    landOn(`?template=${LINKED}`);
+    const first = await mount(keepingClient());
+    await useTheCard(first);
+    document.body.removeChild(first);
+
+    // The shell re-creates the screen (the owner left the module and came back).
+    const el = await mount(keepingClient());
+    expect(openCard(el), 'a remount re-served a shortcut nobody tapped again').toBeNull();
   });
 });
