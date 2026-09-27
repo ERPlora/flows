@@ -84,6 +84,49 @@ export function namesTemplate(search: string): boolean {
   return (new URLSearchParams(search).get('template') ?? '') !== '';
 }
 
+/** Where a served shortcut is recorded: the history entry that carried it (flows#141). */
+const SERVED_SHORTCUT = 'erploraFlowsServedTemplate';
+
+/**
+ * Whether the shortcut in the address has already been served from THIS history entry (flows#141).
+ *
+ * A shortcut is an order, not a place. Served on every navigation the page heard — and on every
+ * remount by the shell — it kept swapping an open draft for the gallery with the template's card
+ * open, and «Use this one» appeared and vanished under the owner's pointer. So it is served once
+ * per history entry: the emitter PUSHES a fresh entry on every tap (`whatsapp_inbox`'s `go()`), so
+ * a real second tap is a new entry and is served again, while a navigation the page merely hears
+ * on the same entry is not.
+ *
+ * The mark lives in `history.state` and not in the address on purpose: rewriting the address
+ * behind the shell's router leaves the router believing it is still on the old one, and the next
+ * `popstate` then re-creates this whole screen — which loses the open draft all the same.
+ */
+export function shortcutServed(search: string): boolean {
+  const id = new URLSearchParams(search).get('template') ?? '';
+  if (!id) return false;
+  const state: unknown = window.history.state;
+  return !!state && typeof state === 'object' && (state as Record<string, unknown>)[SERVED_SHORTCUT] === id;
+}
+
+/**
+ * Records that the shortcut in the address has been answered, on the entry that carried it.
+ *
+ * The address and whatever the shell's router keeps in `history.state` are left exactly as they
+ * were — only the mark is added. With no History API there is nothing to record, and no shortcut
+ * to serve twice either.
+ */
+export function markShortcutServed(): void {
+  try {
+    const id = new URLSearchParams(window.location.search).get('template') ?? '';
+    if (!id) return;
+    const state: unknown = window.history.state;
+    const kept = state && typeof state === 'object' ? (state as Record<string, unknown>) : {};
+    window.history.replaceState({ ...kept, [SERVED_SHORTCUT]: id }, '', window.location.href);
+  } catch {
+    // No address bar or no History API: there is no shortcut to record.
+  }
+}
+
 /**
  * Whether `el` sits on a page the shell is keeping alive OFF screen.
  *
@@ -429,6 +472,15 @@ export class ErpFlowsGallery extends LitElement {
    */
   @state() private modules: 'ok' | 'old-core' | 'unavailable' = 'ok';
 
+  /**
+   * Whether the hub has answered what its modules bring, one way or another (flows#141).
+   *
+   * Until then an id the written catalogue does not have may still be a served card (flows#101),
+   * so it stays in the address to be read again; once the catalogue is whole, an id that matches
+   * nothing is answered by the plain gallery and taken out like any other served shortcut.
+   */
+  private catalogueSettled = false;
+
   @state() private busy = false;
 
   @state() private error = '';
@@ -529,21 +581,28 @@ export class ErpFlowsGallery extends LitElement {
       // Not a failure: a hub older than the door. The written catalogue is the whole gallery there.
       this.served = [];
       this.modules = 'old-core';
+      this.catalogueSettled = true;
+      markShortcutServed();
       return;
     }
     try {
       const rows = await ask.call(client!.flows);
       this.served = moduleTemplates(rows, client!.locale);
       this.modules = 'ok';
+      this.catalogueSettled = true;
       // The catalogue just grew, and the shortcut was read against the written half alone
       // (flows#101): a link naming a card only the hub knows about was dropped as «no such card».
-      // Re-read only while nothing is open — an owner who has since opened a card is not moved.
+      // Re-read only while nothing is open — an owner who has since opened a card is not moved,
+      // and the shortcut they moved on from is not left in the address to be served later.
       if (!this.picked) this.followShortcut();
+      else markShortcutServed();
     } catch {
       // A hub that HAS the door and refused. Said on screen, never swallowed: the owner installed
       // an app for this, and a recipe missing without a word reads as an app that does nothing.
       this.served = [];
       this.modules = 'unavailable';
+      this.catalogueSettled = true;
+      markShortcutServed();
     }
   }
 
@@ -595,11 +654,19 @@ export class ErpFlowsGallery extends LitElement {
   private followShortcut(): void {
     let id = '';
     try {
+      // Already answered from this very entry: a navigation heard again, or the shell re-creating
+      // the screen, is not the owner asking for the card again (flows#141).
+      if (shortcutServed(window.location.search)) return;
       id = templateFromSearch(window.location.search, this.catalogue);
     } catch {
       return; // No address bar, no shortcut. Still a gallery.
     }
-    if (!id) return;
+    if (!id) {
+      // A card this whole catalogue does not have is answered by the plain gallery: served too.
+      if (this.catalogueSettled) markShortcutServed();
+      return;
+    }
+    markShortcutServed();
     // Whatever the previous shortcut was still waiting to show is not what the owner asked for now.
     this.stopWaiting();
     this.linked = id;

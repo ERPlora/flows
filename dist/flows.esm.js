@@ -8248,6 +8248,23 @@ function templateFromSearch(search, catalogue = { cards: TEMPLATES, aliases: {} 
 function namesTemplate(search) {
   return (new URLSearchParams(search).get("template") ?? "") !== "";
 }
+var SERVED_SHORTCUT = "erploraFlowsServedTemplate";
+function shortcutServed(search) {
+  const id = new URLSearchParams(search).get("template") ?? "";
+  if (!id) return false;
+  const state = window.history.state;
+  return !!state && typeof state === "object" && state[SERVED_SHORTCUT] === id;
+}
+function markShortcutServed() {
+  try {
+    const id = new URLSearchParams(window.location.search).get("template") ?? "";
+    if (!id) return;
+    const state = window.history.state;
+    const kept = state && typeof state === "object" ? state : {};
+    window.history.replaceState({ ...kept, [SERVED_SHORTCUT]: id }, "", window.location.href);
+  } catch {
+  }
+}
 function offScreen(el) {
   let node = el;
   while (node) {
@@ -8269,6 +8286,14 @@ var ErpFlowsGallery = class extends i3 {
     this.existing = [];
     this.served = [];
     this.modules = "ok";
+    /**
+     * Whether the hub has answered what its modules bring, one way or another (flows#141).
+     *
+     * Until then an id the written catalogue does not have may still be a served card (flows#101),
+     * so it stays in the address to be read again; once the catalogue is whole, an id that matches
+     * nothing is answered by the plain gallery and taken out like any other served shortcut.
+     */
+    this.catalogueSettled = false;
     this.busy = false;
     this.error = "";
     this.confirmRestore = "";
@@ -8567,16 +8592,22 @@ var ErpFlowsGallery = class extends i3 {
     if (typeof ask !== "function") {
       this.served = [];
       this.modules = "old-core";
+      this.catalogueSettled = true;
+      markShortcutServed();
       return;
     }
     try {
       const rows = await ask.call(client.flows);
       this.served = moduleTemplates(rows, client.locale);
       this.modules = "ok";
+      this.catalogueSettled = true;
       if (!this.picked) this.followShortcut();
+      else markShortcutServed();
     } catch {
       this.served = [];
       this.modules = "unavailable";
+      this.catalogueSettled = true;
+      markShortcutServed();
     }
   }
   /**
@@ -8623,11 +8654,16 @@ var ErpFlowsGallery = class extends i3 {
   followShortcut() {
     let id = "";
     try {
+      if (shortcutServed(window.location.search)) return;
       id = templateFromSearch(window.location.search, this.catalogue);
     } catch {
       return;
     }
-    if (!id) return;
+    if (!id) {
+      if (this.catalogueSettled) markShortcutServed();
+      return;
+    }
+    markShortcutServed();
     this.stopWaiting();
     this.linked = id;
     this.revealed = "";
@@ -12485,11 +12521,15 @@ var ErpFlowsApp = class extends i3 {
      * A navigation that names NO card is left alone on purpose — the Back button, a jump to another
      * module, the shell tidying the address. Closing the editor on any of those would throw away
      * what the owner was writing, which is a worse bug than the one this fixes.
+     *
+     * And so is one whose card was already served from this same history entry (flows#141): the
+     * address still names it, but nobody tapped it again — a real tap pushes a fresh entry. Stepping
+     * aside there is how an open draft kept being swapped for the gallery while the owner worked.
      */
     this.onShortcut = () => {
       let named = false;
       try {
-        named = namesTemplate(window.location.search);
+        named = namesTemplate(window.location.search) && !shortcutServed(window.location.search);
       } catch {
         return;
       }

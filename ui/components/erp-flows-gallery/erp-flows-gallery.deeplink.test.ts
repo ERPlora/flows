@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import './erp-flows-gallery';
 import { QUERY_GRANT_PIN_CORE, schemaFacts } from '../../lib/ai-draft';
-import { ErpFlowsGallery, templateFromSearch } from './erp-flows-gallery';
+import { ErpFlowsGallery, shortcutServed, templateFromSearch } from './erp-flows-gallery';
 import { TEMPLATES, mergeTemplates } from '../../lib/templates';
 import { moduleTemplateId, moduleTemplates } from '../../lib/module-templates';
 
@@ -284,8 +284,9 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
   });
 
   /**
-   * The same shortcut, tapped again, opens the card again — even though the address did not
-   * change.
+   * The same shortcut, tapped again, opens the card again — even though the address it pushes is
+   * the very same one. (A card is served once per history entry, flows#141; the emitter,
+   * `whatsapp_inbox`'s `go()`, pushes a fresh entry on every tap — so each re-tap below lands again.)
    *
    * The shell keeps a module's screen alive when the owner leaves it (`ModuleView.vue`, hub#1099)
    * and, on the way back, re-creates the element ONLY when `route.fullPath` differs from the one it
@@ -302,6 +303,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
     el.open(LINKED);
     await settle(el);
     expect(openPanels(el)).toBe(0);
+    landOn(`?template=${ASKED}`);
     window.dispatchEvent(new PopStateEvent('popstate'));
     await settle(el);
     expect(panel(el, LINKED), 'the second tap on the same shortcut opened nothing').toBeTruthy();
@@ -319,6 +321,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
     const el = await mount();
     el.open(LINKED);
     await settle(el);
+    landOn(`?template=${ASKED}`);
     window.dispatchEvent(new PopStateEvent('popstate'));
     await settle(el);
     expect(scrolled, 'the card was left below the fold the second time').toEqual([LINKED, LINKED]);
@@ -339,6 +342,7 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
     };
     landOn(`?template=${ASKED}`);
     const el = await mount();
+    landOn(`?template=${ASKED}`);
     window.dispatchEvent(new PopStateEvent('popstate'));
     await settle(el);
     expect(panel(el, LINKED)).toBeTruthy();
@@ -372,6 +376,94 @@ describe('landing on the gallery from a shortcut (flows#56)', () => {
       el.renderRoot.querySelector('ok-inline-feedback[tone="danger"]'),
       'the new card opened wearing the previous card’s error',
     ).toBeNull();
+  });
+});
+
+/**
+ * **A served shortcut is recorded on its history entry** (flows#141).
+ *
+ * Unrecorded, every later navigation and every remount served it again, and an open draft kept
+ * being swapped for this gallery with the template's card open. What this block pins is WHEN it is
+ * recorded: as soon as it has been answered — and not a moment earlier, because an id the written
+ * catalogue lacks may still be a card the hub is about to serve (flows#101).
+ */
+describe('a served shortcut is recorded on its history entry (flows#141)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+    landOn('');
+  });
+
+  afterEach(() => {
+    landOn('');
+  });
+
+  const served = (): boolean => shortcutServed(window.location.search);
+
+  /** A hub whose answer about served recipes is held until the test lets it go. */
+  function slowHub() {
+    let answer: (rows: unknown[]) => void = () => {};
+    const client = hub();
+    client.flows.templates = vi.fn(
+      () => new Promise<unknown[]>((done) => {
+        answer = done;
+      }),
+    ) as never;
+    return { client, answer: (rows: unknown[]) => answer(rows) };
+  }
+
+  it('keeps a card only the hub serves unanswered until the hub has answered', async () => {
+    landOn(`?template=${ASKED}`);
+    const { client, answer } = slowHub();
+    const el = await mount(client);
+    expect(served(), 'the shortcut was written off before the hub said whether it serves that card').toBe(false);
+
+    answer([SERVED_ROW]);
+    await settle(el);
+    expect(panel(el, LINKED), 'the card the hub served was never opened').toBeTruthy();
+    expect(served(), 'the served card was not recorded on its entry').toBe(true);
+  });
+
+  it('records it when the owner opened another card before the hub answered', async () => {
+    landOn(`?template=${ASKED}`);
+    const { client, answer } = slowHub();
+    const el = await mount(client);
+    el.open('welcome-new-customer');
+    await settle(el);
+
+    answer([SERVED_ROW]);
+    await settle(el);
+    expect(panel(el, 'welcome-new-customer'), 'the owner was moved off the card they picked').toBeTruthy();
+    expect(served(), 'a shortcut the owner moved on from is left to be served later').toBe(true);
+  });
+
+  it('reads the mark for the card it names only — another card on the same entry is not served', async () => {
+    landOn(`?template=${LINKED}`);
+    await mount();
+    expect(served(), 'this test needs the first card recorded').toBe(true);
+
+    // Same entry, state carried over, but the address now names another card.
+    window.history.replaceState(window.history.state, '', `/m/flows/automations?template=${MADE_UP}`);
+    expect(served(), 'a mark for one card silenced a different one').toBe(false);
+  });
+
+  it('records an unknown id on a hub too old to serve recipes', async () => {
+    landOn(`?template=${MADE_UP}`);
+    const client = hub();
+    delete (client.flows as { templates?: unknown }).templates;
+    const el = await mount(client);
+    expect(openPanels(el)).toBe(0);
+    expect(served(), 'a dead link is left to be served forever on an older hub').toBe(true);
+  });
+
+  it('records an unknown id when the hub refused to say what it serves', async () => {
+    landOn(`?template=${MADE_UP}`);
+    const client = hub();
+    client.flows.templates = vi.fn(async () => {
+      throw new Error('nope');
+    }) as never;
+    const el = await mount(client);
+    expect(openPanels(el)).toBe(0);
+    expect(served(), 'a dead link is left to be served forever when the hub refused').toBe(true);
   });
 });
 
