@@ -202,6 +202,38 @@ describe('uploading the photo of the header', () => {
     expect(vars(el)).toEqual({ header_image: REF });
   });
 
+  it('keeps what she wrote in the step while the photo was going up', async () => {
+    let release: (v: unknown) => void = () => {};
+    const slow = () => new Promise((resolve) => (release = resolve));
+    const { el } = await mount(whatsapp({ template: 'promo', vars: { header_image: '' } }), slow);
+    await panelOf(el);
+    await choose(el, PHOTO());
+    // She fills a variable of the template while the upload is still on its way.
+    const step = el.document.steps[0] as unknown as Record<string, unknown>;
+    el.document = {
+      ...el.document,
+      steps: [{ ...step, vars: { ...(step.vars as object), who: 'Ana' } }, ...el.document.steps.slice(1)],
+    } as never;
+    await settle(el);
+    release({ ref: REF, mime_type: 'image/jpeg', size: 4 });
+    await settle(el);
+    await settle(el);
+    expect(vars(el)).toEqual({ who: 'Ana', header_image: REF });
+  });
+
+  it('does not store an answer that is not a header reference of the hub', async () => {
+    for (const answer of [{ ref: 'https://elsewhere.example/x.jpg' }, {}, null]) {
+      document.body.replaceChildren();
+      const odd = async () => answer;
+      const { el } = await mount(whatsapp({ template: 'promo', vars: { header_image: '' } }), odd);
+      await panelOf(el);
+      await choose(el, PHOTO());
+      expect(vars(el), JSON.stringify(answer)).toEqual({ header_image: '' });
+      const error = el.renderRoot.querySelector('[data-field="header-upload-error"]');
+      expect(error?.textContent, JSON.stringify(answer)).toContain('ui.notifyHeaderUploadFailed');
+    }
+  });
+
   it('is not offered for a video or a document header', async () => {
     for (const kind of ['video', 'document']) {
       document.body.replaceChildren();
