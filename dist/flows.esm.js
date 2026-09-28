@@ -4387,6 +4387,12 @@ var ErpFlowsEditor = class extends i3 {
       border-radius: 0.5rem;
       border: 1px solid var(--ok-border, #e2e0d8);
     }
+    /* Red from the token: color="danger" never paints inside this shadow root (module-toolkit#273). */
+    .header-photo ion-button[data-field='header-remove'] {
+      --color: var(--ok-danger, var(--ion-color-danger, #c5000f));
+      --color-hover: var(--ok-danger, var(--ion-color-danger, #c5000f));
+      --color-activated: var(--ok-danger, var(--ion-color-danger, #c5000f));
+    }
     /* By the TOP (flows#121): a note under Value — the «one of» hint, a failed list with its
        «Try again» — grows that cell only; aligned by the end it dragged Field and Is down with it. */
     .guard-row {
@@ -6189,7 +6195,6 @@ var ErpFlowsEditor = class extends i3 {
             <ion-button
               size="small"
               fill="clear"
-              color="danger"
               data-field="header-remove"
               data-testid="flows-editor-notify-header-photo-remove"
               ?disabled=${busy}

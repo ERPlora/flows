@@ -165,6 +165,21 @@ describe('uploading the photo of the header', () => {
     expect(el.renderRoot.querySelector('erp-flows-value[data-field="header-link"]')).toBeTruthy();
   });
 
+  it('paints «Remove image» red from the component stylesheet, never with an Ionic color attribute', async () => {
+    // Inside the shadow root the global `.ion-color-danger` class never applies: `color="danger"`
+    // painted the button in the default blue (module-toolkit#273), so it did not read as removal.
+    const { el } = await mount(whatsapp({ template: 'promo', vars: { header_image: REF } }));
+    await panelOf(el);
+    await settle(el);
+    const remove = el.renderRoot.querySelector('[data-field="header-remove"]') as HTMLElement;
+    expect(remove, 'no way to take the photo away').toBeTruthy();
+    expect(remove.hasAttribute('color'), 'an ion-* color the hub never paints in here').toBe(false);
+    const cssText = (ErpFlowsEditor.styles as unknown as { cssText: string }).cssText;
+    const at = cssText.indexOf(".header-photo ion-button[data-field='header-remove'] {");
+    expect(at, 'the remove button has no rule of its own').toBeGreaterThanOrEqual(0);
+    expect(cssText.slice(at, cssText.indexOf('}', at))).toContain('--color: var(--ok-danger, var(--ion-color-danger');
+  });
+
   it('says WHY a photo was refused, by its code, and keeps what the step had', async () => {
     for (const [code, key] of [
       ['whatsapp.header_image_too_large', 'ui.notifyHeaderUploadTooLarge'],
