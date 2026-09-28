@@ -187,6 +187,22 @@ function readHeader(vars: Record<string, unknown>): { kind: HeaderKind; link: un
   return kind ? { kind, link: vars[headerKey(kind)] } : null;
 }
 
+/**
+ * Where the hub keeps a header photo uploaded from a step (hub#2335): the step stores this
+ * reference instead of a link, and the hub signs a fresh link to it on every send.
+ */
+const HEADER_MEDIA_FOLDER = 'whatsapp/headers/';
+const isUploadedHeader = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim().startsWith(HEADER_MEDIA_FOLDER);
+
+/** The line that says why the hub refused a header photo, read from its code — never its prose. */
+function headerUploadErrorKey(err: unknown): string {
+  const code = (err as { code?: unknown } | null)?.code;
+  if (code === 'whatsapp.header_image_too_large') return 'ui.notifyHeaderUploadTooLarge';
+  if (code === 'whatsapp.header_image_unsupported') return 'ui.notifyHeaderUploadUnsupported';
+  return 'ui.notifyHeaderUploadFailed';
+}
+
 /** `vars` without any media header key — what a step that cannot carry one must be saved with. */
 function withoutHeader(vars: Record<string, unknown>): Record<string, unknown> {
   const next = { ...vars };
@@ -534,6 +550,26 @@ export class ErpFlowsEditor extends LitElement {
     .hint {
       font-size: 0.78rem;
       color: var(--ok-muted, #6b6a63);
+    }
+    /* The photo of a template's header, uploaded from the step (hub#2335). */
+    .header-upload,
+    .header-photo {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .header-upload input[type='file'] {
+      display: none;
+    }
+    .header-photo img {
+      width: 8rem;
+      max-width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: cover;
+      border-radius: 0.5rem;
+      border: 1px solid var(--ok-border, #e2e0d8);
     }
     /* By the TOP (flows#121): a note under Value — the «one of» hint, a failed list with its
        «Try again» — grows that cell only; aligned by the end it dragged Field and Is down with it. */
@@ -1004,6 +1040,15 @@ export class ErpFlowsEditor extends LitElement {
 
   @state() private error = '';
 
+  /** The step whose header photo is going up right now (hub#2335); `''` when none is. */
+  @state() private uploadingHeader = '';
+  /** Why the last header photo of a step was refused — an i18n key, per step id. */
+  @state() private headerUploadError: Record<string, string> = {};
+  /** A local object URL per uploaded header reference, `''` when the hub could not hand it over. */
+  @state() private headerPreviews: Record<string, string> = {};
+  /** The references already asked for, so a render never asks twice. Not reactive on purpose. */
+  private headerPreviewLoads = new Set<string>();
+
   @state() private notice = '';
 
   @state() saving = false;
@@ -1092,7 +1137,75 @@ export class ErpFlowsEditor extends LitElement {
     if (this.openStep === 'trigger') void this.ensureEventCatalog();
     if (this.openGuardComparesReplyStep()) void this.ensureHubFlows();
     if (this.openStepSendsWhatsapp()) void this.ensureWaTemplates();
+    this.ensureHeaderPreviews();
     this.pinEventSelect();
+  }
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    for (const url of Object.values(this.headerPreviews)) if (url) URL.revokeObjectURL(url);
+    this.headerPreviews = {};
+    this.headerPreviewLoads.clear();
+  }
+
+  /**
+   * Fetches the photo of every uploaded header the flow carries, once, so the step shows the
+   * picture rather than the hub's reference to it (hub#2335). The bytes come through the shell's
+   * authenticated media door and become a local object URL: no credential ever reaches the DOM.
+   */
+  private ensureHeaderPreviews(): void {
+    const client = this.client;
+    if (typeof client?.fetchMediaBlob !== 'function') return;
+    for (const step of this.document.steps) {
+      const ref = (step.vars as Record<string, unknown> | undefined)?.header_image;
+      if (!isUploadedHeader(ref)) continue;
+      const key = ref.trim();
+      if (this.headerPreviewLoads.has(key)) continue;
+      this.headerPreviewLoads.add(key);
+      void (async () => {
+        let url = '';
+        try {
+          const blob = await client.fetchMediaBlob!(key);
+          if (blob) url = URL.createObjectURL(blob);
+        } catch {
+          url = '';
+        }
+        if (!this.isConnected) {
+          if (url) URL.revokeObjectURL(url);
+          return;
+        }
+        this.headerPreviews = { ...this.headerPreviews, [key]: url };
+      })();
+    }
+  }
+
+  /**
+   * Sends the chosen photo to the hub and keeps the reference it answers as the step's header
+   * (hub#2335). Written on the step as it is WHEN THE UPLOAD ENDS — found by its id, not the `vars`
+   * the button was drawn with — so what she typed meanwhile survives.
+   */
+  private async uploadHeaderImage(stepId: string, file: File | undefined): Promise<void> {
+    const flows = this.client?.flows;
+    if (!file || this.uploadingHeader || typeof flows?.uploadWhatsappHeaderImage !== 'function') return;
+    this.uploadingHeader = stepId;
+    const { [stepId]: _previous, ...otherErrors } = this.headerUploadError;
+    this.headerUploadError = otherErrors;
+    try {
+      const stored = await flows.uploadWhatsappHeaderImage(file);
+      if (!isUploadedHeader(stored?.ref)) throw new Error('the hub answered no header reference');
+      const index = this.document.steps.findIndex((s) => s.id === stepId);
+      if (index < 0) return;
+      const current = (this.document.steps[index].vars ?? {}) as Record<string, unknown>;
+      this.setDoc(
+        patchStep(this.document, index, {
+          vars: { ...withoutHeader(current), header_image: stored.ref },
+        }),
+      );
+    } catch (err) {
+      this.headerUploadError = { ...this.headerUploadError, [stepId]: headerUploadErrorKey(err) };
+    } finally {
+      this.uploadingHeader = '';
+    }
   }
 
   /**
@@ -2549,7 +2662,12 @@ export class ErpFlowsEditor extends LitElement {
    * The header of a template the list knows: nothing to choose, only the file to attach (flows#132).
    * On a hub that cannot send a header, a warning instead of a field the kernel would refuse.
    */
-  private renderDeducedHeader(index: number, vars: Record<string, unknown>, known: WhatsappTemplateChoice) {
+  private renderDeducedHeader(
+    step: Step,
+    index: number,
+    vars: Record<string, unknown>,
+    known: WhatsappTemplateChoice,
+  ) {
     const kind = known.header;
     if (!kind || kind === 'unknown') return nothing;
     const kindLabel = this.t(`ui.notifyHeader_${kind}`);
@@ -2565,18 +2683,13 @@ export class ErpFlowsEditor extends LitElement {
       <span class="hint" data-field="header-deduced"
         >${this.t('ui.notifyHeaderDeduced', { kind: kindLabel })}</span
       >
-      ${this.renderValue({
-        field: 'header-link',
-        label: this.t('ui.notifyHeaderLink'),
-        value: readHeader(vars)?.link ?? '',
-        template: true,
-        onChange: (link) =>
-          this.setDoc(
-            patchStep(this.document, index, {
-              vars: { ...withoutHeader(vars), [headerKey(kind)]: link },
-            }),
-          ),
-      })}
+      ${this.renderHeaderFile(step, kind, readHeader(vars)?.link ?? '', (link) =>
+        this.setDoc(
+          patchStep(this.document, index, {
+            vars: { ...withoutHeader(vars), [headerKey(kind)]: link },
+          }),
+        ),
+      )}
     `;
   }
 
@@ -2590,7 +2703,7 @@ export class ErpFlowsEditor extends LitElement {
   private renderTemplateHeader(step: Step, index: number, vars: Record<string, unknown>) {
     if (step.channel !== 'whatsapp' || !String(step.template ?? '').trim()) return nothing;
     const known = this.knownTemplate(step);
-    if (known && known.header !== 'unknown') return this.renderDeducedHeader(index, vars, known);
+    if (known && known.header !== 'unknown') return this.renderDeducedHeader(step, index, vars, known);
     // A title with a gap IS the header: there is no room for a picture next to it (hub#2111).
     if (known?.titleVariable || !this.headerMedia) return nothing;
     const header = readHeader(vars);
@@ -2620,13 +2733,103 @@ export class ErpFlowsEditor extends LitElement {
         <span class="hint">${this.t('ui.notifyHeaderHint')}</span>
       </div>
       ${header
-        ? this.renderValue({
+        ? this.renderHeaderFile(step, header.kind, header.link ?? '', (link) => write(header.kind, link))
+        : nothing}
+    `;
+  }
+
+  /**
+   * The file of a template's header: its link — or, for a photo, the photo itself, uploaded from
+   * here (hub#2335). The owner of a salon has the picture, not a public link to it, so an image
+   * header offers «Upload image» next to the link on a hub whose client carries the upload; once
+   * uploaded, the step shows the photo (the reference is the hub's business, not hers) and lets her
+   * replace it or take it away. Video and document stay a link (hub#2347).
+   */
+  private renderHeaderFile(step: Step, kind: HeaderKind, link: unknown, write: (link: unknown) => void) {
+    const uploaded = kind === 'image' && isUploadedHeader(link);
+    const canUpload =
+      kind === 'image' && typeof this.client?.flows?.uploadWhatsappHeaderImage === 'function';
+    const busy = this.uploadingHeader === step.id;
+    const error = this.headerUploadError[step.id];
+    const preview = uploaded ? this.headerPreviews[(link as string).trim()] : undefined;
+    return html`
+      ${uploaded
+        ? html`<div class="header-photo">
+            ${preview
+              ? html`<img
+                  data-field="header-preview"
+                  data-testid="flows-editor-notify-header-preview"
+                  src=${preview}
+                  alt=${this.t('ui.notifyHeaderPreviewAlt')}
+                />`
+              : html`<span
+                  class="hint"
+                  data-field="header-uploaded"
+                  data-testid="flows-editor-notify-header-uploaded"
+                  >${this.t('ui.notifyHeaderUploaded')}</span
+                >`}
+            <ion-button
+              size="small"
+              fill="clear"
+              color="danger"
+              data-field="header-remove"
+              data-testid="flows-editor-notify-header-photo-remove"
+              ?disabled=${busy}
+              @click=${() => write('')}
+              >${this.t('ui.notifyHeaderRemove')}</ion-button
+            >
+          </div>`
+        : this.renderValue({
             field: 'header-link',
             label: this.t('ui.notifyHeaderLink'),
-            value: header.link ?? '',
+            value: link,
             template: true,
-            onChange: (link) => write(header.kind, link),
-          })
+            onChange: write,
+          })}
+      ${canUpload
+        ? html`<div class="header-upload">
+            <input
+              type="file"
+              hidden
+              accept="image/jpeg,image/png"
+              data-field="header-file"
+              data-testid="flows-editor-notify-header-file"
+              @change=${(e: Event) => {
+                const input = e.target as HTMLInputElement;
+                const file = input.files?.[0];
+                input.value = '';
+                void this.uploadHeaderImage(step.id, file);
+              }}
+            />
+            <ion-button
+              size="small"
+              fill="outline"
+              data-field="header-upload"
+              data-testid="flows-editor-notify-header-upload"
+              ?disabled=${busy}
+              @click=${(e: Event) =>
+                (e.currentTarget as HTMLElement)
+                  .closest('.header-upload')
+                  ?.querySelector<HTMLInputElement>('input[type="file"]')
+                  ?.click()}
+              >${this.t(
+                busy
+                  ? 'ui.notifyHeaderUploading'
+                  : uploaded
+                    ? 'ui.notifyHeaderReplace'
+                    : 'ui.notifyHeaderUpload',
+              )}</ion-button
+            >
+            <span class="hint">${this.t('ui.notifyHeaderUploadHint')}</span>
+          </div>`
+        : nothing}
+      ${error
+        ? html`<ok-inline-feedback
+            tone="danger"
+            data-field="header-upload-error"
+            data-testid="flows-editor-notify-header-upload-error"
+            >${this.t(error)}</ok-inline-feedback
+          >`
         : nothing}
     `;
   }

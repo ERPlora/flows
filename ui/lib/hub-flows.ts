@@ -170,6 +170,21 @@ export interface FlowsApi {
    * flows.restoreModuleTemplate === 'function'` is the probe.
    */
   restoreModuleTemplate?(module: string, family: string): Promise<Flow>;
+  /**
+   * Stores the photo a WhatsApp template step sends in its header (`POST
+   * /api/hub/flows/whatsapp-header-images`, hub#2335) and answers the reference the step keeps in
+   * `vars.header_image`; the hub signs a fresh link to it on every send. JPEG or PNG, up to 5 MB.
+   * **Optional** like {@link templates}: a hub older than the door hands out a client without it,
+   * and the step keeps the link alone.
+   */
+  uploadWhatsappHeaderImage?(file: Blob): Promise<WhatsappHeaderImage>;
+}
+
+/** What {@link FlowsApi.uploadWhatsappHeaderImage} answers (hub#2335). */
+export interface WhatsappHeaderImage {
+  ref: string;
+  mime_type: string;
+  size: number;
 }
 
 /**
@@ -309,6 +324,12 @@ export interface ModuleClient {
    * because an older shell's client has only `query`.
    */
   queryAllOptional?<T = unknown>(name: string, params?: Record<string, unknown>): Promise<T[] | undefined>;
+  /**
+   * The bytes of one file of the hub's `media/`, authenticated by the shell (`null` when it is not
+   * there or is not an image). Read to show the photo a template step uploaded for its header
+   * (hub#2335). Optional because `erplora dev`'s preview client has none.
+   */
+  fetchMediaBlob?(ref: string): Promise<Blob | null>;
   locale?: string;
   t?(catalog: Record<string, unknown>, key: string, params?: Record<string, unknown>): string;
   formatMoney?(amount: unknown): string;
