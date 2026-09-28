@@ -3900,6 +3900,7 @@ export class ErpFlowsEditor extends LitElement {
           data-testid="flows-editor-save"
           ?disabled=${this.saving}
           @click=${() => void this.save()}
+        >
           ${this.saving ? this.t('ui.saving') : this.t('ui.save')}
         </ion-button>
       </div>
