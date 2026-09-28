@@ -7194,6 +7194,7 @@ var ErpFlowsEditor = class extends i3 {
           data-testid="flows-editor-save"
           ?disabled=${this.saving}
           @click=${() => void this.save()}
+        >
           ${this.saving ? this.t("ui.saving") : this.t("ui.save")}
         </ion-button>
       </div>
