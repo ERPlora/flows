@@ -6274,7 +6274,7 @@ var ErpFlowsEditor = class extends i3 {
     const canUpload = this.headerUploader(kind) !== null;
     const busy = this.uploadingHeader === step.id;
     const error = this.headerUploadError[step.id];
-    const preview = uploaded && kind === "image" ? this.headerPreviews[link.trim()] : void 0;
+    const preview = uploaded ? this.headerPreviews[link.trim()] : void 0;
     return b2`
       ${uploaded ? b2`<div class="header-photo">
             ${preview ? b2`<img

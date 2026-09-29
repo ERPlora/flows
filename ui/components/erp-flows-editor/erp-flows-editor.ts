@@ -2859,7 +2859,7 @@ export class ErpFlowsEditor extends LitElement {
     const canUpload = this.headerUploader(kind) !== null;
     const busy = this.uploadingHeader === step.id;
     const error = this.headerUploadError[step.id];
-    const preview = uploaded && kind === 'image' ? this.headerPreviews[(link as string).trim()] : undefined;
+    const preview = uploaded ? this.headerPreviews[(link as string).trim()] : undefined;
     return html`
       ${uploaded
         ? html`<div class="header-photo">
