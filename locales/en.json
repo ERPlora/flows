@@ -9,6 +9,8 @@
   "ui": {
     "activate": "Activate",
     "active": "Active",
+    "enableAutomation": "Turn on the automation",
+    "enableNamed": "Turn on {name}",
     "addAi": "Ask the assistant",
     "addApproval": "Ask somebody first",
     "addCommand": "Do something",
