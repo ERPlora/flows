@@ -7171,8 +7171,10 @@ var ErpFlowsEditor = class extends i3 {
           tone=${this.enabled ? "success" : "neutral"}
           label=${this.enabled ? this.t("ui.active") : this.t("ui.paused")}
         ></ok-status-pill>
+        <!-- The pill beside it is not tied to it: the switch carries its own name (flows#140). -->
         <ion-toggle
           data-testid="flows-editor-enabled"
+          aria-label=${this.t("ui.enableAutomation")}
           .checked=${this.enabled}
           @ionChange=${(e4) => this.onEnable(!!e4.target.checked)}
         ></ion-toggle>
@@ -10541,6 +10543,8 @@ var es_default = {
   ui: {
     activate: "Activar",
     active: "Activa",
+    enableAutomation: "Activar automatizaci\xF3n",
+    enableNamed: "Activar {name}",
     addAi: "Ped\xEDrselo al asistente",
     addApproval: "Preguntar antes a alguien",
     addCommand: "Hacer algo",
@@ -11513,6 +11517,8 @@ var en_default = {
   ui: {
     activate: "Activate",
     active: "Active",
+    enableAutomation: "Turn on the automation",
+    enableNamed: "Turn on {name}",
     addAi: "Ask the assistant",
     addApproval: "Ask somebody first",
     addCommand: "Do something",
@@ -13315,6 +13321,7 @@ var ErpFlowsApp = class extends i3 {
         ></ok-status-pill>
         <ion-toggle
           data-testid=${`flows-app-row-toggle-${flow.id}`}
+          aria-label=${this.t("ui.enableNamed", { name: flow.name || this.t("ui.unnamed") })}
           .checked=${flow.enabled}
           @ionChange=${(e4) => void this.setEnabled(flow, !!e4.target.checked)}
         ></ion-toggle>
