@@ -9,6 +9,8 @@
   "ui": {
     "activate": "Activar",
     "active": "Activa",
+    "enableAutomation": "Activar automatización",
+    "enableNamed": "Activar {name}",
     "addAi": "Pedírselo al asistente",
     "addApproval": "Preguntar antes a alguien",
     "addCommand": "Hacer algo",

@@ -1017,6 +1017,7 @@ export class ErpFlowsApp extends LitElement {
         ></ok-status-pill>
         <ion-toggle
           data-testid=${`flows-app-row-toggle-${flow.id}`}
+          aria-label=${this.t('ui.enableNamed', { name: flow.name || this.t('ui.unnamed') })}
           .checked=${flow.enabled}
           @ionChange=${(e: Event) =>
             void this.setEnabled(flow, !!(e.target as HTMLInputElement).checked)}

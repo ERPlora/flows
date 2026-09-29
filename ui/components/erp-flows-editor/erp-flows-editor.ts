@@ -3950,8 +3950,10 @@ export class ErpFlowsEditor extends LitElement {
           tone=${this.enabled ? 'success' : 'neutral'}
           label=${this.enabled ? this.t('ui.active') : this.t('ui.paused')}
         ></ok-status-pill>
+        <!-- The pill beside it is not tied to it: the switch carries its own name (flows#140). -->
         <ion-toggle
           data-testid="flows-editor-enabled"
+          aria-label=${this.t('ui.enableAutomation')}
           .checked=${this.enabled}
           @ionChange=${(e: Event) => this.onEnable(!!(e.target as HTMLInputElement).checked)}
         ></ion-toggle>
