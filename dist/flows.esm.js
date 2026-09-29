@@ -4189,6 +4189,8 @@ var ErpFlowsEditor = class extends i3 {
       background: transparent;
       color: inherit;
       padding: 0.35rem 0;
+      /* A long name used to stop mid-letter on a phone, as if that were all of it (flows#142). */
+      text-overflow: ellipsis;
     }
     .head .name:hover,
     .head .name:focus {
@@ -4584,6 +4586,38 @@ var ErpFlowsEditor = class extends i3 {
       padding: 0 0.75rem;
       border-bottom: 1px solid var(--ok-border-soft, rgba(0, 0, 0, 0.08));
       overflow-x: auto;
+      /* When the strip does not fit, a shadow at the edge says it goes on — a tab cut by the
+         border read as another word, «Historia» (flows#142). Scrolling shadows: the two covers
+         ride with the content and the two shadows stay with the box, so a strip that fits, or
+         one scrolled to an end, covers its own shadow with no script to fall out of step. The
+         strip wears the card's colour itself, so the covers always match what is under them; the
+         shadows are the text colour, so they read on a dark card too. */
+      background-color: var(--ok-surface, var(--ion-card-background, #fff));
+      background-image:
+        linear-gradient(to right, var(--ok-surface, var(--ion-card-background, #fff)) 30%, transparent),
+        linear-gradient(to left, var(--ok-surface, var(--ion-card-background, #fff)) 30%, transparent),
+        radial-gradient(
+          farthest-side at 0 50%,
+          color-mix(in srgb, currentColor 22%, transparent),
+          transparent
+        ),
+        radial-gradient(
+          farthest-side at 100% 50%,
+          color-mix(in srgb, currentColor 22%, transparent),
+          transparent
+        );
+      background-position:
+        0 0,
+        100% 0,
+        0 0,
+        100% 0;
+      background-repeat: no-repeat;
+      background-size:
+        2.5rem 100%,
+        2.5rem 100%,
+        0.9rem 100%,
+        0.9rem 100%;
+      background-attachment: local, local, scroll, scroll;
     }
     .tabs button {
       font: inherit;
@@ -4601,6 +4635,13 @@ var ErpFlowsEditor = class extends i3 {
       border-bottom-color: var(--ok-primary, #3880ff);
       font-weight: 600;
     }
+    /* The four tabs were 347px in a 328px strip at 360: this gives back the 25px «Historial» was
+       missing, in both languages (flows#142). */
+    @media (max-width: 559.98px) {
+      .tabs button {
+        padding: 0.6rem 0.5rem;
+      }
+    }
     .list {
       max-width: 44rem;
       margin: 0 auto;
@@ -4616,11 +4657,24 @@ var ErpFlowsEditor = class extends i3 {
       border: 1px solid var(--ok-border, #d7d5cc);
       border-radius: var(--ok-radius-sm, 10px);
       background: var(--ok-surface, #fff);
+      flex-wrap: wrap;
     }
     .grant .grow {
-      flex: 1 1 auto;
+      flex: 1 1 10rem;
       min-width: 0;
       overflow-wrap: anywhere;
+    }
+    /* «Limits» and «Remove» never shrink: when the row runs out of room they drop under the
+       permission, to the right. As two loose items they shrank to their 2.6rem floor and the
+       shell's inherited overflow-wrap split them into «Lím / ites» (flows#142). */
+    .grant-actions {
+      display: flex;
+      gap: 0.25rem;
+      flex: 0 0 auto;
+      margin-left: auto;
+    }
+    .grant-actions button {
+      white-space: nowrap;
     }
     /* One permission and its limits, as a single block: the fold has to read as belonging to the
        row above it and not as another permission of its own. */
@@ -4782,6 +4836,7 @@ var ErpFlowsEditor = class extends i3 {
   updated(changed) {
     if (changed.has("tab") && this.tab === "history") void this.loadRuns();
     if (changed.has("tab") && this.tab === "test") this.tested = true;
+    if (changed.has("tab")) this.revealActiveTab();
     if (this.openStep === "trigger") void this.ensureEventCatalog();
     if (this.openGuardComparesReplyStep()) void this.ensureHubFlows();
     if (this.openStepSendsWhatsapp()) void this.ensureWaTemplates();
@@ -4851,6 +4906,20 @@ var ErpFlowsEditor = class extends i3 {
     } finally {
       this.uploadingHeader = "";
     }
+  }
+  /**
+   * Bring the chosen tab whole into the strip (flows#142). Where the strip scrolls sideways — a
+   * narrow phone, a larger font — a tab chosen half under the edge reads as another word.
+   * Horizontal only, by hand: `scrollIntoView` would also scroll the page around the editor.
+   */
+  revealActiveTab() {
+    const strip = this.renderRoot.querySelector(".tabs");
+    const active = strip?.querySelector('[aria-selected="true"]');
+    if (!strip || !active) return;
+    const box = strip.getBoundingClientRect();
+    const tab = active.getBoundingClientRect();
+    if (tab.left < box.left) strip.scrollLeft -= box.left - tab.left;
+    else if (tab.right > box.right) strip.scrollLeft += tab.right - box.right;
   }
   /**
    * Put the saved event back into the trigger `<select>` once its `<option>` children exist.
@@ -6988,29 +7057,31 @@ var ErpFlowsEditor = class extends i3 {
         <span class="grow"
           >${g3.kind === "command" ? g3.value : this.t("ui.grantOther", { kind: g3.kind, value: g3.value })}${limits ? b2` <em class="pinned">${this.t("ui.grantPinned", { limits })}</em>` : A}</span
         >
-        <!-- A command's payload and a query's parameters, and nothing else (hub#1623, hub#1662).
-             Offered on any other kind the hub answers flow.invalid_grant_payload — and this
-             endpoint replaces the WHOLE list, so it would not lose that row, it would lose every
-             permission on the screen. -->
-        ${canPinPayload(g3.kind) ? b2`<button
-              type="button"
-              class="icon-btn"
-              data-act="limits"
-              data-testid=${`flows-editor-grant-limits-${k2}`}
-              aria-expanded=${open ? "true" : "false"}
-              @click=${() => this.toggleLimits(g3)}
-            >
-              ${this.t("ui.grantLimits")}
-            </button>` : A}
-        <button
-          type="button"
-          class="icon-btn"
-          data-act="revoke"
-          data-testid=${`flows-editor-grant-revoke-${k2}`}
-          @click=${() => void this.revoke(g3)}
-        >
-          ${this.t("ui.revoke")}
-        </button>
+        <span class="grant-actions">
+          <!-- A command's payload and a query's parameters, and nothing else (hub#1623, hub#1662).
+               Offered on any other kind the hub answers flow.invalid_grant_payload — and this
+               endpoint replaces the WHOLE list, so it would not lose that row, it would lose every
+               permission on the screen. -->
+          ${canPinPayload(g3.kind) ? b2`<button
+                type="button"
+                class="icon-btn"
+                data-act="limits"
+                data-testid=${`flows-editor-grant-limits-${k2}`}
+                aria-expanded=${open ? "true" : "false"}
+                @click=${() => this.toggleLimits(g3)}
+              >
+                ${this.t("ui.grantLimits")}
+              </button>` : A}
+          <button
+            type="button"
+            class="icon-btn"
+            data-act="revoke"
+            data-testid=${`flows-editor-grant-revoke-${k2}`}
+            @click=${() => void this.revoke(g3)}
+          >
+            ${this.t("ui.revoke")}
+          </button>
+        </span>
       </div>
       ${open ? this.renderLimits(g3) : A}
     </div>`;
@@ -7336,6 +7407,7 @@ var ErpFlowsEditor = class extends i3 {
           type="text"
           data-testid="flows-editor-name"
           .value=${this.name}
+          title=${this.name || A}
           placeholder=${this.t("ui.unnamed")}
           @input=${(e4) => {
       this.name = e4.target.value;
