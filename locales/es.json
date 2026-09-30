@@ -517,6 +517,8 @@
     "notifyHeaderReplace_document": "Cambiar PDF",
     "notifyHeaderUploadHint_video": "MP4, hasta 16 MB. Se envía con cada mensaje.",
     "notifyHeaderUploadHint_document": "PDF, hasta 100 MB. Se envía con cada mensaje.",
+    "notifyHeaderDocumentName": "Nombre que ve el cliente",
+    "notifyHeaderDocumentNameHint": "El nombre del PDF en el chat del cliente. Vacío: el nombre de la plantilla.",
     "notifyHeaderUploaded_video": "Vídeo subido",
     "notifyHeaderUploaded_document": "PDF subido",
     "notifyHeaderRemove_video": "Quitar vídeo",
