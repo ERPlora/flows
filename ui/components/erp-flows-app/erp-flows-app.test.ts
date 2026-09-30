@@ -387,6 +387,7 @@ describe('what the hub can do reaches the screen that draws it (flows#75)', () =
     return el.renderRoot.querySelector('erp-flows-editor') as HTMLElement & {
       interactiveNotify: boolean;
       headerMedia: boolean;
+      documentName: boolean;
       headerText: boolean;
       buttonUrl: boolean;
     };
@@ -418,6 +419,19 @@ describe('what the hub can do reaches the screen that draws it (flows#75)', () =
     expect((await editorOf(declaring))?.headerMedia).toBe(true);
     document.body.replaceChildren();
     expect((await editorOf(withSchema({ $defs: { step: { properties: {} } } })))?.headerMedia).toBe(false);
+  });
+
+  // hub#2405: and for the name of the header PDF.
+  it('hands the editor what the hub said about the name of the header PDF', async () => {
+    const declaring = withSchema({
+      $defs: { step: { properties: { vars: { properties: { header_image: {}, header_document_filename: {} } } } } },
+    });
+    expect((await editorOf(declaring))?.documentName).toBe(true);
+    document.body.replaceChildren();
+    const headerOnly = withSchema({
+      $defs: { step: { properties: { vars: { properties: { header_image: {} } } } } },
+    });
+    expect((await editorOf(headerOnly))?.documentName).toBe(false);
   });
 
   // hub#2111 / hub#2110: and for the title with a variable and the link button.

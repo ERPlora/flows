@@ -3087,6 +3087,7 @@ var HEADER_OF = {
   DOCUMENT: "document"
 };
 var HEADER_KEYS = ["header_image", "header_video", "header_document"];
+var DOCUMENT_NAME_KEY = "header_document_filename";
 var TITLE_KEY = "header_text";
 var linkKey = (n5) => `button_url_${n5}`;
 var LINK_KEY = /^button_url_[0-9]$/;
@@ -3148,6 +3149,7 @@ function withTemplateHeader(vars, header) {
   const next = { ...vars };
   const link = HEADER_KEYS.map((k2) => next[k2]).find((v2) => v2 !== void 0);
   for (const k2 of HEADER_KEYS) delete next[k2];
+  if (header !== "document") delete next[DOCUMENT_NAME_KEY];
   if (header) next[`header_${header}`] = link ?? "";
   return next;
 }
@@ -4052,6 +4054,12 @@ function headerUploadErrorKey(err, kind) {
 function withoutHeader(vars) {
   const next = { ...vars };
   for (const kind of HEADER_KINDS) delete next[headerKey(kind)];
+  delete next[DOCUMENT_NAME_KEY];
+  return next;
+}
+function withHeader(vars, kind, link) {
+  const next = { ...withoutHeader(vars), [headerKey(kind)]: link };
+  if (kind === "document" && DOCUMENT_NAME_KEY in vars) next[DOCUMENT_NAME_KEY] = vars[DOCUMENT_NAME_KEY];
   return next;
 }
 function dropHeaderOf(doc, index) {
@@ -4115,6 +4123,7 @@ var ErpFlowsEditor = class extends i3 {
     this.tab = "editor";
     this.interactiveNotify = false;
     this.headerMedia = false;
+    this.documentName = false;
     this.headerText = false;
     this.buttonUrl = false;
     this.openStep = null;
@@ -4922,11 +4931,9 @@ var ErpFlowsEditor = class extends i3 {
       const index = this.document.steps.findIndex((s4) => s4.id === stepId);
       if (index < 0) return;
       const current = this.document.steps[index].vars ?? {};
-      this.setDoc(
-        patchStep(this.document, index, {
-          vars: { ...withoutHeader(current), [headerKey(kind)]: stored.ref }
-        })
-      );
+      const vars = withHeader(current, kind, stored.ref);
+      if (kind === "document" && this.documentName) vars[DOCUMENT_NAME_KEY] = file.name;
+      this.setDoc(patchStep(this.document, index, { vars }));
     } catch (err) {
       this.headerUploadError = { ...this.headerUploadError, [stepId]: headerUploadErrorKey(err, kind) };
     } finally {
@@ -6211,13 +6218,11 @@ var ErpFlowsEditor = class extends i3 {
       >
       ${this.renderHeaderFile(
       step,
+      index,
+      vars,
       kind,
       readHeader(vars)?.link ?? "",
-      (link) => this.setDoc(
-        patchStep(this.document, index, {
-          vars: { ...withoutHeader(vars), [headerKey(kind)]: link }
-        })
-      )
+      (link) => this.setDoc(patchStep(this.document, index, { vars: withHeader(vars, kind, link) }))
     )}
     `;
   }
@@ -6235,10 +6240,9 @@ var ErpFlowsEditor = class extends i3 {
     if (known?.titleVariable || !this.headerMedia) return A;
     const header = readHeader(vars);
     const write = (kind, link) => {
-      const rest = withoutHeader(vars);
       this.setDoc(
         patchStep(this.document, index, {
-          vars: kind === "none" ? rest : { ...rest, [headerKey(kind)]: link ?? "" }
+          vars: kind === "none" ? withoutHeader(vars) : withHeader(vars, kind, link ?? "")
         })
       );
     };
@@ -6258,7 +6262,14 @@ var ErpFlowsEditor = class extends i3 {
         </select>
         <span class="hint">${this.t("ui.notifyHeaderHint")}</span>
       </div>
-      ${header ? this.renderHeaderFile(step, header.kind, header.link ?? "", (link) => write(header.kind, link)) : A}
+      ${header ? this.renderHeaderFile(
+      step,
+      index,
+      vars,
+      header.kind,
+      header.link ?? "",
+      (link) => write(header.kind, link)
+    ) : A}
     `;
   }
   /**
@@ -6267,9 +6278,10 @@ var ErpFlowsEditor = class extends i3 {
    * menu, not a public link to it, so a media header offers «Upload …» of its own kind next to the
    * link on a hub whose client carries the upload; once uploaded, the step shows the photo — or,
    * for a video or a PDF, that it is uploaded: a 100 MB file is not downloaded to preview it — and
-   * lets her replace it or take it away.
+   * lets her replace it or take it away. A PDF also carries the name the customer sees on it in the
+   * chat (hub#2405), on a hub that sends it.
    */
-  renderHeaderFile(step, kind, link, write) {
+  renderHeaderFile(step, index, vars, kind, link, write) {
     const uploaded = isUploadedHeader(link);
     const canUpload = this.headerUploader(kind) !== null;
     const busy = this.uploadingHeader === step.id;
@@ -6331,6 +6343,16 @@ var ErpFlowsEditor = class extends i3 {
             >
             <span class="hint">${this.t(headerCopy("notifyHeaderUploadHint", kind))}</span>
           </div>` : A}
+      ${kind === "document" && this.documentName ? b2`${this.renderValue({
+      field: "header-document-name",
+      label: this.t("ui.notifyHeaderDocumentName"),
+      value: vars[DOCUMENT_NAME_KEY] ?? "",
+      template: true,
+      onChange: (name) => this.setDoc(patchStep(this.document, index, { vars: { ...vars, [DOCUMENT_NAME_KEY]: name } }))
+    })}
+            <span class="hint" data-field="header-document-name-hint"
+              >${this.t(uploaded ? "ui.notifyHeaderDocumentNameHint" : "ui.notifyHeaderDocumentNameHintLink")}</span
+            >` : A}
       ${error ? b2`<ok-inline-feedback
             tone="danger"
             data-field="header-upload-error"
@@ -7570,6 +7592,9 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "headerMedia", 2);
 __decorateClass([
   n4({ attribute: false })
+], ErpFlowsEditor.prototype, "documentName", 2);
+__decorateClass([
+  n4({ attribute: false })
 ], ErpFlowsEditor.prototype, "headerText", 2);
 __decorateClass([
   n4({ attribute: false })
@@ -7753,7 +7778,9 @@ function schemaFacts(schema, coreVersion) {
     // Same rule again (hub#2101). The three keys landed together; asking for the first one is
     // asking for the release that sends them.
     headerMedia: !!at(schema, ["$defs", "step", "properties", "vars", "properties", "header_image"]),
-    // Same rule, one key per release: hub#2111 (the title) and hub#2110 (the link button).
+    // Same rule, one key per release: hub#2405 (the name of the header PDF)…
+    documentName: !!at(schema, ["$defs", "step", "properties", "vars", "properties", "header_document_filename"]),
+    // …hub#2111 (the title) and hub#2110 (the link button).
     headerText: !!at(schema, ["$defs", "step", "properties", "vars", "properties", "header_text"]),
     buttonUrl: !!at(schema, ["$defs", "step", "properties", "vars", "patternProperties", "^button_url_[0-9]$"]),
     // Not `at(schema, …)` like every line above it, because there is nothing in the schema to
@@ -11333,6 +11360,9 @@ var es_default = {
     notifyHeaderReplace_document: "Cambiar PDF",
     notifyHeaderUploadHint_video: "MP4, hasta 16 MB. Se env\xEDa con cada mensaje.",
     notifyHeaderUploadHint_document: "PDF, hasta 100 MB. Se env\xEDa con cada mensaje.",
+    notifyHeaderDocumentName: "Nombre que ve el cliente",
+    notifyHeaderDocumentNameHint: "El nombre del PDF en el chat del cliente. Vac\xEDo: el nombre de la plantilla.",
+    notifyHeaderDocumentNameHintLink: "El nombre del PDF en el chat del cliente. Vac\xEDo: el final del enlace.",
     notifyHeaderUploaded_video: "V\xEDdeo subido",
     notifyHeaderUploaded_document: "PDF subido",
     notifyHeaderRemove_video: "Quitar v\xEDdeo",
@@ -12333,6 +12363,9 @@ var en_default = {
     notifyHeaderReplace_document: "Replace PDF",
     notifyHeaderUploadHint_video: "MP4, up to 16 MB. It is sent with every message.",
     notifyHeaderUploadHint_document: "PDF, up to 100 MB. It is sent with every message.",
+    notifyHeaderDocumentName: "Name the customer sees",
+    notifyHeaderDocumentNameHint: "The name of the PDF in the customer's chat. Empty: the template's name.",
+    notifyHeaderDocumentNameHintLink: "The name of the PDF in the customer's chat. Empty: the end of the link.",
     notifyHeaderUploaded_video: "Video uploaded",
     notifyHeaderUploaded_document: "PDF uploaded",
     notifyHeaderRemove_video: "Remove video",
@@ -13877,6 +13910,7 @@ var ErpFlowsApp = class extends i3 {
         .draft=${this.draftReview}
         .interactiveNotify=${this.facts.interactiveNotify}
         .headerMedia=${this.facts.headerMedia}
+        .documentName=${this.facts.documentName}
         .headerText=${this.facts.headerText}
         .buttonUrl=${this.facts.buttonUrl}
         @flows-back=${() => {

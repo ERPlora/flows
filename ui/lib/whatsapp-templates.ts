@@ -60,6 +60,8 @@ const HEADER_OF: Record<string, TemplateHeader | null> = {
 };
 
 const HEADER_KEYS = ['header_image', 'header_video', 'header_document'];
+/** The kernel key of the name the customer sees on the header PDF (hub#2405). */
+export const DOCUMENT_NAME_KEY = 'header_document_filename';
 
 /** The kernel key of a text title's value (hub#2111). */
 export const TITLE_KEY = 'header_text';
@@ -152,6 +154,8 @@ export function withTemplateHeader(
   const next = { ...vars };
   const link = HEADER_KEYS.map((k) => next[k]).find((v) => v !== undefined);
   for (const k of HEADER_KEYS) delete next[k];
+  // The name of the PDF names THAT PDF: a photo, a video or no header has none (hub#2405).
+  if (header !== 'document') delete next[DOCUMENT_NAME_KEY];
   if (header) next[`header_${header}`] = link ?? '';
   return next;
 }
