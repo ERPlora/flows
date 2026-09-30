@@ -178,9 +178,19 @@ export interface FlowsApi {
    * and the step keeps the link alone.
    */
   uploadWhatsappHeaderImage?(file: Blob): Promise<WhatsappHeaderImage>;
+  /**
+   * Stores the file a WhatsApp template step sends in its header, of the kind given (same door,
+   * hub#2347): a JPEG or PNG photo up to 5 MB, an MP4 video up to 16 MB or a PDF up to 100 MB. It
+   * answers the reference the step keeps in `vars.header_<kind>`. **Optional**: a hub older than it
+   * only has {@link uploadWhatsappHeaderImage}, and there a video or a PDF stays a link.
+   */
+  uploadWhatsappHeaderMedia?(file: Blob, kind: WhatsappHeaderMediaKind): Promise<WhatsappHeaderImage>;
 }
 
-/** What {@link FlowsApi.uploadWhatsappHeaderImage} answers (hub#2335). */
+/** The kinds of file a WhatsApp template header carries (hub#2347). */
+export type WhatsappHeaderMediaKind = 'image' | 'video' | 'document';
+
+/** What {@link FlowsApi.uploadWhatsappHeaderImage} and `uploadWhatsappHeaderMedia` answer (hub#2335). */
 export interface WhatsappHeaderImage {
   ref: string;
   mime_type: string;

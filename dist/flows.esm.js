@@ -4037,11 +4037,17 @@ function readHeader(vars) {
 }
 var HEADER_MEDIA_FOLDER = "whatsapp/headers/";
 var isUploadedHeader = (value) => typeof value === "string" && value.trim().startsWith(HEADER_MEDIA_FOLDER);
-function headerUploadErrorKey(err) {
+var HEADER_UPLOAD = {
+  image: { accept: "image/jpeg,image/png", maxBytes: 5 * 1024 * 1024 },
+  video: { accept: "video/mp4", maxBytes: 16 * 1024 * 1024 },
+  document: { accept: "application/pdf", maxBytes: 100 * 1024 * 1024 }
+};
+var headerCopy = (base, kind) => kind === "image" ? `ui.${base}` : `ui.${base}_${kind}`;
+function headerUploadErrorKey(err, kind) {
   const code = err?.code;
-  if (code === "whatsapp.header_image_too_large") return "ui.notifyHeaderUploadTooLarge";
-  if (code === "whatsapp.header_image_unsupported") return "ui.notifyHeaderUploadUnsupported";
-  return "ui.notifyHeaderUploadFailed";
+  if (code === `whatsapp.header_${kind}_too_large`) return headerCopy("notifyHeaderUploadTooLarge", kind);
+  if (code === `whatsapp.header_${kind}_unsupported`) return headerCopy("notifyHeaderUploadUnsupported", kind);
+  return headerCopy("notifyHeaderUploadFailed", kind);
 }
 function withoutHeader(vars) {
   const next = { ...vars };
@@ -4880,29 +4886,49 @@ var ErpFlowsEditor = class extends i3 {
     }
   }
   /**
-   * Sends the chosen photo to the hub and keeps the reference it answers as the step's header
-   * (hub#2335). Written on the step as it is WHEN THE UPLOAD ENDS — found by its id, not the `vars`
+   * How this hub's client uploads a header file of `kind`, or `null` when it cannot (hub#2347).
+   * `uploadWhatsappHeaderMedia` takes the three kinds; a hub from before it only has the photo's
+   * `uploadWhatsappHeaderImage` (hub#2335), and there a video or a PDF stays a link.
+   */
+  headerUploader(kind) {
+    const flows = this.client?.flows;
+    if (typeof flows?.uploadWhatsappHeaderMedia === "function") {
+      return (file) => flows.uploadWhatsappHeaderMedia(file, kind);
+    }
+    if (kind === "image" && typeof flows?.uploadWhatsappHeaderImage === "function") {
+      return (file) => flows.uploadWhatsappHeaderImage(file);
+    }
+    return null;
+  }
+  /**
+   * Sends the chosen file to the hub and keeps the reference it answers as the step's header
+   * (hub#2335, hub#2347). A file over Meta's cap for its kind is refused here, before minutes of
+   * upload. Written on the step as it is WHEN THE UPLOAD ENDS — found by its id, not the `vars`
    * the button was drawn with — so what she typed meanwhile survives.
    */
-  async uploadHeaderImage(stepId, file) {
-    const flows = this.client?.flows;
-    if (!file || this.uploadingHeader || typeof flows?.uploadWhatsappHeaderImage !== "function") return;
-    this.uploadingHeader = stepId;
+  async uploadHeaderFile(stepId, kind, file) {
+    const upload = this.headerUploader(kind);
+    if (!file || this.uploadingHeader || !upload) return;
     const { [stepId]: _previous, ...otherErrors } = this.headerUploadError;
     this.headerUploadError = otherErrors;
+    if (file.size > HEADER_UPLOAD[kind].maxBytes) {
+      this.headerUploadError = { ...this.headerUploadError, [stepId]: headerCopy("notifyHeaderUploadTooLarge", kind) };
+      return;
+    }
+    this.uploadingHeader = stepId;
     try {
-      const stored = await flows.uploadWhatsappHeaderImage(file);
+      const stored = await upload(file);
       if (!isUploadedHeader(stored?.ref)) throw new Error("the hub answered no header reference");
       const index = this.document.steps.findIndex((s4) => s4.id === stepId);
       if (index < 0) return;
       const current = this.document.steps[index].vars ?? {};
       this.setDoc(
         patchStep(this.document, index, {
-          vars: { ...withoutHeader(current), header_image: stored.ref }
+          vars: { ...withoutHeader(current), [headerKey(kind)]: stored.ref }
         })
       );
     } catch (err) {
-      this.headerUploadError = { ...this.headerUploadError, [stepId]: headerUploadErrorKey(err) };
+      this.headerUploadError = { ...this.headerUploadError, [stepId]: headerUploadErrorKey(err, kind) };
     } finally {
       this.uploadingHeader = "";
     }
@@ -6236,15 +6262,16 @@ var ErpFlowsEditor = class extends i3 {
     `;
   }
   /**
-   * The file of a template's header: its link — or, for a photo, the photo itself, uploaded from
-   * here (hub#2335). The owner of a salon has the picture, not a public link to it, so an image
-   * header offers «Upload image» next to the link on a hub whose client carries the upload; once
-   * uploaded, the step shows the photo (the reference is the hub's business, not hers) and lets her
-   * replace it or take it away. Video and document stay a link (hub#2347).
+   * The file of a template's header: its link — or the file itself, uploaded from here (hub#2335
+   * for the photo, hub#2347 for the video and the PDF). The owner of a salon has the picture or the
+   * menu, not a public link to it, so a media header offers «Upload …» of its own kind next to the
+   * link on a hub whose client carries the upload; once uploaded, the step shows the photo — or,
+   * for a video or a PDF, that it is uploaded: a 100 MB file is not downloaded to preview it — and
+   * lets her replace it or take it away.
    */
   renderHeaderFile(step, kind, link, write) {
-    const uploaded = kind === "image" && isUploadedHeader(link);
-    const canUpload = kind === "image" && typeof this.client?.flows?.uploadWhatsappHeaderImage === "function";
+    const uploaded = isUploadedHeader(link);
+    const canUpload = this.headerUploader(kind) !== null;
     const busy = this.uploadingHeader === step.id;
     const error = this.headerUploadError[step.id];
     const preview = uploaded ? this.headerPreviews[link.trim()] : void 0;
@@ -6259,7 +6286,7 @@ var ErpFlowsEditor = class extends i3 {
                   class="hint"
                   data-field="header-uploaded"
                   data-testid="flows-editor-notify-header-uploaded"
-                  >${this.t("ui.notifyHeaderUploaded")}</span
+                  >${this.t(headerCopy("notifyHeaderUploaded", kind))}</span
                 >`}
             <ion-button
               size="small"
@@ -6268,7 +6295,7 @@ var ErpFlowsEditor = class extends i3 {
               data-testid="flows-editor-notify-header-photo-remove"
               ?disabled=${busy}
               @click=${() => write("")}
-              >${this.t("ui.notifyHeaderRemove")}</ion-button
+              >${this.t(headerCopy("notifyHeaderRemove", kind))}</ion-button
             >
           </div>` : this.renderValue({
       field: "header-link",
@@ -6281,14 +6308,14 @@ var ErpFlowsEditor = class extends i3 {
             <input
               type="file"
               hidden
-              accept="image/jpeg,image/png"
+              accept=${HEADER_UPLOAD[kind].accept}
               data-field="header-file"
               data-testid="flows-editor-notify-header-file"
               @change=${(e4) => {
       const input = e4.target;
       const file = input.files?.[0];
       input.value = "";
-      void this.uploadHeaderImage(step.id, file);
+      void this.uploadHeaderFile(step.id, kind, file);
     }}
             />
             <ion-button
@@ -6299,10 +6326,10 @@ var ErpFlowsEditor = class extends i3 {
               ?disabled=${busy}
               @click=${(e4) => e4.currentTarget.closest(".header-upload")?.querySelector('input[type="file"]')?.click()}
               >${this.t(
-      busy ? "ui.notifyHeaderUploading" : uploaded ? "ui.notifyHeaderReplace" : "ui.notifyHeaderUpload"
+      busy ? "ui.notifyHeaderUploading" : uploaded ? headerCopy("notifyHeaderReplace", kind) : headerCopy("notifyHeaderUpload", kind)
     )}</ion-button
             >
-            <span class="hint">${this.t("ui.notifyHeaderUploadHint")}</span>
+            <span class="hint">${this.t(headerCopy("notifyHeaderUploadHint", kind))}</span>
           </div>` : A}
       ${error ? b2`<ok-inline-feedback
             tone="danger"
@@ -11300,6 +11327,22 @@ var es_default = {
     notifyHeaderUploadTooLarge: "Esa imagen pesa m\xE1s de 5 MB, lo m\xE1ximo que acepta WhatsApp. Elige una m\xE1s ligera.",
     notifyHeaderUploadUnsupported: "Ese archivo no es una imagen JPEG o PNG. Elige una foto en uno de esos formatos.",
     notifyHeaderUploadFailed: "No se ha podido guardar la imagen. Revisa la conexi\xF3n y vuelve a intentarlo.",
+    notifyHeaderUpload_video: "Subir v\xEDdeo",
+    notifyHeaderUpload_document: "Subir PDF",
+    notifyHeaderReplace_video: "Cambiar v\xEDdeo",
+    notifyHeaderReplace_document: "Cambiar PDF",
+    notifyHeaderUploadHint_video: "MP4, hasta 16 MB. Se env\xEDa con cada mensaje.",
+    notifyHeaderUploadHint_document: "PDF, hasta 100 MB. Se env\xEDa con cada mensaje.",
+    notifyHeaderUploaded_video: "V\xEDdeo subido",
+    notifyHeaderUploaded_document: "PDF subido",
+    notifyHeaderRemove_video: "Quitar v\xEDdeo",
+    notifyHeaderRemove_document: "Quitar PDF",
+    notifyHeaderUploadTooLarge_video: "Ese v\xEDdeo pesa m\xE1s de 16 MB, lo m\xE1ximo que acepta WhatsApp. Elige uno m\xE1s corto o m\xE1s ligero.",
+    notifyHeaderUploadTooLarge_document: "Ese PDF pesa m\xE1s de 100 MB, lo m\xE1ximo que acepta WhatsApp. Elige uno m\xE1s ligero.",
+    notifyHeaderUploadUnsupported_video: "Ese archivo no es un v\xEDdeo MP4. Elige un v\xEDdeo en ese formato.",
+    notifyHeaderUploadUnsupported_document: "Ese archivo no es un PDF. Elige un documento en ese formato.",
+    notifyHeaderUploadFailed_video: "No se ha podido guardar el v\xEDdeo. Revisa la conexi\xF3n y vuelve a intentarlo.",
+    notifyHeaderUploadFailed_document: "No se ha podido guardar el PDF. Revisa la conexi\xF3n y vuelve a intentarlo.",
     notifyTitleValue: "Qu\xE9 va en el hueco del t\xEDtulo de la plantilla",
     notifyTitleUnsupported: "Esta plantilla tiene un hueco en el t\xEDtulo y este hub todav\xEDa no puede rellenarlo. Actualiza el hub o elige una plantilla sin \xE9l.",
     notifyLinkValue: "Final del enlace del bot\xF3n \xAB{button}\xBB",
@@ -12284,6 +12327,22 @@ var en_default = {
     notifyHeaderUploadTooLarge: "That image weighs more than 5 MB, the most WhatsApp accepts. Choose a lighter one.",
     notifyHeaderUploadUnsupported: "That file is not a JPEG or PNG image. Choose a photo in one of those formats.",
     notifyHeaderUploadFailed: "The image could not be saved. Check the connection and try again.",
+    notifyHeaderUpload_video: "Upload video",
+    notifyHeaderUpload_document: "Upload PDF",
+    notifyHeaderReplace_video: "Replace video",
+    notifyHeaderReplace_document: "Replace PDF",
+    notifyHeaderUploadHint_video: "MP4, up to 16 MB. It is sent with every message.",
+    notifyHeaderUploadHint_document: "PDF, up to 100 MB. It is sent with every message.",
+    notifyHeaderUploaded_video: "Video uploaded",
+    notifyHeaderUploaded_document: "PDF uploaded",
+    notifyHeaderRemove_video: "Remove video",
+    notifyHeaderRemove_document: "Remove PDF",
+    notifyHeaderUploadTooLarge_video: "That video weighs more than 16 MB, the most WhatsApp accepts. Choose a shorter or lighter one.",
+    notifyHeaderUploadTooLarge_document: "That PDF weighs more than 100 MB, the most WhatsApp accepts. Choose a lighter one.",
+    notifyHeaderUploadUnsupported_video: "That file is not an MP4 video. Choose a video in that format.",
+    notifyHeaderUploadUnsupported_document: "That file is not a PDF. Choose a document in that format.",
+    notifyHeaderUploadFailed_video: "The video could not be saved. Check the connection and try again.",
+    notifyHeaderUploadFailed_document: "The PDF could not be saved. Check the connection and try again.",
     notifyTitleValue: "What goes in the gap of the template's title",
     notifyTitleUnsupported: "This template has a gap in its title and this hub cannot fill it yet. Update the hub, or choose a template without one.",
     notifyLinkValue: "End of the link of the \xAB{button}\xBB button",

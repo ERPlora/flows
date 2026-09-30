@@ -9,8 +9,9 @@ import { ErpFlowsEditor } from './erp-flows-editor';
  * from a link. The owner of a salon has no public link to her salon's picture — she has the file.
  * So next to the link, the step offers «Upload image»: the hub keeps the photo in its own files and
  * answers a reference (`whatsapp/headers/<id>.jpg`) that the step stores as `vars.header_image`;
- * every send signs a fresh link to it. Only the image kind (video and PDF stay a link for now), and
- * only on a hub whose client carries the upload — an older hub keeps the link alone.
+ * every send signs a fresh link to it. On a hub with only this photo upload, video and PDF stay a
+ * link (hub#2347 uploads them where the client carries `uploadWhatsappHeaderMedia`), and an older
+ * hub keeps the link alone.
  */
 
 const SHAPE = {
@@ -249,7 +250,7 @@ describe('uploading the photo of the header', () => {
     }
   });
 
-  it('is not offered for a video or a document header', async () => {
+  it('is not offered for a video or a document header on a hub that only uploads the photo', async () => {
     for (const kind of ['video', 'document']) {
       document.body.replaceChildren();
       const { el } = await mount(whatsapp({ template: 'promo', vars: { [`header_${kind}`]: '' } }));
