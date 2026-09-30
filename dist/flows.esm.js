@@ -1854,7 +1854,7 @@ __decorateClass4([
 ], OkStatusPill.prototype, "size");
 define("ok-status-pill", OkStatusPill);
 
-// ui/components/erp-flows-value/erp-flows-value.ts
+// @erplora/module-flows/ui/components/erp-flows-value/erp-flows-value.ts
 var ErpFlowsValue = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2071,7 +2071,7 @@ __decorateClass([
 ], ErpFlowsValue.prototype, "name", 2);
 define("erp-flows-value", ErpFlowsValue);
 
-// ui/lib/plain-language.ts
+// @erplora/module-flows/ui/lib/plain-language.ts
 var MINUTE = 60;
 var HOUR = 3600;
 var DAY = 86400;
@@ -2299,7 +2299,7 @@ function describeSample(field, t3) {
   return field.truncated ? `${text2}\u2026` : text2;
 }
 
-// ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
+// @erplora/module-flows/ui/components/erp-flows-field-picker/erp-flows-field-picker.ts
 var ErpFlowsFieldPicker = class extends i3 {
   constructor() {
     super(...arguments);
@@ -2558,7 +2558,7 @@ __decorateClass([
 ], ErpFlowsFieldPicker.prototype, "t", 2);
 define("erp-flows-field-picker", ErpFlowsFieldPicker);
 
-// ui/lib/flow-doc.ts
+// @erplora/module-flows/ui/lib/flow-doc.ts
 var SCHEMA_VERSION = 1;
 var PATH_ROOTS = ["input", "steps", "event", "secret"];
 var OPERATORS = [
@@ -2879,7 +2879,7 @@ function approvalOutputs(step) {
   return ["decision", "decided_by", "decided_at", "comment"].map((f3) => `steps.${step.id}.${f3}`);
 }
 
-// ui/lib/whatsapp-options.ts
+// @erplora/module-flows/ui/lib/whatsapp-options.ts
 var MAX_BUTTONS = 3;
 var MAX_LIST_ROWS = 10;
 var TAP_KINDS = ["button", "list"];
@@ -3058,7 +3058,7 @@ function setTapMode(doc, index, wants, remembered) {
   });
 }
 
-// ui/lib/hub-flows.ts
+// @erplora/module-flows/ui/lib/hub-flows.ts
 var CAPABILITY_DENIED = "capability_denied";
 var APPROVAL_EXPIRED = "flow.approval_expired";
 var APPROVAL_ALREADY_DECIDED = "flow.approval_already_decided";
@@ -3079,7 +3079,7 @@ function errorCode(e4) {
   return typeof code === "string" ? code : "";
 }
 
-// ui/lib/whatsapp-templates.ts
+// @erplora/module-flows/ui/lib/whatsapp-templates.ts
 var HEADER_OF = {
   TEXT: null,
   IMAGE: "image",
@@ -3168,7 +3168,7 @@ function withTemplateSlots(vars, template, can) {
   return next;
 }
 
-// ui/lib/trigger-catalog.ts
+// @erplora/module-flows/ui/lib/trigger-catalog.ts
 var TRIGGER_CATALOG = [
   { event: "sale.completed", labelKey: "ui.evSaleCompleted", module: "sales" },
   { event: "sale.voided", labelKey: "ui.evSaleVoided", module: "sales" },
@@ -3305,7 +3305,7 @@ function catalogEntry(event) {
   return TRIGGER_CATALOG.find((e4) => e4.event === event);
 }
 
-// ui/lib/event-phrasing.ts
+// @erplora/module-flows/ui/lib/event-phrasing.ts
 var EVENT_FAMILIES = {
   appointments: "ui.evfAppointments",
   cart_checkout: "ui.evfCartCheckout",
@@ -3506,7 +3506,7 @@ function eventPhrase(event, t3) {
   return humanizeToken(tail).toLowerCase();
 }
 
-// ui/lib/event-catalog.ts
+// @erplora/module-flows/ui/lib/event-catalog.ts
 var BAD_CATALOG = "flows.bad_catalog";
 function toOption(row) {
   const event = typeof row?.name === "string" ? row.name.trim() : "";
@@ -3568,7 +3568,7 @@ function mergeContractFields(shape, supported) {
   return missing.length ? { ...shape, fields: [...shape.fields, ...missing] } : shape;
 }
 
-// ui/lib/simulate.ts
+// @erplora/module-flows/ui/lib/simulate.ts
 var REDACTED = "\0redacted\0";
 var REDACTED_MARK = "\u2022\u2022\u2022\u2022";
 var UNKNOWN = "\0unknown\0";
@@ -3893,7 +3893,7 @@ function simulate(doc, input) {
   };
 }
 
-// ui/lib/run-trouble.ts
+// @erplora/module-flows/ui/lib/run-trouble.ts
 var TABLE = {
   "flow.grant_denied": "permission",
   "flow.grant_kind_not_available": "permission",
@@ -3946,7 +3946,7 @@ function needsAttention(run2) {
   return run2.status === "failed";
 }
 
-// ui/lib/question-steps.ts
+// @erplora/module-flows/ui/lib/question-steps.ts
 function obj2(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
@@ -4004,7 +4004,7 @@ function ambiguousReplyGuards(definition, flows) {
   return out;
 }
 
-// ui/components/erp-flows-editor/erp-flows-editor.ts
+// @erplora/module-flows/ui/components/erp-flows-editor/erp-flows-editor.ts
 var TABS = ["editor", "test", "permissions", "history"];
 function stepSeconds(step) {
   const from = Date.parse(String(step.started_at ?? ""));
@@ -7667,7 +7667,7 @@ __decorateClass([
 ], ErpFlowsEditor.prototype, "pickerRoot", 2);
 define("erp-flows-editor", ErpFlowsEditor);
 
-// ui/lib/core-version.ts
+// @erplora/module-flows/ui/lib/core-version.ts
 function versionTriple(value) {
   if (typeof value !== "string") return null;
   const core = value.trim().split(/[-+]/)[0];
@@ -7690,7 +7690,7 @@ function coreAtLeast(version, floor) {
   return true;
 }
 
-// ui/lib/ai-draft.ts
+// @erplora/module-flows/ui/lib/ai-draft.ts
 var DRAFT_STEP_KINDS = ["command", "condition", "delay"];
 function readNotes(raw) {
   const value = typeof raw === "string" ? safeParse(raw) : raw;
@@ -7911,7 +7911,7 @@ function draftGaps(doc, known) {
   return out;
 }
 
-// ui/lib/templates.ts
+// @erplora/module-flows/ui/lib/templates.ts
 var SECTORS = ["any", "beauty", "food"];
 var NEED_FACT = {
   interactive: "interactiveNotify",
@@ -8444,7 +8444,7 @@ function mergeTemplates(local, fromModules) {
   return { cards: [...local, ...fromModules], aliases };
 }
 
-// ui/lib/module-templates.ts
+// @erplora/module-flows/ui/lib/module-templates.ts
 var MODULE_TEMPLATE_PREFIX = "module:";
 function moduleTemplateId(module, family) {
   return `${MODULE_TEMPLATE_PREFIX}${module}/${family}`;
@@ -8551,7 +8551,7 @@ function moduleTemplates(rows, locale) {
   return out;
 }
 
-// ui/components/erp-flows-gallery/erp-flows-gallery.ts
+// @erplora/module-flows/ui/components/erp-flows-gallery/erp-flows-gallery.ts
 function templateFromSearch(search, catalogue = { cards: TEMPLATES, aliases: {} }) {
   const id = new URLSearchParams(search).get("template") ?? "";
   if (!id) return "";
@@ -9637,7 +9637,7 @@ __decorateClass([
 ], ErpFlowsGallery.prototype, "restoredId", 2);
 define("erp-flows-gallery", ErpFlowsGallery);
 
-// ui/components/erp-flows-guide/erp-flows-guide.ts
+// @erplora/module-flows/ui/components/erp-flows-guide/erp-flows-guide.ts
 var FIRST_STEPS = [
   "guide.firstPick",
   "guide.firstUse",
@@ -9912,7 +9912,7 @@ __decorateClass([
 ], ErpFlowsGuide.prototype, "t", 2);
 define("erp-flows-guide", ErpFlowsGuide);
 
-// ui/components/erp-flows-approvals/erp-flows-approvals.ts
+// @erplora/module-flows/ui/components/erp-flows-approvals/erp-flows-approvals.ts
 var ErpFlowsApprovals = class extends i3 {
   constructor() {
     super(...arguments);
@@ -10208,7 +10208,7 @@ function policy(value, fallback) {
 }
 define("erp-flows-approvals", ErpFlowsApprovals);
 
-// ui/components/erp-flows-dead-letter/erp-flows-dead-letter.ts
+// @erplora/module-flows/ui/components/erp-flows-dead-letter/erp-flows-dead-letter.ts
 var MAX_REASON = 500;
 var REASON_PRESETS = ["ui.deadReasonDuplicate", "ui.deadReasonHandled", "ui.deadReasonObsolete"];
 var ErpFlowsDeadLetter = class extends i3 {
@@ -10729,7 +10729,7 @@ __decorateClass([
 ], ErpFlowsDeadLetter.prototype, "notice", 2);
 define("erp-flows-dead-letter", ErpFlowsDeadLetter);
 
-// ui/lib/flow-list.ts
+// @erplora/module-flows/ui/lib/flow-list.ts
 var EMPTY_VIEW = { q: "", state: "all", trigger: "all", sort: "updated" };
 function triggerKindOf(flow) {
   return readDoc(flow.definition).triggers[0]?.kind ?? "manual";
@@ -10790,7 +10790,7 @@ function copyName(name, taken, t3) {
   return base;
 }
 
-// ui/lib/flow-checkup.ts
+// @erplora/module-flows/ui/lib/flow-checkup.ts
 var WHATSAPP_MESSAGE_EVENT2 = "hub.whatsapp.message_received";
 var WHATSAPP_MODULE_MESSAGE_EVENT = "whatsapp_inbox.message.received";
 var WHATSAPP_MESSAGE_EVENTS = [
@@ -10840,7 +10840,7 @@ function repairedDefinition(definition, problemId) {
   return repaired;
 }
 
-// locales/es.json
+// @erplora/module-flows/locales/es.json
 var es_default = {
   name: "Automatizaciones",
   description: "Automatiza el trabajo repetitivo sin programar: recordatorios de citas, avisos de stock bajo y mensajes a clientes que salen solos.",
@@ -11843,7 +11843,7 @@ var es_default = {
   }
 };
 
-// locales/en.json
+// @erplora/module-flows/locales/en.json
 var en_default = {
   name: "Automations",
   description: "Automate repetitive work without writing code: appointment reminders, low-stock alerts and messages to customers that go out on their own.",
@@ -12846,7 +12846,7 @@ var en_default = {
   }
 };
 
-// ui/components/erp-flows-app/erp-flows-app.ts
+// @erplora/module-flows/ui/components/erp-flows-app/erp-flows-app.ts
 var CATALOG = { es: es_default, en: en_default };
 var ErpFlowsApp = class extends i3 {
   constructor() {
