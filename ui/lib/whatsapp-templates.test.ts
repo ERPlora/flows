@@ -131,6 +131,14 @@ describe('withTemplateHeader', () => {
     expect(withTemplateHeader({ text: 'hola' }, 'video')).toEqual({ text: 'hola', header_video: '' });
   });
 
+  // hub#2405: the name the customer sees on the header PDF names THAT PDF, and nothing else.
+  it('keeps the name of the PDF only while the header is a document', () => {
+    const named = { header_document: 'whatsapp/headers/ef.pdf', header_document_filename: 'Menu.pdf' };
+    expect(withTemplateHeader(named, 'document')).toEqual(named);
+    expect(withTemplateHeader(named, 'image')).toEqual({ header_image: 'whatsapp/headers/ef.pdf' });
+    expect(withTemplateHeader(named, null)).toEqual({});
+  });
+
   it('drops every header key for a template without media', () => {
     expect(withTemplateHeader({ text: 'hola', header_image: 'https://a/x.jpg' }, null)).toEqual({
       text: 'hola',

@@ -149,6 +149,22 @@ describe('the contract is read off the LIVE schema, not remembered', () => {
     expect(schemaFacts(undefined).headerMedia).toBe(false);
   });
 
+  // hub#2405: the name of the header PDF. Fail-closed like the header itself: on a hub that never
+  // named the key it travels as a BODY variable and Meta refuses the send.
+  it('offers the name of the header PDF only where the hub named its key', () => {
+    const declaring = JSON.parse(JSON.stringify(liveSchema));
+    declaring.$defs.step.properties.vars = {
+      $ref: '#/$defs/mapping',
+      properties: { header_image: {}, header_video: {}, header_document: {}, header_document_filename: {} },
+    };
+    expect(schemaFacts(declaring).documentName).toBe(true);
+    const headerOnly = JSON.parse(JSON.stringify(declaring));
+    delete headerOnly.$defs.step.properties.vars.properties.header_document_filename;
+    expect(schemaFacts(headerOnly).documentName).toBe(false);
+    expect(schemaFacts(liveSchema).documentName).toBe(false);
+    expect(schemaFacts(undefined).documentName).toBe(false);
+  });
+
   // hub#2111 / hub#2110: the title with a variable and the link button, each its own key and its
   // own release. Same floor: on a core that never named them they travel as BODY variables.
   it('offers the title and the link-button gaps only where the hub named their keys', () => {

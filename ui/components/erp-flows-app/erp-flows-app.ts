@@ -1256,6 +1256,7 @@ export class ErpFlowsApp extends LitElement {
         .draft=${this.draftReview}
         .interactiveNotify=${this.facts.interactiveNotify}
         .headerMedia=${this.facts.headerMedia}
+        .documentName=${this.facts.documentName}
         .headerText=${this.facts.headerText}
         .buttonUrl=${this.facts.buttonUrl}
         @flows-back=${() => {

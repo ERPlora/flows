@@ -165,6 +165,11 @@ export interface SchemaFacts {
    */
   headerMedia: boolean;
   /**
+   * Whether this hub sends `vars.header_document_filename` as the name the customer sees on the
+   * header PDF (hub#2405). Fail-closed like {@link SchemaFacts.headerMedia}, for the same reason.
+   */
+  documentName: boolean;
+  /**
    * Whether this hub turns `vars.header_text` into the value of a template's text title (hub#2111).
    * Fail-closed like {@link SchemaFacts.headerMedia}, for the same reason.
    */
@@ -277,7 +282,9 @@ export function schemaFacts(schema: unknown, coreVersion?: unknown): SchemaFacts
     // Same rule again (hub#2101). The three keys landed together; asking for the first one is
     // asking for the release that sends them.
     headerMedia: !!at(schema, ['$defs', 'step', 'properties', 'vars', 'properties', 'header_image']),
-    // Same rule, one key per release: hub#2111 (the title) and hub#2110 (the link button).
+    // Same rule, one key per release: hub#2405 (the name of the header PDF)…
+    documentName: !!at(schema, ['$defs', 'step', 'properties', 'vars', 'properties', 'header_document_filename']),
+    // …hub#2111 (the title) and hub#2110 (the link button).
     headerText: !!at(schema, ['$defs', 'step', 'properties', 'vars', 'properties', 'header_text']),
     buttonUrl: !!at(schema, ['$defs', 'step', 'properties', 'vars', 'patternProperties', '^button_url_[0-9]$']),
     // Not `at(schema, …)` like every line above it, because there is nothing in the schema to

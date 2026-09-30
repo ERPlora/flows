@@ -17,6 +17,7 @@ import {
   tapOptionProblems,
 } from '../../lib/whatsapp-options';
 import {
+  DOCUMENT_NAME_KEY,
   TITLE_KEY,
   linkKey,
   loadWhatsappTemplates,
@@ -214,10 +215,25 @@ function headerUploadErrorKey(err: unknown, kind: HeaderKind): string {
   return headerCopy('notifyHeaderUploadFailed', kind);
 }
 
-/** `vars` without any media header key — what a step that cannot carry one must be saved with. */
+/**
+ * `vars` without any media header key — nor the name of its PDF (hub#2405) — what a step that
+ * cannot carry one must be saved with.
+ */
 function withoutHeader(vars: Record<string, unknown>): Record<string, unknown> {
   const next = { ...vars };
   for (const kind of HEADER_KINDS) delete next[headerKey(kind)];
+  delete next[DOCUMENT_NAME_KEY];
+  return next;
+}
+
+/**
+ * `vars` whose one media header is `kind` with this `link`. The name the customer sees on the PDF
+ * (hub#2405) stays while the header is still a document — a new link to the same menu keeps the
+ * name she wrote — and goes with any other kind: it would name a file the message does not carry.
+ */
+function withHeader(vars: Record<string, unknown>, kind: HeaderKind, link: unknown): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...withoutHeader(vars), [headerKey(kind)]: link };
+  if (kind === 'document' && DOCUMENT_NAME_KEY in vars) next[DOCUMENT_NAME_KEY] = vars[DOCUMENT_NAME_KEY];
   return next;
 }
 
@@ -1043,6 +1059,13 @@ export class ErpFlowsEditor extends LitElement {
   @property({ attribute: false }) headerMedia = false;
 
   /**
+   * **Whether THIS hub sends the name the customer sees on the header PDF** (hub#2405), read off
+   * the schema the hub served (`schemaFacts().documentName`). Default `false` for the same reason
+   * as {@link headerMedia}.
+   */
+  @property({ attribute: false }) documentName = false;
+
+  /**
    * **Whether THIS hub sends the value of a template's text title** (hub#2111) and **the end of its
    * link buttons** (hub#2110), read off the schema the hub served. Default `false` for the same
    * reason as {@link headerMedia}.
@@ -1289,11 +1312,11 @@ export class ErpFlowsEditor extends LitElement {
       const index = this.document.steps.findIndex((s) => s.id === stepId);
       if (index < 0) return;
       const current = (this.document.steps[index].vars ?? {}) as Record<string, unknown>;
-      this.setDoc(
-        patchStep(this.document, index, {
-          vars: { ...withoutHeader(current), [headerKey(kind)]: stored.ref },
-        }),
-      );
+      const vars = withHeader(current, kind, stored.ref);
+      // Another file, its own name (hub#2405): the one on her disk is the one she recognises, and
+      // without a name the customer's chat would show the fingerprint the hub stores it under.
+      if (kind === 'document' && this.documentName) vars[DOCUMENT_NAME_KEY] = file.name;
+      this.setDoc(patchStep(this.document, index, { vars }));
     } catch (err) {
       this.headerUploadError = { ...this.headerUploadError, [stepId]: headerUploadErrorKey(err, kind) };
     } finally {
@@ -2791,12 +2814,8 @@ export class ErpFlowsEditor extends LitElement {
       <span class="hint" data-field="header-deduced"
         >${this.t('ui.notifyHeaderDeduced', { kind: kindLabel })}</span
       >
-      ${this.renderHeaderFile(step, kind, readHeader(vars)?.link ?? '', (link) =>
-        this.setDoc(
-          patchStep(this.document, index, {
-            vars: { ...withoutHeader(vars), [headerKey(kind)]: link },
-          }),
-        ),
+      ${this.renderHeaderFile(step, index, vars, kind, readHeader(vars)?.link ?? '', (link) =>
+        this.setDoc(patchStep(this.document, index, { vars: withHeader(vars, kind, link) })),
       )}
     `;
   }
@@ -2816,10 +2835,9 @@ export class ErpFlowsEditor extends LitElement {
     if (known?.titleVariable || !this.headerMedia) return nothing;
     const header = readHeader(vars);
     const write = (kind: HeaderKind | 'none', link: unknown): void => {
-      const rest = withoutHeader(vars);
       this.setDoc(
         patchStep(this.document, index, {
-          vars: kind === 'none' ? rest : { ...rest, [headerKey(kind)]: link ?? '' },
+          vars: kind === 'none' ? withoutHeader(vars) : withHeader(vars, kind, link ?? ''),
         }),
       );
     };
@@ -2841,7 +2859,9 @@ export class ErpFlowsEditor extends LitElement {
         <span class="hint">${this.t('ui.notifyHeaderHint')}</span>
       </div>
       ${header
-        ? this.renderHeaderFile(step, header.kind, header.link ?? '', (link) => write(header.kind, link))
+        ? this.renderHeaderFile(step, index, vars, header.kind, header.link ?? '', (link) =>
+            write(header.kind, link),
+          )
         : nothing}
     `;
   }
@@ -2852,9 +2872,17 @@ export class ErpFlowsEditor extends LitElement {
    * menu, not a public link to it, so a media header offers «Upload …» of its own kind next to the
    * link on a hub whose client carries the upload; once uploaded, the step shows the photo — or,
    * for a video or a PDF, that it is uploaded: a 100 MB file is not downloaded to preview it — and
-   * lets her replace it or take it away.
+   * lets her replace it or take it away. A PDF also carries the name the customer sees on it in the
+   * chat (hub#2405), on a hub that sends it.
    */
-  private renderHeaderFile(step: Step, kind: HeaderKind, link: unknown, write: (link: unknown) => void) {
+  private renderHeaderFile(
+    step: Step,
+    index: number,
+    vars: Record<string, unknown>,
+    kind: HeaderKind,
+    link: unknown,
+    write: (link: unknown) => void,
+  ) {
     const uploaded = isUploadedHeader(link);
     const canUpload = this.headerUploader(kind) !== null;
     const busy = this.uploadingHeader === step.id;
@@ -2929,6 +2957,19 @@ export class ErpFlowsEditor extends LitElement {
             >
             <span class="hint">${this.t(headerCopy('notifyHeaderUploadHint', kind))}</span>
           </div>`
+        : nothing}
+      ${kind === 'document' && this.documentName
+        ? html`${this.renderValue({
+              field: 'header-document-name',
+              label: this.t('ui.notifyHeaderDocumentName'),
+              value: vars[DOCUMENT_NAME_KEY] ?? '',
+              template: true,
+              onChange: (name) =>
+                this.setDoc(patchStep(this.document, index, { vars: { ...vars, [DOCUMENT_NAME_KEY]: name } })),
+            })}
+            <span class="hint" data-field="header-document-name-hint"
+              >${this.t('ui.notifyHeaderDocumentNameHint')}</span
+            >`
         : nothing}
       ${error
         ? html`<ok-inline-feedback
