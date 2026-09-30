@@ -519,6 +519,7 @@
     "notifyHeaderUploadHint_document": "PDF, up to 100 MB. It is sent with every message.",
     "notifyHeaderDocumentName": "Name the customer sees",
     "notifyHeaderDocumentNameHint": "The name of the PDF in the customer's chat. Empty: the template's name.",
+    "notifyHeaderDocumentNameHintLink": "The name of the PDF in the customer's chat. Empty: the end of the link.",
     "notifyHeaderUploaded_video": "Video uploaded",
     "notifyHeaderUploaded_document": "PDF uploaded",
     "notifyHeaderRemove_video": "Remove video",

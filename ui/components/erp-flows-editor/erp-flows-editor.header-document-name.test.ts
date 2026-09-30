@@ -143,6 +143,25 @@ describe('the name the customer sees on the header PDF', () => {
     expect(nameField(el), 'the name is not shown to be changed').toBeTruthy();
   });
 
+  it('opens showing the name saved on the step, labelled, with what an empty one sends', async () => {
+    const el = await mount({ header_document: REFS.document, [NAME_KEY]: 'Carta de otoño.pdf' });
+    const field = nameField(el) as (Element & { parts: unknown; label: string }) | null;
+    expect(field, 'the name is not on the screen').toBeTruthy();
+    expect(field!.parts).toEqual([{ kind: 'text', text: 'Carta de otoño.pdf' }]);
+    expect(field!.label).toBe('ui.notifyHeaderDocumentName');
+    const hint = el.renderRoot.querySelector('[data-field="header-document-name-hint"]');
+    // An uploaded PDF without a name travels with the template's name (hub#2405).
+    expect(hint?.textContent?.trim()).toBe('ui.notifyHeaderDocumentNameHint');
+  });
+
+  it('tells her an own link without a name goes out named after the end of the link', async () => {
+    // The hub adds the template's name only to a PDF it stores; for her own link Meta uses the
+    // end of the address, and the hint must not promise otherwise.
+    const el = await mount({ header_document: 'https://cdn.example.com/menu.pdf' });
+    const hint = el.renderRoot.querySelector('[data-field="header-document-name-hint"]');
+    expect(hint?.textContent?.trim()).toBe('ui.notifyHeaderDocumentNameHintLink');
+  });
+
   it('is hers to change, and changing the link keeps it', async () => {
     const el = await mount({ header_document: 'https://cdn.example.com/menu.pdf', [NAME_KEY]: 'Menu.pdf' });
     await compose(el, 'header-document-name', 'Tarifa 2026.pdf');

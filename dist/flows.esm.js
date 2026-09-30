@@ -6351,7 +6351,7 @@ var ErpFlowsEditor = class extends i3 {
       onChange: (name) => this.setDoc(patchStep(this.document, index, { vars: { ...vars, [DOCUMENT_NAME_KEY]: name } }))
     })}
             <span class="hint" data-field="header-document-name-hint"
-              >${this.t("ui.notifyHeaderDocumentNameHint")}</span
+              >${this.t(uploaded ? "ui.notifyHeaderDocumentNameHint" : "ui.notifyHeaderDocumentNameHintLink")}</span
             >` : A}
       ${error ? b2`<ok-inline-feedback
             tone="danger"
@@ -11362,6 +11362,7 @@ var es_default = {
     notifyHeaderUploadHint_document: "PDF, hasta 100 MB. Se env\xEDa con cada mensaje.",
     notifyHeaderDocumentName: "Nombre que ve el cliente",
     notifyHeaderDocumentNameHint: "El nombre del PDF en el chat del cliente. Vac\xEDo: el nombre de la plantilla.",
+    notifyHeaderDocumentNameHintLink: "El nombre del PDF en el chat del cliente. Vac\xEDo: el final del enlace.",
     notifyHeaderUploaded_video: "V\xEDdeo subido",
     notifyHeaderUploaded_document: "PDF subido",
     notifyHeaderRemove_video: "Quitar v\xEDdeo",
@@ -12364,6 +12365,7 @@ var en_default = {
     notifyHeaderUploadHint_document: "PDF, up to 100 MB. It is sent with every message.",
     notifyHeaderDocumentName: "Name the customer sees",
     notifyHeaderDocumentNameHint: "The name of the PDF in the customer's chat. Empty: the template's name.",
+    notifyHeaderDocumentNameHintLink: "The name of the PDF in the customer's chat. Empty: the end of the link.",
     notifyHeaderUploaded_video: "Video uploaded",
     notifyHeaderUploaded_document: "PDF uploaded",
     notifyHeaderRemove_video: "Remove video",

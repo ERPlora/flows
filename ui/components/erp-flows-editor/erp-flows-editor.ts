@@ -2968,7 +2968,7 @@ export class ErpFlowsEditor extends LitElement {
                 this.setDoc(patchStep(this.document, index, { vars: { ...vars, [DOCUMENT_NAME_KEY]: name } })),
             })}
             <span class="hint" data-field="header-document-name-hint"
-              >${this.t('ui.notifyHeaderDocumentNameHint')}</span
+              >${this.t(uploaded ? 'ui.notifyHeaderDocumentNameHint' : 'ui.notifyHeaderDocumentNameHintLink')}</span
             >`
         : nothing}
       ${error
