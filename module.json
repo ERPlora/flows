@@ -2,7 +2,7 @@
   "id": "flows",
   "name": "Automations",
   "icon": "git-branch",
-  "version": "0.1.81",
+  "version": "0.1.82",
   "description": "Automate repetitive work without writing code: appointment reminders, low-stock alerts and messages to customers that go out on their own.",
   "agent": {
     "description": "Automations (flows) for this hub — «when X happens, do Y». Two things live here. (1) The visual editor the owner uses: create, edit, enable and pause automations that react to an event, a schedule or a manual trigger; grant them what they may do; read their run history in plain language. (2) `flows.drafts.propose`, which is how YOU answer somebody who wants something to happen on its own — you write the automation as a DRAFT and it waits in Automations for them to check and turn on. Reach for it whenever a request is about something recurring, automatic, or «remind me / warn me / send it every time…». The module does not RUN automations; the hub's own kernel does.",
