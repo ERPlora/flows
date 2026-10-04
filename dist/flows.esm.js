@@ -4698,6 +4698,11 @@ var ErpFlowsEditor = class extends i3 {
       flex-direction: column;
       gap: 0.4rem;
     }
+    /* flows#88 — what to do about a damaged permission, read in the colour of the pill above it. */
+    .grant-block .broken {
+      color: var(--ok-danger, var(--ion-color-danger, #c0392b));
+      padding: 0 0.7rem;
+    }
     .grant .pinned {
       font-style: normal;
       color: var(--ok-text-muted, #6b675c);
@@ -7099,10 +7104,11 @@ var ErpFlowsEditor = class extends i3 {
   renderGrant(g3) {
     const k2 = grantKey(g3);
     const limits = pinRows(g3).map(([field, value]) => `${field} = ${value}`).join(", ");
-    const open = this.limitsOpen.includes(k2);
+    const broken = g3.payload_unreadable === true;
+    const open = !broken && this.limitsOpen.includes(k2);
     return b2`<div class="grant-block" data-grant=${k2}>
       <div class="grant">
-        <ok-status-pill tone="success" label=${this.t("ui.grantsGranted")}></ok-status-pill>
+        ${broken ? b2`<ok-status-pill tone="danger" label=${this.t("ui.grantBroken")}></ok-status-pill>` : b2`<ok-status-pill tone="success" label=${this.t("ui.grantsGranted")}></ok-status-pill>`}
         <span class="grow"
           >${g3.kind === "command" ? g3.value : this.t("ui.grantOther", { kind: g3.kind, value: g3.value })}${limits ? b2` <em class="pinned">${this.t("ui.grantPinned", { limits })}</em>` : A}</span
         >
@@ -7111,7 +7117,7 @@ var ErpFlowsEditor = class extends i3 {
                Offered on any other kind the hub answers flow.invalid_grant_payload — and this
                endpoint replaces the WHOLE list, so it would not lose that row, it would lose every
                permission on the screen. -->
-          ${canPinPayload(g3.kind) ? b2`<button
+          ${canPinPayload(g3.kind) && !broken ? b2`<button
                 type="button"
                 class="icon-btn"
                 data-act="limits"
@@ -7132,6 +7138,9 @@ var ErpFlowsEditor = class extends i3 {
           </button>
         </span>
       </div>
+      <!-- No limits to edit on it: a limit saved over an unreadable one leaves the row as it is in
+           the hub. Withdrawing it is what repairs it, and it then shows as missing, to allow again. -->
+      ${broken ? b2`<span class="hint broken" data-broken>${this.t("ui.grantBrokenHint")}</span>` : A}
       ${open ? this.renderLimits(g3) : A}
     </div>`;
   }
@@ -11252,6 +11261,8 @@ var es_default = {
     filterState: "Ver",
     filterTrigger: "Arranca con",
     grantAll: "Autorizar todo lo que necesita",
+    grantBroken: "Da\xF1ado",
+    grantBrokenHint: "El l\xEDmite de este permiso se ha estropeado, as\xED que la automatizaci\xF3n no puede hacer esto y se para aqu\xED. Ret\xEDralo y vuelve a autorizarlo; si ten\xEDa un l\xEDmite, ponlo otra vez despu\xE9s.",
     grantCommandNotFound: "Este hub no tiene ning\xFAn comando llamado {command}. Revisa el nombre en el paso.",
     grantLimitAdd: "A\xF1adir un l\xEDmite",
     grantLimitBadRoot: "\xAB{field}\xBB nombra algo que esta automatizaci\xF3n no tiene. Un l\xEDmite solo puede usar lo que la propia automatizaci\xF3n averigua \u2014escribe input.\u2026 o steps.\u2026\u2014 o un valor fijo.",
@@ -12255,6 +12266,8 @@ var en_default = {
     filterState: "Showing",
     filterTrigger: "Starts with",
     grantAll: "Allow everything it needs",
+    grantBroken: "Damaged",
+    grantBrokenHint: "This permission's limit got damaged, so the automation is not allowed to do this and stops here. Withdraw it and allow it again; if it had a limit, set it again afterwards.",
     grantCommandNotFound: "This hub has no command called {command}. Check the name in the step.",
     grantLimitAdd: "Add a limit",
     grantLimitBadRoot: "\xAB{field}\xBB names something this automation does not have. A limit can only use what the automation itself works out \u2014 write input.\u2026 or steps.\u2026 \u2014 or a fixed value.",

@@ -222,6 +222,12 @@ export interface Grant {
    * `flow.grant_payload_denied`, and **omitting it is refused just the same** as contradicting it.
    */
   payload?: Record<string, unknown>;
+  /**
+   * flows#88 — set by the hub when the stored limit of this grant cannot be read. Since hub#1636
+   * such a row authorises NOTHING, while `payload` still reads `{}` like a grant that limits
+   * nothing; this flag is the only way the screen can tell the two apart. Never sent back.
+   */
+  payload_unreadable?: boolean;
 }
 
 /** One piece of a composed value: typed text, or a field the owner picked. */
