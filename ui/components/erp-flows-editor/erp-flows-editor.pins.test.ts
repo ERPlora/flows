@@ -559,9 +559,33 @@ describe('a permission whose limit got damaged (flows#88)', () => {
     expect(row.querySelector('[data-broken]')?.textContent).toContain('ui.grantBrokenHint');
   });
 
-  it('offers no limits on it: saving a limit over an unreadable one would not repair it', async () => {
+  it('offers no limits on it: there is no stored limit left to show, and an empty one repairs nothing', async () => {
     const el = await permissionsTab(damaged());
     expect(rowOf(el, `command ${CANCEL}`).querySelector('[data-act="limits"]')).toBeNull();
+  });
+
+  it('folds away the limits the owner had open when the hub answers that the row got damaged', async () => {
+    // Every save answers with what the hub really stored. A row whose limits were open a moment
+    // ago may come back unreadable, and its boxes would then be editing a limit that is not there.
+    const el = await permissionsTab(
+      fakeClient({
+        flows: {
+          grants: vi.fn(async () => [
+            { id: 'g1', kind: 'command', value: CANCEL, payload: { channel: 'customer' } },
+            { id: 'g2', kind: 'notify', value: 'email', payload: {} },
+          ]),
+          replaceGrants: vi.fn(async () => [
+            { id: 'g1', kind: 'command', value: CANCEL, payload: {}, payload_unreadable: true },
+          ]),
+        },
+      }),
+    );
+    await click(el, '[data-act="limits"]');
+    expect(rowOf(el, `command ${CANCEL}`).querySelector('[data-field="pin-name"]')).not.toBeNull();
+
+    await click(el, '[data-testid="flows-editor-grant-revoke-notify email"]');
+    expect(rowOf(el, `command ${CANCEL}`).querySelector('[data-broken]')).not.toBeNull();
+    expect(rowOf(el, `command ${CANCEL}`).querySelector('[data-field="pin-name"]')).toBeNull();
   });
 
   it('withdraws it, and then offers to allow it again — the repair, end to end', async () => {

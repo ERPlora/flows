@@ -7138,8 +7138,9 @@ var ErpFlowsEditor = class extends i3 {
           </button>
         </span>
       </div>
-      <!-- No limits to edit on it: a limit saved over an unreadable one leaves the row as it is in
-           the hub. Withdrawing it is what repairs it, and it then shows as missing, to allow again. -->
+      <!-- No limits to edit on it: there is no stored limit left to show, and saving the boxes empty
+           re-sends the row as it is, which the hub leaves broken. Withdrawing it is the one repair
+           the row names, and it then shows as missing, to allow again. -->
       ${broken ? b2`<span class="hint broken" data-broken>${this.t("ui.grantBrokenHint")}</span>` : A}
       ${open ? this.renderLimits(g3) : A}
     </div>`;
