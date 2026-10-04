@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import './erp-flows-editor';
 import type { ErpFlowsEditor } from './erp-flows-editor';
+import en from '../../../locales/en.json';
+import es from '../../../locales/es.json';
 
 /**
  * **«Puede anular citas COMO CLIENTE» has to be sayable from the screen** (flows#66, hub#1623).
@@ -522,5 +524,105 @@ describe('a limit the hub would bounce never leaves the screen (flows#108)', () 
     await typeLimit(el, 'input.customer_id');
     const [, sent] = client.flows.replaceGrants.mock.calls[0] as [string, unknown];
     expect(sent).toEqual([{ kind: 'query', value: OWN, payload: { customer_id: 'input.customer_id' } }]);
+  });
+});
+
+/**
+ * **A permission whose limit got damaged reads as damaged, and says how to fix it** (flows#88).
+ *
+ * Since hub#1636 the kernel authorises NOTHING with a grant whose stored limit cannot be read, and
+ * the listing says so with `payload_unreadable`. This screen used to paint that row «Allowed», in
+ * green, exactly like a grant that limits nothing — the owner saw a permission given while every
+ * run stopped on it. The way back is the one the row now names: withdraw it and allow it again.
+ */
+describe('a permission whose limit got damaged (flows#88)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const damaged = (replaceGrants = vi.fn(async (_id: string, g: unknown) => g)) =>
+    fakeClient({
+      flows: {
+        grants: vi.fn(async () => [
+          { id: 'g1', kind: 'command', value: CANCEL, payload: {}, payload_unreadable: true },
+        ]),
+        replaceGrants,
+      },
+    });
+
+  it('is not painted as allowed, and says what to do about it', async () => {
+    const el = await permissionsTab(damaged());
+    const row = rowOf(el, `command ${CANCEL}`);
+    const pill = row.querySelector('ok-status-pill')!;
+    expect(pill.getAttribute('label')).toBe('ui.grantBroken');
+    expect(pill.getAttribute('tone')).toBe('danger');
+    expect(row.querySelector('[data-broken]')?.textContent).toContain('ui.grantBrokenHint');
+  });
+
+  it('offers no limits on it: there is no stored limit left to show, and an empty one repairs nothing', async () => {
+    const el = await permissionsTab(damaged());
+    expect(rowOf(el, `command ${CANCEL}`).querySelector('[data-act="limits"]')).toBeNull();
+  });
+
+  it('folds away the limits the owner had open when the hub answers that the row got damaged', async () => {
+    // Every save answers with what the hub really stored. A row whose limits were open a moment
+    // ago may come back unreadable, and its boxes would then be editing a limit that is not there.
+    const el = await permissionsTab(
+      fakeClient({
+        flows: {
+          grants: vi.fn(async () => [
+            { id: 'g1', kind: 'command', value: CANCEL, payload: { channel: 'customer' } },
+            { id: 'g2', kind: 'notify', value: 'email', payload: {} },
+          ]),
+          replaceGrants: vi.fn(async () => [
+            { id: 'g1', kind: 'command', value: CANCEL, payload: {}, payload_unreadable: true },
+          ]),
+        },
+      }),
+    );
+    await click(el, '[data-act="limits"]');
+    expect(rowOf(el, `command ${CANCEL}`).querySelector('[data-field="pin-name"]')).not.toBeNull();
+
+    await click(el, '[data-testid="flows-editor-grant-revoke-notify email"]');
+    expect(rowOf(el, `command ${CANCEL}`).querySelector('[data-broken]')).not.toBeNull();
+    expect(rowOf(el, `command ${CANCEL}`).querySelector('[data-field="pin-name"]')).toBeNull();
+  });
+
+  it('withdraws it, and then offers to allow it again — the repair, end to end', async () => {
+    const replaceGrants = vi.fn(async (_id: string, g: unknown) => g);
+    const el = await permissionsTab(damaged(replaceGrants));
+    await click(el, `[data-testid="flows-editor-grant-revoke-command ${CANCEL}"]`);
+    expect(replaceGrants).toHaveBeenLastCalledWith('f1', []);
+    expect(rowOf(el, `command ${CANCEL}`)).toBeNull();
+
+    await click(el, '[data-testid="flows-editor-grant-all"]');
+    expect(replaceGrants).toHaveBeenLastCalledWith('f1', [{ kind: 'command', value: CANCEL }]);
+    const pill = rowOf(el, `command ${CANCEL}`).querySelector('ok-status-pill')!;
+    expect(pill.getAttribute('label')).toBe('ui.grantsGranted');
+  });
+
+  it('leaves a readable grant that limits nothing exactly as it was', async () => {
+    const el = await permissionsTab(
+      fakeClient({
+        flows: {
+          grants: vi.fn(async () => [
+            { id: 'g1', kind: 'command', value: CANCEL, payload: {}, payload_unreadable: false },
+          ]),
+        },
+      }),
+    );
+    const row = rowOf(el, `command ${CANCEL}`);
+    expect(row.querySelector('ok-status-pill')!.getAttribute('label')).toBe('ui.grantsGranted');
+    expect(row.querySelector('[data-broken]')).toBeNull();
+    expect(row.querySelector('[data-act="limits"]')).not.toBeNull();
+  });
+
+  it('has its words in English and in Spanish', () => {
+    for (const locale of [en, es]) {
+      for (const key of ['grantBroken', 'grantBrokenHint']) {
+        expect((locale.ui as Record<string, string>)[key], key).toBeTruthy();
+      }
+    }
+    expect(es.ui.grantBrokenHint).not.toBe(en.ui.grantBrokenHint);
   });
 });

@@ -409,6 +409,8 @@
     "filterState": "Showing",
     "filterTrigger": "Starts with",
     "grantAll": "Allow everything it needs",
+    "grantBroken": "Damaged",
+    "grantBrokenHint": "This permission's limit got damaged, so the automation is not allowed to do this and stops here. Withdraw it and allow it again; if it had a limit, set it again afterwards.",
     "grantCommandNotFound": "This hub has no command called {command}. Check the name in the step.",
     "grantLimitAdd": "Add a limit",
     "grantLimitBadRoot": "«{field}» names something this automation does not have. A limit can only use what the automation itself works out — write input.… or steps.… — or a fixed value.",

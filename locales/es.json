@@ -409,6 +409,8 @@
     "filterState": "Ver",
     "filterTrigger": "Arranca con",
     "grantAll": "Autorizar todo lo que necesita",
+    "grantBroken": "Dañado",
+    "grantBrokenHint": "El límite de este permiso se ha estropeado, así que la automatización no puede hacer esto y se para aquí. Retíralo y vuelve a autorizarlo; si tenía un límite, ponlo otra vez después.",
     "grantCommandNotFound": "Este hub no tiene ningún comando llamado {command}. Revisa el nombre en el paso.",
     "grantLimitAdd": "Añadir un límite",
     "grantLimitBadRoot": "«{field}» nombra algo que esta automatización no tiene. Un límite solo puede usar lo que la propia automatización averigua —escribe input.… o steps.…— o un valor fijo.",

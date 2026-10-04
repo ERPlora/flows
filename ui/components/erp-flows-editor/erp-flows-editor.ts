@@ -894,6 +894,11 @@ export class ErpFlowsEditor extends LitElement {
       flex-direction: column;
       gap: 0.4rem;
     }
+    /* flows#88 — what to do about a damaged permission, read in the colour of the pill above it. */
+    .grant-block .broken {
+      color: var(--ok-danger, var(--ion-color-danger, #c0392b));
+      padding: 0 0.7rem;
+    }
     .grant .pinned {
       font-style: normal;
       color: var(--ok-text-muted, #6b675c);
@@ -3803,10 +3808,15 @@ export class ErpFlowsEditor extends LitElement {
     const limits = pinRows(g)
       .map(([field, value]) => `${field} = ${value}`)
       .join(', ');
-    const open = this.limitsOpen.includes(k);
+    // flows#88 — the hub denies everything with a grant whose limit it cannot read (hub#1636).
+    // Painted «Allowed» it would be the one row on this screen that lies.
+    const broken = g.payload_unreadable === true;
+    const open = !broken && this.limitsOpen.includes(k);
     return html`<div class="grant-block" data-grant=${k}>
       <div class="grant">
-        <ok-status-pill tone="success" label=${this.t('ui.grantsGranted')}></ok-status-pill>
+        ${broken
+          ? html`<ok-status-pill tone="danger" label=${this.t('ui.grantBroken')}></ok-status-pill>`
+          : html`<ok-status-pill tone="success" label=${this.t('ui.grantsGranted')}></ok-status-pill>`}
         <span class="grow"
           >${g.kind === 'command' ? g.value : this.t('ui.grantOther', { kind: g.kind, value: g.value })}${limits
             ? html` <em class="pinned">${this.t('ui.grantPinned', { limits })}</em>`
@@ -3817,7 +3827,7 @@ export class ErpFlowsEditor extends LitElement {
                Offered on any other kind the hub answers flow.invalid_grant_payload — and this
                endpoint replaces the WHOLE list, so it would not lose that row, it would lose every
                permission on the screen. -->
-          ${canPinPayload(g.kind)
+          ${canPinPayload(g.kind) && !broken
             ? html`<button
                 type="button"
                 class="icon-btn"
@@ -3840,6 +3850,10 @@ export class ErpFlowsEditor extends LitElement {
           </button>
         </span>
       </div>
+      <!-- No limits to edit on it: there is no stored limit left to show, and saving the boxes empty
+           re-sends the row as it is, which the hub leaves broken. Withdrawing it is the one repair
+           the row names, and it then shows as missing, to allow again. -->
+      ${broken ? html`<span class="hint broken" data-broken>${this.t('ui.grantBrokenHint')}</span>` : nothing}
       ${open ? this.renderLimits(g) : nothing}
     </div>`;
   }
