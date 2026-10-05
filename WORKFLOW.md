@@ -38,8 +38,8 @@ Todo lo que corre vive en el motor del hub:
 | Recetas de fábrica que traen otros módulos (servirlas, encenderlas, apagarlas, restaurarlas) | Hub, `crates/runtime/src/flows/templates.rs`; cada módulo publica las suyas en su carpeta `flows/` |
 | Conceder al módulo «Administrar automatizaciones» | Hub, Ajustes → Permisos |
 
-Pendiente de enlazar: hub — motor de automatizaciones: disparadores, pasos, permisos, secretos, aprobaciones, historial y eventos caídos
-Pendiente de enlazar: hub — recetas de fábrica de los módulos: servirlas, encenderlas, apagarlas y restaurarlas
+El motor (disparadores, pasos, permisos, secretos, aprobaciones, historial) lo describe el `WORKFLOW.md` del hub en `workflow/automatizaciones.md` (HUB-F80 a HUB-F112), y la cola de avisos caídos en `workflow/avisos.md` (HUB-F50 a HUB-F64).
+Las recetas de fábrica (servirlas, encenderlas, apagarlas y restaurarlas) son HUB-F104 a HUB-F107 del mismo documento.
 
 ## Referencia adoptada
 
@@ -280,9 +280,14 @@ El recorrido canónico de `qa-hub-flows` (§«Lo más importante»), paso a paso
   el hub no tiene, se rechaza la lista completa.
 - **Un secreto no se vuelve a leer.** El hub solo devuelve los nombres.
 - **Una pregunta espera como mucho 30 días**; el hub rechaza un plazo mayor al guardar.
-- **Pausar o borrar para lo que estaba en marcha.** Una ejecución en curso de una automatización
-  pausada o borrada se cancela en su siguiente paso. Al borrar, lo que esperaba un plazo se cancela
-  al momento; lo que esperaba una respuesta se cancela cuando alguien contesta o caduca la pregunta.
+- **Pausar o borrar para lo que estaba en marcha, con excepciones.** Una ejecución pendiente o en
+  curso de una automatización pausada o borrada se cancela en su siguiente paso. Al pausar, una espera
+  se cancela solo al despertar (si se vuelve a encender antes, sigue); las preguntas y las propuestas
+  del asistente no se cancelan y aprobarlas ejecuta; los mensajes en cola salen, y una llamada a otro
+  sistema o un turno del asistente ya en marcha terminan. Al borrar, lo que esperaba un plazo se
+  cancela al momento; lo que esperaba una respuesta se cancela cuando alguien contesta la pregunta,
+  rechaza la propuesta o caduca, y aprobar una propuesta de una automatización borrada contesta «sin
+  permiso» y la deja pendiente (FLOWS-F03, FLOWS-F09).
 - **Aislamiento.** Los borradores y la consulta de estado van siempre con el `hub_id` del negocio.
 
 ## Lo que NO hace, a propósito

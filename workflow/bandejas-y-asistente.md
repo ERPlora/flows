@@ -27,8 +27,7 @@ automatización sigue. Un no o el silencio hacen lo que se eligió en el paso (F
 historial de la ejecución.
 Si falla: la tarjeta se queda y sale «Demasiado tarde: esta caducó antes de que contestaras. No se ha
 hecho nada.», «Alguien ya contestó a esta. No se ha hecho nada dos veces.» o el mensaje del hub.
-Implicados: pendiente
-Pendiente de enlazar: hub — decidir una pregunta o una propuesta (re-comprueba el permiso, ejecuta lo propuesto sin volver al asistente, caducidad por barrido)
+Implicados: HUB-F100, HUB-F101, HUB_SHELL-F93
 QA: qa-hub-flows R6
 
 ### FLOWS-F25 Reenviar o cerrar lo que no llegó a pasar
@@ -39,7 +38,8 @@ Pantalla: Automatizaciones
 Pasos:
 1. En **Automatizaciones**, la bandeja **Necesita tu atención** («Esto no llegó a pasar. Decide qué
    hacer con cada uno.») enseña cada aviso del negocio que el hub no consiguió entregar tras sus
-   reintentos: «… no llegó a salir», por qué y qué hacer, de qué módulo vino, cuántos intentos, cuándo,
+   reintentos (los que fallan por un permiso, por el cupo agotado o porque se retiró el permiso de la
+   automatización llegan al primer intento): «… no llegó a salir», por qué y qué hacer, de qué módulo vino, cuántos intentos, cuándo,
    su referencia (**Copiar la referencia**), su contenido y el texto técnico plegado.
 2. **Volver a enviarlo** lo devuelve a la cola de envío. Con más de uno reenviable sale también **Volver a
    enviar los N**.
@@ -58,8 +58,7 @@ días y después borra el evento (la pantalla lo dice: «El hub guarda quién ce
 qué durante noventa días.»). Lo que sigue atascado sin decidir no se borra nunca.
 Si falla: la fila se queda y sale el motivo («Le quitaste el permiso…», «Automatizaciones no tiene permiso
 para ver lo que se ha atascado…» o el mensaje del hub).
-Implicados: PRINTING-F16
-Pendiente de enlazar: hub — cola de eventos caídos: reenviar, reenviar todos y cerrar con motivo; la misma cola de Sistema › «Eventos caídos»
+Implicados: PRINTING-F16, HUB-F53, HUB-F54, HUB-F55, HUB-F56, HUB-F57, HUB-F191, HUB-F266, HUB_SHELL-F145, HUB_SHELL-F146, HUB_SHELL-F147, HUB_SHELL-F148, HUB-F52
 QA: qa-hub-flows R8, BD-10
 
 ### FLOWS-F26 Pedirle al asistente una automatización
@@ -72,18 +71,21 @@ Pasos:
    llamarle»).
 2. El asistente escribe un **borrador**: nombre, un disparador como mucho, de uno a ocho pasos de «hacer
    algo», «solo sigue si» o «esperar», y las notas de lo que no supo decidir.
-3. Contesta que lo ha dejado esperando en Automatizaciones y repite sus dudas.
-4. El borrador aparece en **Propuestas por el asistente** la próxima vez que se abre Automatizaciones
+3. Antes de guardarlo sale la tarjeta «El asistente quiere ejecutar una acción», que en vez del nombre
+   de la acción dice «Una acción que esta app no sabe nombrar» (el módulo no publica el nombre de su
+   orden en la traducción); la persona la confirma.
+4. Contesta que lo ha dejado esperando en Automatizaciones y repite sus dudas.
+5. El borrador aparece en **Propuestas por el asistente** la próxima vez que se abre Automatizaciones
    (FLOWS-F27).
 Entra: lo que la persona pide en la conversación; los nombres de acciones que el asistente conoce de
 este negocio.
 Sale: un borrador pendiente en el módulo, y el aviso `flows.draft.proposed` (que hoy no escucha nadie).
 No crea ninguna automatización, no concede permisos y no ejecuta nada.
 Si falla: el hub rechaza un borrador que no sigue la forma pedida antes de guardarlo; sin el permiso de
-gestionar automatizaciones (de fábrica, solo el perfil administrador) no se guarda. Si el asistente se
-inventa un nombre de acción, se descubre al guardarlo en el editor.
-Implicados: pendiente
-Pendiente de enlazar: hub — el asistente del hub, que ofrece esta orden como herramienta y la ejecuta con la sesión de quien pregunta
+gestionar automatizaciones (de fábrica, solo el perfil administrador) el asistente no tiene esa orden y
+contesta que no puede. Si el asistente se inventa un nombre de acción, el editor lo guarda igual: se
+descubre al conceder su permiso o al ejecutarse (FLOWS-F14).
+Implicados: HUB-F273, HUB-F274, HUB_SHELL-F190
 QA: ninguno
 
 ### FLOWS-F27 Revisar un borrador del asistente y crearlo
@@ -109,8 +111,7 @@ ejecutar.
 Sale: una automatización nueva sin permisos, y el borrador marcado como usado con el enlace a ella.
 Salir con ← sin guardar deja el borrador en la bandeja.
 Si falla: si el hub no la acepta al guardar, el mensaje en rojo y no se crea nada.
-Implicados: pendiente
-Pendiente de enlazar: hub — crear una automatización (valida el documento entero al guardar)
+Implicados: HUB-F80, HUB-F111
 QA: ninguno
 
 ### FLOWS-F28 Descartar un borrador del asistente
