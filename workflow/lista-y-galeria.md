@@ -66,7 +66,9 @@ Pasos:
 Entra: la automatización entera (el hub la vuelve a validar al guardarla).
 Sale: la automatización encendida o pausada. Pausarla hace que lo que estaba en marcha se cancele en su
 siguiente paso. Si es una receta encendida desde otro módulo, esa pantalla la verá apagada.
-Si falla: el mensaje del hub en rojo arriba; la fila se queda como estaba. No hay borrar ni ejecutar en
+Si falla: el mensaje del hub en rojo arriba. La etiqueta sigue con el estado guardado, pero el
+interruptor puede quedarse movido hasta que se recarga la pantalla (leído en el código, sin ejecutar).
+No hay borrar ni ejecutar en
 grupo, a propósito.
 Implicados: pendiente
 Pendiente de enlazar: hub — guardar una automatización con su interruptor; una ejecución en curso se cancela si se pausa
@@ -95,7 +97,8 @@ y restaurantes»). Una tarjeta se esconde cuando el hub contesta que no conoce e
 módulos; entonces, debajo de la galería, sale «Hay automatizaciones ocultas: necesitan el módulo …» y
 vuelve al recargar tras instalarlo.
 Sale: una automatización nueva, en pausa y sin permisos, con el nombre y los valores de la tarjeta (por
-ejemplo, esperar un día, 100,00 € o seis personas).
+ejemplo, esperar un día, 100,00 € o seis personas). La pausa la pide la pantalla al crearla (el hub,
+si no se le dice, crea encendida), y no queda ligada a su tarjeta.
 Si falla: el mensaje del hub en rojo dentro de la tarjeta, que sigue abierta; no se crea nada.
 Implicados: pendiente
 Pendiente de enlazar: hub — crear una automatización y comprobar qué avisos conoce el hub
@@ -155,7 +158,8 @@ Pasos:
    Seguirá encendida o apagada como esté ahora.») o **Dejar la mía**.
 4. Sale «Hecho: esta automatización ya es la versión de fábrica.».
 Entra: la receta encendida (solo las encendidas por la puerta del módulo, no las copias de FLOWS-F05).
-Sale: la misma automatización (mismo historial) con el documento y los permisos de la receta actual;
+Sale: la misma automatización (mismo historial) con el nombre, el documento y los permisos de la receta
+actual;
 encendida o pausada como estaba.
 Si falla: «Esta automatización ya no existe aquí, así que no hay nada que restaurar. Vuelve a activarla
 desde su app.» o «No se pudo restaurar la automatización. No se ha cambiado nada; inténtalo de nuevo en
@@ -197,7 +201,8 @@ Pasos:
 3. Si la original llama a otro sistema con claves, el aviso añade «Sale fuera usando: … Comprueba que
    son los correctos para la copia.».
 Entra: el documento de la original.
-Sale: una automatización nueva con el mismo documento, en pausa y sin permisos, sin historial.
+Sale: una automatización nueva con el mismo documento, en pausa (lo pide la pantalla) y sin permisos,
+sin historial.
 Si falla: el mensaje del hub en rojo arriba; no se crea nada.
 Implicados: pendiente
 Pendiente de enlazar: hub — crear una automatización
@@ -213,12 +218,13 @@ Pasos:
 2. Debajo sale «¿Borrar «…»? Esto no se puede deshacer.» con **Sí, bórrala** y **Déjala**.
 3. **Sí, bórrala** la quita de la lista.
 Entra: la automatización elegida.
-Sale: el hub la marca como borrada: deja de dispararse al momento, lo que esperaba se cancela y su
+Sale: el hub la marca como borrada: deja de dispararse al momento, lo que esperaba un plazo se cancela
+al momento, lo que esperaba una respuesta se cancela cuando alguien contesta o caduca la pregunta, y su
 historial se conserva. Si era una receta encendida desde otro módulo, esa pantalla deja de verla y,
 si se vuelve a activar allí, se crea otra.
 Si falla: el mensaje del hub en rojo arriba; la fila sigue. Desde el editor no se puede borrar.
 Implicados: pendiente
-Pendiente de enlazar: hub — borrar una automatización (desarma sus disparadores y cancela lo que esperaba)
+Pendiente de enlazar: hub — borrar una automatización (desarma sus disparadores y cancela lo que esperaba un plazo)
 QA: qa-hub-flows R10
 
 ### FLOWS-F10 Leer la guía

@@ -220,7 +220,7 @@ El recorrido canónico de `qa-hub-flows` (§«Lo más importante»), paso a paso
 | Entender el fallo y saber qué hacer | hecho | F23, F25 |
 | Reintentar una ejecución fallida desde el paso que falló | no hecho (hub#952) | F23 |
 | Reenviar o cerrar con motivo lo que no se entregó | hecho; sin lista de lo cerrado (flows#47) | F25 |
-| Duplicar, buscar, filtrar entre muchas | parcial: el buscador solo encuentra por el nombre técnico del aviso o la acción | F02, F08 |
+| Duplicar, buscar, filtrar entre muchas | parcial: el buscador solo encuentra por el nombre de la automatización y el nombre técnico del aviso o la acción | F02, F08 |
 | Permisos por automatización, con límites | parcial: antes del primer guardado «Autorizar todo» no hace nada | F19 |
 | Aprobación por rol con plazo y salida por caducidad | parcial: solo un administrador puede contestar, sea cual sea el rol | F18, F24 |
 | Borrador del asistente con lo que no supo decidir | hecho | F26, F27 |
@@ -246,18 +246,27 @@ El recorrido canónico de `qa-hub-flows` (§«Lo más importante»), paso a paso
     nombre o el teléfono de un cliente si se los dijeron. El borrado de un cliente no los toca;
   - el aviso `flows.draft.proposed` lleva lo mismo que la orden que deja el borrador (nombre,
     documento y notas); vive en el registro de avisos del hub, que lo borra a los 90 días;
-  - en el hub: lo que entró y salió de cada paso de cada ejecución (nombres, teléfonos, el texto de un
+  - en el hub: lo que entró y salió de cada paso de cada ejecución (nombres, el texto de un
     WhatsApp…), que el hub borra a los 90 días del final de la ejecución; el texto de una pregunta en
     espera, la propuesta del asistente con sus datos y la nota de quien contesta, que mueren con su
-    ejecución; el contenido completo de cada evento caído, que se ve en pantalla en FLOWS-F25; quién
-    creó y cambió cada automatización y permiso, y quién cerró cada evento caído y por qué;
+    ejecución; el contenido completo de cada evento caído, que se ve en pantalla en FLOWS-F25 (uno
+    atascado se guarda hasta que alguien lo decide; uno cerrado, con quién lo cerró y por qué, 90
+    días); y quién creó y cambió cada automatización y permiso;
+  - el teléfono o el email al que va un mensaje no queda en el historial de la ejecución (el paso lo
+    marca como oculto): solo viaja en la cola de envío;
+  - al borrar los datos de un cliente, el hub vacía lo que su historial **terminado** guardaba de él
+    (avisos entregados o cerrados, ejecuciones terminadas con sus pasos y propuestas); lo atascado y lo
+    que sigue en marcha no se vacía;
   - la pantalla enseña en claro los datos que viajan en una propuesta y en un evento caído.
 
 ## Reglas que no se rompen
 
 - **Solo un administrador.** Todas las puertas del motor (automatizaciones, permisos, secretos,
-  preguntas, ejecuciones, eventos caídos) exigen sesión de dueño o administrador, y además que el
-  módulo tenga concedido «Administrar automatizaciones». Lo comprueba el hub, no la pantalla.
+  preguntas, ejecuciones, eventos caídos, recetas de fábrica) exigen sesión de dueño o administrador;
+  lo comprueba el hub. Cuando la llamada la hace un módulo, como esta pantalla, el hub exige además
+  que ese módulo tenga «Administrar automatizaciones». Las puertas de recetas de fábrica (listar,
+  encender, apagar y restaurar) no lo piden: un módulo solo toca sus propias recetas, salvo
+  restaurar, que también puede quien tenga ese permiso.
 - **Un borrador no es una automatización.** El asistente solo puede dejar un borrador: la orden lo
   guarda siempre como pendiente, en una tabla del módulo que el motor no conoce. Solo se convierte en
   automatización cuando un administrador lo guarda en el editor.
@@ -266,14 +275,14 @@ El recorrido canónico de `qa-hub-flows` (§«Lo más importante»), paso a paso
 - **Nada nace con permisos.** Crear desde la galería, copiar o crear un borrador no concede ningún
   permiso; la única excepción son los permisos con límite que declara una receta (FLOWS-F05), y si el
   hub no puede guardar el límite, la pantalla retira todos los de esa automatización.
-- **La galería y la copia crean siempre en pausa.**
 - **Una automatización actúa con sus propios permisos**, nunca con los de quien la creó; un paso sin
   su permiso se rechaza al ejecutarse. Conceder permisos es una lista entera: si nombra una acción que
   el hub no tiene, se rechaza la lista completa.
 - **Un secreto no se vuelve a leer.** El hub solo devuelve los nombres.
 - **Una pregunta espera como mucho 30 días**; el hub rechaza un plazo mayor al guardar.
 - **Pausar o borrar para lo que estaba en marcha.** Una ejecución en curso de una automatización
-  pausada o borrada se cancela en su siguiente paso; las que esperaban se cancelan al borrar.
+  pausada o borrada se cancela en su siguiente paso. Al borrar, lo que esperaba un plazo se cancela
+  al momento; lo que esperaba una respuesta se cancela cuando alguien contesta o caduca la pregunta.
 - **Aislamiento.** Los borradores y la consulta de estado van siempre con el `hub_id` del negocio.
 
 ## Lo que NO hace, a propósito
@@ -289,7 +298,11 @@ El recorrido canónico de `qa-hub-flows` (§«Lo más importante»), paso a paso
   o salen fuera, y los añade la persona.
 - No enciende las recetas de fábrica de otros módulos: eso lo hace la pantalla de cada módulo (por
   ejemplo, Ajustes de la Bandeja de WhatsApp) por la puerta del hub.
-- No guarda etiquetas, autor ni plantilla de origen en una automatización: el hub no tiene dónde.
+- No tiene etiquetas: el hub no tiene dónde. La pantalla no enseña quién creó o cambió una
+  automatización, aunque el hub lo guarda. Y lo que se crea desde la galería no queda ligado a su
+  tarjeta: el hub solo guarda la receta de origen de lo que se enciende desde la pantalla de su módulo.
+- No hace que el hub cree en pausa: la galería, la copia y el borrador nacen en pausa porque la
+  pantalla lo pide así; el hub, si no le dicen nada, crea la automatización encendida.
 - No manda SMS.
 
 ## Dudas abiertas
@@ -308,7 +321,8 @@ Se resuelven con `market-decision`; no las decide el worker.
 6. ¿Debe avisar «Volver» de que hay cambios sin guardar?
 7. ¿Debe poder editarse el filtro del disparador («solo cuando el total pase de…»)?
 8. ¿Cuánto se conservan los borradores decididos y deben entrar en el borrado de un cliente?
-9. `flows.automations.status` ya no la consulta ningún módulo en `origin/main`: ¿se mantiene?
+9. `flows.automations.status` ya no la consulta ningún módulo en `origin/main` (sí puede usarla el
+   asistente, que la tiene como herramienta): ¿se mantiene?
 
 ## Fuentes contrastadas
 
@@ -328,7 +342,7 @@ discrepancia; manda el código.
 - **`docs/screens.md`**: la caja de secretos vive en la pestaña Permisos; vive dentro del paso
   «Llamar a otro sistema» (F16).
 - **`docs/screens.md`**: el disparador por aviso admite «a filter on the event's own fields»; la
-  pantalla no tiene dónde escribirlo (lo conserva si ya venía) (F13).
+  pantalla no tiene dónde escribirlo; lo conserva si ya venía, también al cambiar de aviso (F13).
 - **`docs/screens.md`**: dentro de una automatización hay **Delete**; solo se borra desde la × de la
   lista (F09).
 - **`README.md`**: la tarjeta se crea «con lo que tienes que decidir señalado»; lo que hay que decidir
@@ -341,12 +355,14 @@ discrepancia; manda el código.
 - **`architecture/hub/flows.md` §9.3**: `flows.automations.status` la consume la tarjeta de WhatsApp;
   en `origin/main` de `whatsapp_inbox` ya no la llama (usa `flows.drafts.list` solo para saber si
   Automatizaciones está instalado) (F29).
-- **Texto equivocado**: al guardar una automatización sale «Permisos actualizados.» (F12, F21).
+- **Sin confirmación al guardar** (leído en el código, sin ejecutar): el aviso que el editor fija al
+  guardar se borra en el mismo instante, así que tras **Guardar** no sale nada; «Permisos
+  actualizados.» solo se ve tras **Autorizar todo lo que necesita** o **Guardar límites** (F12, F21).
 - **Texto equivocado**: con un hub cuyo formato de automatizaciones es **más nuevo** que el del
   módulo, la pantalla dice «Este hub todavía no sabe automatizar … Actualiza el hub» (F01).
 - **Texto que no se cumple**: el buscador dice «por lo que la arranca o por lo que hace», pero solo
-  encuentra por el nombre técnico (`sale.completed`, `tasks.tasks.create`), no por la frase que se ve
-  (F02).
+  encuentra por el nombre de la automatización y por el nombre técnico del aviso o la acción
+  (`sale.completed`, `tasks.tasks.create`), no por la frase que se ve (F02).
 - **Texto equivocado**: la bandeja «Pendiente de ti» dice «El asistente quiere cambiar algo.» también
   cuando lo que espera es una pregunta de un paso «Preguntar antes a alguien», sin asistente (F24).
 - **Texto inalcanzable**: «Esta pregunta se hizo a otro rol y no puedes contestarla tú.» no puede salir

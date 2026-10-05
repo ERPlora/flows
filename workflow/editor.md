@@ -5,7 +5,7 @@ Prefijo: FLOWS
 ## Flujos
 
 ### FLOWS-F12 Crear una automatización desde cero
-Estado: parcial — nace «Solo a mano» y no hay botón para ejecutarla (FLOWS-F22); al guardar dice «Permisos actualizados.»; y la flecha de volver tira lo que no se guardó sin preguntar
+Estado: parcial — nace «Solo a mano» y no hay botón para ejecutarla (FLOWS-F22); al guardar no sale ningún aviso de que se ha guardado (leído en el código, sin ejecutar); y la flecha de volver tira lo que no se guardó sin preguntar
 Vertical: comun
 Actor: administrador
 Pantalla: Editor de automatización
@@ -15,8 +15,8 @@ Pasos:
    cuando pulses Ejecutar» y «Todavía no hay pasos. Añade lo primero que debe hacer esta
    automatización.».
 3. Escribe el nombre, elige cuándo arranca (FLOWS-F13) y añade los pasos (FLOWS-F14).
-4. Pulsa **Guardar**: el hub la crea y el editor sigue abierto sobre ella; ya se pueden conceder sus
-   permisos (FLOWS-F19).
+4. Pulsa **Guardar**: el botón pasa a «Guardando…» y vuelve a «Guardar», sin otro aviso; el hub la crea
+   y el editor sigue abierto sobre ella; ya se pueden conceder sus permisos (FLOWS-F19).
 5. ← vuelve a la lista y la recarga.
 Entra: lo que se escribe y se elige.
 Sale: una automatización nueva, en pausa salvo que se haya encendido el interruptor antes de guardar
@@ -28,7 +28,7 @@ Pendiente de enlazar: hub — crear una automatización: el hub valida el docume
 QA: qa-hub-flows R1, BD-10
 
 ### FLOWS-F13 Elegir cuándo arranca
-Estado: parcial — el filtro del propio disparador («solo cuando el total pase de…») no se puede escribir ni ver (se conserva si ya venía), y la lista de avisos no tiene buscador (flows#50)
+Estado: parcial — el filtro del propio disparador («solo cuando el total pase de…») no se puede escribir ni ver; se conserva, también si se cambia el aviso o el tipo de disparador, y Probar lo tiene en cuenta; y la lista de avisos no tiene buscador (flows#50)
 Vertical: comun
 Actor: administrador
 Pantalla: Editor de automatización
@@ -50,7 +50,8 @@ Pasos:
 Entra: la lista de avisos que da el hub (los que declaran los módulos instalados y los que ha visto
 pasar en 90 días) y sus ejemplos. Un aviso sin frase propia sale con una frase compuesta o con su
 nombre técnico.
-Sale: el disparador en el documento; el hub lo arma al guardar.
+Sale: el disparador en el documento; el hub lo arma al guardar. Un filtro que ya traía se queda aunque
+se elija otro aviso, sin que se vea.
 Si falla: si el hub no da la lista, se dice por qué y queda la casilla de texto: «Preguntando a este hub
 qué eventos puede lanzar…», «Este hub es demasiado antiguo para listar sus eventos…», «Este hub todavía
 no tiene ningún evento…», «Automatizaciones aún no puede leer los eventos de este hub…» o «Este hub no ha
@@ -64,7 +65,7 @@ Pendiente de enlazar: printing — el aviso «hay algo que imprimir» (PRINTING-
 QA: qa-hub-flows R0, qa-hub-flows R2
 
 ### FLOWS-F14 Añadir, ordenar y rellenar los pasos
-Estado: parcial — el nombre de la acción y de la consulta se escribe a mano (no hay lista donde elegirlo); no se puede esperar hasta una fecha que traiga el aviso, ni ver o cambiar «solo si toca» y «seguir si falla» en un paso (el hub los admite y la pantalla los conserva sin enseñarlos)
+Estado: parcial — el nombre de la acción y de la consulta se escribe a mano (no hay lista donde elegirlo); no se puede esperar hasta una fecha que traiga el aviso, ni ver ni cambiar en **Pasos** el «solo si» y el «seguir si falla» de un paso (el hub los admite y la pantalla los conserva; **Probar** sí avisa cuando un paso se saltaría por su «solo si»)
 Vertical: comun
 Actor: administrador
 Pantalla: Editor de automatización
@@ -233,9 +234,10 @@ Pasos:
    vez que …») o «Esto no ha pasado en tu hub últimamente…».
 3. Paso a paso dice qué haría y con qué valores, y señala: lo que «saldría vacío» (y el total arriba),
    «Ni siquiera arrancaría…», una condición que la pararía («Se pararía aquí, y eso es la automatización
-   funcionando…»), lo que no puede saber («Esto no se puede comprobar aquí…», «sale de un paso anterior…»),
-   una pregunta («Espera aquí a que alguien conteste…») y un paso sin permiso («Se lo rechazarían:
-   todavía no le has permitido …»).
+   funcionando…»), un paso que se saltaría por su «solo si» («Esta vez se salta…» / «Podría
+   saltarse…»), lo que no puede saber («Esto no se puede comprobar aquí…», «sale de un paso
+   anterior…»), una pregunta («Espera aquí a que alguien conteste…») y un paso sin permiso («Se lo
+   rechazarían: todavía no le has permitido …»).
 4. Abrir esta pestaña quita del interruptor el aviso de «Todavía no la has probado».
 Entra: los ejemplos reales que el hub ha visto de cada dato del aviso (no un aviso entero); los permisos
 concedidos.
@@ -246,7 +248,7 @@ Pendiente de enlazar: hub — ejemplos reales de un aviso, con los datos de pers
 QA: qa-hub-flows R0, qa-hub-flows R1
 
 ### FLOWS-F21 Guardar y encender una automatización desde el editor
-Estado: parcial — el interruptor del editor no se guarda hasta pulsar **Guardar** y ← lo pierde sin avisar; al guardar sale «Permisos actualizados.»
+Estado: parcial — el interruptor del editor no se guarda hasta pulsar **Guardar** y ← lo pierde sin avisar; al guardar no sale ningún aviso de que se ha guardado (leído en el código, sin ejecutar)
 Vertical: comun
 Actor: administrador
 Pantalla: Editor de automatización
@@ -255,7 +257,7 @@ Pasos:
 2. Si le faltan permisos sale «Encendida, pero aún no tiene los permisos que pide (…): no hará nada hasta
    que se los concedas en la pestaña Permisos.»; si no se ha abierto **Probar**, «Todavía no la has
    probado…». No impide encenderla.
-3. Pulsa **Guardar** («Guardando…»).
+3. Pulsa **Guardar** («Guardando…»); vuelve a «Guardar» sin otro aviso.
 4. Desde ese momento el hub la dispara cuando toque.
 Entra: el nombre, el interruptor y el documento entero.
 Sale: la automatización guardada; el hub vuelve a validarla y a armar sus disparadores (un horario que no
@@ -269,9 +271,10 @@ QA: qa-hub-flows R1, qa-hub-flows R10
 Estado: no hecho — no hay botón «Ejecutar ahora»: una automatización «Solo a mano» («Solo cuando pulses Ejecutar») no se puede lanzar desde la pantalla
 Vertical: comun
 Actor: administrador
-Pantalla: asistente
+Pantalla: ninguna
 Pasos:
-1. Hoy solo por la API del hub, con sesión de administrador, sobre una automatización encendida.
+1. Hoy solo por la API del hub (`POST /api/hub/flows/{id}/run`), con sesión de administrador, sobre una
+   automatización encendida. Ni esta pantalla ni el asistente la pueden lanzar.
 2. La ejecución empieza y su resultado aparece en **Historial** (FLOWS-F23).
 Entra: la automatización y, si se quiere, los datos de entrada.
 Sale: una ejecución real, con todos sus efectos (el hub no tiene modo de prueba; para eso está FLOWS-F20).

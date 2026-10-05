@@ -53,7 +53,9 @@ Pasos:
 Entra: la cola de avisos caídos de todo el negocio (no solo los de automatizaciones), que es la misma que
 el hub enseña en «Eventos caídos».
 Sale: el aviso devuelto a la cola de envío (que vuelve a intentarlo; si la causa sigue, vuelve aquí), o
-cerrado para siempre con quién, cuándo y por qué. Ninguno se borra.
+cerrado: deja de reintentarse para siempre. El hub guarda quién lo cerró, cuándo y por qué durante 90
+días y después borra el evento (la pantalla lo dice: «El hub guarda quién cerró cada uno, cuándo y por
+qué durante noventa días.»). Lo que sigue atascado sin decidir no se borra nunca.
 Si falla: la fila se queda y sale el motivo («Le quitaste el permiso…», «Automatizaciones no tiene permiso
 para ver lo que se ha atascado…» o el mensaje del hub).
 Implicados: pendiente
@@ -141,7 +143,8 @@ Entra: el nombre del aviso y de la acción; exige el permiso de ver automatizaci
 administrador).
 Sale: tres números del negocio; ningún nombre ni contenido.
 Si falla: sin el permiso, se rechaza; un módulo `flows` anterior a esta consulta contesta que no existe.
-Hoy no la usa ningún módulo en `origin/main`.
+Hoy no la usa ningún módulo en `origin/main`. El asistente también puede consultarla: está ofrecida como
+herramienta.
 Implicados: pendiente
 Pendiente de enlazar: whatsapp_inbox — antes usaba esta consulta para su tarjeta; hoy lee el estado de la receta del hub y solo consulta los borradores para saber si Automatizaciones está instalado
 QA: ninguno
