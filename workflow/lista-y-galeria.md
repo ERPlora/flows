@@ -48,7 +48,7 @@ Entra: todas las automatizaciones del negocio, de una vez (también las que ence
 receta de fábrica).
 Sale: nada guardado; el filtro dura mientras la pantalla está abierta.
 Si falla: si la lista no se puede leer, la pantalla entera da el aviso de FLOWS-F01.
-Implicados: pendiente
+Implicados: WHATSAPP_INBOX-F14, WHATSAPP_INBOX-F15
 Pendiente de enlazar: hub — lista de automatizaciones del negocio
 QA: qa-hub-flows R10
 
@@ -70,9 +70,8 @@ Si falla: el mensaje del hub en rojo arriba. La etiqueta sigue con el estado gua
 interruptor puede quedarse movido hasta que se recarga la pantalla (leído en el código, sin ejecutar).
 No hay borrar ni ejecutar en
 grupo, a propósito.
-Implicados: pendiente
+Implicados: WHATSAPP_INBOX-F14, WHATSAPP_INBOX-F15, WHATSAPP_INBOX-F17, REC_WA_CITA-F01, REC_WA_MESA-F01
 Pendiente de enlazar: hub — guardar una automatización con su interruptor; una ejecución en curso se cancela si se pausa
-Pendiente de enlazar: whatsapp_inbox — la tarjeta de la respuesta automática lee si su receta está encendida (WHATSAPP_INBOX-F14, WHATSAPP_INBOX-F17)
 QA: qa-hub-flows R10
 
 ### FLOWS-F04 Crear una automatización desde una tarjeta de la galería
@@ -100,16 +99,8 @@ Sale: una automatización nueva, en pausa y sin permisos, con el nombre y los va
 ejemplo, esperar un día, 100,00 € o seis personas). La pausa la pide la pantalla al crearla (el hub,
 si no se le dice, crea encendida), y no queda ligada a su tarjeta.
 Si falla: el mensaje del hub en rojo dentro de la tarjeta, que sigue abierta; no se crea nada.
-Implicados: pendiente
+Implicados: APPOINTMENTS-F09, CASH_REGISTER-F09, CUSTOMERS-F01, CUSTOMERS-F05, RESERVATIONS-F06, SALES-F01, STAFF-F01, VERIFACTU-F15, WHATSAPP_INBOX-F03, REC_PELUQUERIA-F12
 Pendiente de enlazar: hub — crear una automatización y comprobar qué avisos conoce el hub
-Pendiente de enlazar: customers — la tarjeta de bienvenida arranca con el alta de una ficha (CUSTOMERS-F01) y la de venta grande escribe una nota en la ficha (CUSTOMERS-F05)
-Pendiente de enlazar: sales — la tarjeta de venta grande arranca con una venta cobrada (SALES-F01)
-Pendiente de enlazar: cash_register — la tarjeta de repaso arranca con el cierre del turno (CASH_REGISTER-F09)
-Pendiente de enlazar: verifactu — la tarjeta de aviso arranca con un registro que no llega a la AEAT (VERIFACTU-F24)
-Pendiente de enlazar: appointments — la tarjeta de quien no vino arranca al marcar una cita como no presentada (APPOINTMENTS-F09)
-Pendiente de enlazar: reservations — la tarjeta de mesa grande arranca con una reserva nueva (RESERVATIONS-F06)
-Pendiente de enlazar: staff — la tarjeta de checklist arranca con el alta de un profesional (STAFF-F01)
-Pendiente de enlazar: whatsapp_inbox — la tarjeta de mensajes sin contestar arranca con cada WhatsApp que entra (WHATSAPP_INBOX-F03)
 Pendiente de enlazar: tasks — nueve tarjetas crean una tarea
 QA: qa-hub-flows R0, BD-10
 
@@ -138,9 +129,8 @@ automatización y dice «La receta se instaló y quedó apagada, sin ningún per
 queda en la lista). Si el hub es anterior a esta puerta: «Este hub todavía no ofrece las
 automatizaciones que vienen con tus aplicaciones…»; si la rechaza: «No se han podido cargar las
 automatizaciones que vienen con tus aplicaciones…». Las tarjetas propias siguen.
-Implicados: pendiente
+Implicados: WHATSAPP_INBOX-F14, WHATSAPP_INBOX-F15, REC_WA_CITA-F01, REC_WA_MESA-F01
 Pendiente de enlazar: hub — recetas de fábrica que sirven los módulos instalados, con sus permisos y límites
-Pendiente de enlazar: whatsapp_inbox — encender la misma receta desde Ajustes de la Bandeja de WhatsApp (WHATSAPP_INBOX-F14, WHATSAPP_INBOX-F15)
 QA: qa-hub-flows R7
 
 ### FLOWS-F06 Restaurar la versión de fábrica de una receta
@@ -164,9 +154,8 @@ encendida o pausada como estaba.
 Si falla: «Esta automatización ya no existe aquí, así que no hay nada que restaurar. Vuelve a activarla
 desde su app.» o «No se pudo restaurar la automatización. No se ha cambiado nada; inténtalo de nuevo en
 un momento.».
-Implicados: pendiente
+Implicados: WHATSAPP_INBOX-F18
 Pendiente de enlazar: hub — restaurar una receta de fábrica (misma puerta que usa la Bandeja de WhatsApp)
-Pendiente de enlazar: whatsapp_inbox — el botón «Actualizar» de la tarjeta hace lo mismo desde Ajustes (WHATSAPP_INBOX-F18)
 QA: ninguno
 
 ### FLOWS-F07 Llegar a una tarjeta desde otro módulo
@@ -176,7 +165,8 @@ Actor: administrador
 Pantalla: Automatizaciones
 Pasos:
 1. Otro módulo lleva a Automatizaciones. Hoy la Bandeja de WhatsApp lo hace con «Ajustes avanzados en
-   Automatizaciones», que abre la pantalla sin más.
+   Automatizaciones», que abre la pantalla sin más; solo enseña el enlace si la consulta de borradores
+   de este módulo (`flows.drafts.list`) le contesta, que es como sabe que Automatizaciones está instalada.
 2. Un enlace que nombra una tarjeta (`?template=…`, como los que publicaba la Bandeja de WhatsApp antes)
    abre esa tarjeta y la trae a la vista, aunque estuviera abierto el editor o la guía; los nombres
    antiguos de las tarjetas de WhatsApp llevan a su receta.
@@ -184,8 +174,7 @@ Pasos:
 Entra: la dirección con la que se llega.
 Sale: nada guardado. El mismo enlace solo abre la tarjeta una vez por cada pulsación.
 Si falla: si la tarjeta está escondida (falta su módulo), se ve la galería sin abrir nada.
-Implicados: pendiente
-Pendiente de enlazar: whatsapp_inbox — el enlace «Ajustes avanzados en Automatizaciones» de sus Ajustes
+Implicados: WHATSAPP_INBOX-F14, WHATSAPP_INBOX-F15
 QA: ninguno
 
 ### FLOWS-F08 Hacer una copia de una automatización
@@ -264,7 +253,6 @@ Entra: el documento guardado de cada automatización.
 Sale: la automatización guardada con el filtro completo.
 Si falla: «No hemos podido actualizar esta automatización: el hub la ha guardado sin el cambio…» o el
 mensaje del hub; el aviso se queda.
-Implicados: pendiente
-Pendiente de enlazar: whatsapp_inbox — el aviso de mensaje recibido y los datos que lleva (dirección del mensaje, historial, respuesta a qué pregunta) (WHATSAPP_INBOX-F03, WHATSAPP_INBOX-F19)
+Implicados: WHATSAPP_INBOX-F03, WHATSAPP_INBOX-F19
 Pendiente de enlazar: hub — guardar una automatización
 QA: ninguno

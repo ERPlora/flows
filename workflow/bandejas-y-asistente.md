@@ -58,9 +58,8 @@ días y después borra el evento (la pantalla lo dice: «El hub guarda quién ce
 qué durante noventa días.»). Lo que sigue atascado sin decidir no se borra nunca.
 Si falla: la fila se queda y sale el motivo («Le quitaste el permiso…», «Automatizaciones no tiene permiso
 para ver lo que se ha atascado…» o el mensaje del hub).
-Implicados: pendiente
+Implicados: PRINTING-F16
 Pendiente de enlazar: hub — cola de eventos caídos: reenviar, reenviar todos y cerrar con motivo; la misma cola de Sistema › «Eventos caídos»
-Pendiente de enlazar: printing — un trabajo pedido sin el permiso de impresora acaba en esta cola (PRINTING-F16)
 QA: qa-hub-flows R8, BD-10
 
 ### FLOWS-F26 Pedirle al asistente una automatización
@@ -145,6 +144,5 @@ Sale: tres números del negocio; ningún nombre ni contenido.
 Si falla: sin el permiso, se rechaza; un módulo `flows` anterior a esta consulta contesta que no existe.
 Hoy no la usa ningún módulo en `origin/main`. El asistente también puede consultarla: está ofrecida como
 herramienta.
-Implicados: pendiente
-Pendiente de enlazar: whatsapp_inbox — antes usaba esta consulta para su tarjeta; hoy lee el estado de la receta del hub y solo consulta los borradores para saber si Automatizaciones está instalado
+Implicados: ninguno
 QA: ninguno

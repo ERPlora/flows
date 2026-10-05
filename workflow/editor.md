@@ -49,7 +49,10 @@ Pasos:
 3. Se guarda con **Guardar** (FLOWS-F21).
 Entra: la lista de avisos que da el hub (los que declaran los módulos instalados y los que ha visto
 pasar en 90 días) y sus ejemplos. Un aviso sin frase propia sale con una frase compuesta o con su
-nombre técnico.
+nombre técnico. Tienen frase escrita a mano, entre otros, la ficha nueva y el consentimiento de
+Clientes, la ausencia de Personal, «hay algo que imprimir», la mesa abierta, cerrada, trasladada,
+fusionada o dividida de Mesas, la comanda nueva y la lista de Cocina y el artículo que cruza su mínimo
+de Inventario (los flujos de Implicados).
 Sale: el disparador en el documento; el hub lo arma al guardar. Un filtro que ya traía se queda aunque
 se elija otro aviso, sin que se vea.
 Si falla: si el hub no da la lista, se dice por qué y queda la casilla de texto: «Preguntando a este hub
@@ -57,11 +60,8 @@ qué eventos puede lanzar…», «Este hub es demasiado antiguo para listar sus 
 no tiene ningún evento…», «Automatizaciones aún no puede leer los eventos de este hub…» o «Este hub no ha
 podido listar sus eventos (…)». Un aviso que el hub no conoce dice «Este hub no lo tiene — lo trae el
 módulo …». Un horario o fecha imposibles los rechaza el hub al guardar.
-Implicados: pendiente
+Implicados: CUSTOMERS-F01, CUSTOMERS-F14, CUSTOMERS-F15, INVENTORY-F18, KITCHEN-F05, KITCHEN-F11, PRINTING-F16, STAFF-F17, TABLES-F10, TABLES-F15, TABLES-F16, TABLES-F17, TABLES-F18, TABLES-F21
 Pendiente de enlazar: hub — catálogo de avisos y ejemplos reales; horario en la zona del negocio; rechazo de horarios imposibles al guardar
-Pendiente de enlazar: customers — avisos de ficha nueva y de consentimiento dado o retirado (CUSTOMERS-F01, CUSTOMERS-F14, CUSTOMERS-F15)
-Pendiente de enlazar: staff — el aviso «alguien pide vacaciones», que sale al registrar cualquier ausencia (STAFF-F17)
-Pendiente de enlazar: printing — el aviso «hay algo que imprimir» (PRINTING-F16)
 QA: qa-hub-flows R0, qa-hub-flows R2
 
 ### FLOWS-F14 Añadir, ordenar y rellenar los pasos
@@ -96,9 +96,8 @@ permiso (FLOWS-F19).
 Si falla: el hub rechaza al guardar una acción o una consulta que no existen y lo dice en rojo. Un
 paso de un tipo que este editor no conoce se enseña con «Este paso sigue funcionando. Editarlo
 necesita una versión más nueva de este módulo.» y se guarda intacto.
-Implicados: pendiente
+Implicados: WHATSAPP_INBOX-F19
 Pendiente de enlazar: hub — tipos de paso, datos de un aviso con ejemplos, «solo si toca» y «seguir si falla» por paso
-Pendiente de enlazar: whatsapp_inbox — sus recetas usan «solo si toca» y «seguir si falla» para contestar cuando un paso falla (WHATSAPP_INBOX-F20) y comprueban a qué pregunta contesta el cliente (WHATSAPP_INBOX-F19)
 QA: qa-hub-flows R1, BD-10
 
 ### FLOWS-F15 Mandar un mensaje a un cliente desde una automatización
@@ -126,8 +125,7 @@ acaba en «Necesita tu atención» (FLOWS-F25).
 Si falla: avisos en el propio paso («“…” no está entre tus plantillas aprobadas: WhatsApp no la
 enviará…», «Esa imagen pesa más de 5 MB…», «Esta plantilla lleva arriba: … y este hub todavía no puede
 enviarlo…»).
-Implicados: pendiente
-Pendiente de enlazar: whatsapp_inbox — número conectado y plantillas aprobadas por Meta (WHATSAPP_INBOX-F01, WHATSAPP_INBOX-F27, WHATSAPP_INBOX-F28)
+Implicados: WHATSAPP_INBOX-F01, WHATSAPP_INBOX-F27
 Pendiente de enlazar: hub — paso de mensaje: destinatario leído de una consulta, cola de envío y permisos de canal y destinatario
 QA: qa-hub-flows R7
 
