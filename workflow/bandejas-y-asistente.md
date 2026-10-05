@@ -58,7 +58,7 @@ días y después borra el evento (la pantalla lo dice: «El hub guarda quién ce
 qué durante noventa días.»). Lo que sigue atascado sin decidir no se borra nunca.
 Si falla: la fila se queda y sale el motivo («Le quitaste el permiso…», «Automatizaciones no tiene permiso
 para ver lo que se ha atascado…» o el mensaje del hub).
-Implicados: PRINTING-F16, HUB-F53, HUB-F54, HUB-F55, HUB-F56, HUB-F57, HUB-F191, HUB-F266, HUB_SHELL-F145, HUB_SHELL-F146, HUB_SHELL-F147, HUB_SHELL-F148
+Implicados: PRINTING-F16, HUB-F53, HUB-F54, HUB-F55, HUB-F56, HUB-F57, HUB-F191, HUB-F266, HUB_SHELL-F145, HUB_SHELL-F146, HUB_SHELL-F147, HUB_SHELL-F148, HUB-F52
 QA: qa-hub-flows R8, BD-10
 
 ### FLOWS-F26 Pedirle al asistente una automatización

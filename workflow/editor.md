@@ -61,7 +61,7 @@ qué eventos puede lanzar…», «Este hub es demasiado antiguo para listar sus 
 no tiene ningún evento…», «Automatizaciones aún no puede leer los eventos de este hub…» o «Este hub no ha
 podido listar sus eventos (…)». Un aviso que el hub no conoce dice «Este hub no lo tiene — lo trae el
 módulo …». Un horario o fecha imposibles los rechaza el hub al guardar.
-Implicados: CUSTOMERS-F01, CUSTOMERS-F14, CUSTOMERS-F15, INVENTORY-F18, KITCHEN-F05, KITCHEN-F11, PRINTING-F16, STAFF-F17, TABLES-F10, TABLES-F15, TABLES-F16, TABLES-F17, TABLES-F18, TABLES-F21, HUB-F80, HUB-F83, HUB-F108, HUB-F109, HUB_SHELL-F157
+Implicados: CUSTOMERS-F01, CUSTOMERS-F14, CUSTOMERS-F15, INVENTORY-F18, KITCHEN-F05, KITCHEN-F11, PRINTING-F16, STAFF-F17, TABLES-F10, TABLES-F15, TABLES-F16, TABLES-F17, TABLES-F18, TABLES-F21, HUB-F80, HUB-F83, HUB-F108, HUB-F109, HUB_SHELL-F157, HUB-F82, HUB-F84
 QA: qa-hub-flows R0, qa-hub-flows R2
 
 ### FLOWS-F14 Añadir, ordenar y rellenar los pasos
@@ -126,7 +126,7 @@ acaba en «Necesita tu atención» (FLOWS-F25).
 Si falla: avisos en el propio paso («“…” no está entre tus plantillas aprobadas: WhatsApp no la
 enviará…», «Esa imagen pesa más de 5 MB…», «Esta plantilla lleva arriba: … y este hub todavía no puede
 enviarlo…»).
-Implicados: WHATSAPP_INBOX-F01, WHATSAPP_INBOX-F27, HUB-F61, HUB-F93, HUB-F98, HUB-F266
+Implicados: WHATSAPP_INBOX-F01, WHATSAPP_INBOX-F27, HUB-F61, HUB-F93, HUB-F98, HUB-F266, HUB-F112
 QA: qa-hub-flows R7
 
 ### FLOWS-F16 Llamar a otro sistema y guardar sus claves
