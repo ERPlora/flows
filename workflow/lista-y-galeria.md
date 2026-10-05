@@ -64,8 +64,13 @@ Pasos:
 3. Pulsa una de las dos: se aplica a cada elegida, una tras otra, y la selección se suelta.
 4. Filtrar o buscar suelta las elegidas que dejan de verse.
 Entra: la automatización entera (el hub la vuelve a validar al guardarla).
-Sale: la automatización encendida o pausada. Pausarla hace que lo que estaba en marcha se cancele en su
-siguiente paso. Si es una receta encendida desde otro módulo, esa pantalla la verá apagada.
+Sale: la automatización encendida o pausada. Al pausarla, lo pendiente y lo que está en curso se
+cancelan en su siguiente paso, y una espera, solo al despertar (si se vuelve a encender antes, sigue como
+si nada; mientras tanto, un aviso de «cita anulada» o «cita movida» la sigue cancelando o moviendo). No
+se cancelan las preguntas ni las propuestas del asistente: aprobarlas ejecuta, también en pausa. Los
+mensajes que ya estaban en cola salen, y una llamada a otro sistema o un turno del asistente que ya
+estaban en marcha terminan (el turno puede ejecutar o dejar una propuesta nueva). Si es una receta
+encendida desde otro módulo, esa pantalla la verá apagada.
 Si falla: el mensaje del hub en rojo arriba. La etiqueta sigue con el estado guardado, pero el
 interruptor puede quedarse movido hasta que se recarga la pantalla (leído en el código, sin ejecutar).
 No hay borrar ni ejecutar en
@@ -208,8 +213,10 @@ Pasos:
 3. **Sí, bórrala** la quita de la lista.
 Entra: la automatización elegida.
 Sale: el hub la marca como borrada: deja de dispararse al momento, lo que esperaba un plazo se cancela
-al momento, lo que esperaba una respuesta se cancela cuando alguien contesta o caduca la pregunta, y su
-historial se conserva. Si era una receta encendida desde otro módulo, esa pantalla deja de verla y,
+al momento, lo que esperaba una respuesta se cancela cuando alguien contesta la pregunta, rechaza la
+propuesta o caduca, y su historial se conserva. Aprobar una propuesta del asistente de una automatización
+borrada contesta «sin permiso» (sus permisos se retiraron al borrarla) y la propuesta sigue pendiente:
+se cierra rechazándola. Si era una receta encendida desde otro módulo, esa pantalla deja de verla y,
 si se vuelve a activar allí, se crea otra.
 Si falla: el mensaje del hub en rojo arriba; la fila sigue. Desde el editor no se puede borrar.
 Implicados: pendiente

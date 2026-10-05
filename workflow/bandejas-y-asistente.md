@@ -39,7 +39,8 @@ Pantalla: Automatizaciones
 Pasos:
 1. En **Automatizaciones**, la bandeja **Necesita tu atención** («Esto no llegó a pasar. Decide qué
    hacer con cada uno.») enseña cada aviso del negocio que el hub no consiguió entregar tras sus
-   reintentos: «… no llegó a salir», por qué y qué hacer, de qué módulo vino, cuántos intentos, cuándo,
+   reintentos (los que fallan por un permiso, por el cupo agotado o porque se retiró el permiso de la
+   automatización llegan al primer intento): «… no llegó a salir», por qué y qué hacer, de qué módulo vino, cuántos intentos, cuándo,
    su referencia (**Copiar la referencia**), su contenido y el texto técnico plegado.
 2. **Volver a enviarlo** lo devuelve a la cola de envío. Con más de uno reenviable sale también **Volver a
    enviar los N**.
@@ -72,16 +73,20 @@ Pasos:
    llamarle»).
 2. El asistente escribe un **borrador**: nombre, un disparador como mucho, de uno a ocho pasos de «hacer
    algo», «solo sigue si» o «esperar», y las notas de lo que no supo decidir.
-3. Contesta que lo ha dejado esperando en Automatizaciones y repite sus dudas.
-4. El borrador aparece en **Propuestas por el asistente** la próxima vez que se abre Automatizaciones
+3. Antes de guardarlo sale la tarjeta «El asistente quiere ejecutar una acción», que en vez del nombre
+   de la acción dice «Una acción que esta app no sabe nombrar» (el módulo no publica el nombre de su
+   orden en la traducción); la persona la confirma.
+4. Contesta que lo ha dejado esperando en Automatizaciones y repite sus dudas.
+5. El borrador aparece en **Propuestas por el asistente** la próxima vez que se abre Automatizaciones
    (FLOWS-F27).
 Entra: lo que la persona pide en la conversación; los nombres de acciones que el asistente conoce de
 este negocio.
 Sale: un borrador pendiente en el módulo, y el aviso `flows.draft.proposed` (que hoy no escucha nadie).
 No crea ninguna automatización, no concede permisos y no ejecuta nada.
 Si falla: el hub rechaza un borrador que no sigue la forma pedida antes de guardarlo; sin el permiso de
-gestionar automatizaciones (de fábrica, solo el perfil administrador) no se guarda. Si el asistente se
-inventa un nombre de acción, se descubre al guardarlo en el editor.
+gestionar automatizaciones (de fábrica, solo el perfil administrador) el asistente no tiene esa orden y
+contesta que no puede. Si el asistente se inventa un nombre de acción, el editor lo guarda igual: se
+descubre al conceder su permiso o al ejecutarse (FLOWS-F14).
 Implicados: pendiente
 Pendiente de enlazar: hub — el asistente del hub, que ofrece esta orden como herramienta y la ejecuta con la sesión de quien pregunta
 QA: ninguno

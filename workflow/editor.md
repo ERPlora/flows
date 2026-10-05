@@ -21,8 +21,10 @@ Pasos:
 Entra: lo que se escribe y se elige.
 Sale: una automatización nueva, en pausa salvo que se haya encendido el interruptor antes de guardar
 (FLOWS-F21), y sin permisos. Sin nombre se guarda como «Automatización sin nombre».
-Si falla: el mensaje del hub en rojo encima de la pestaña (por ejemplo, una acción que no existe o un
-horario imposible), y no se guarda nada. Pulsar ← antes de **Guardar** pierde lo hecho sin aviso.
+Si falla: el mensaje del hub en rojo encima de la pestaña (por ejemplo, una acción interna del hub, una
+consulta que no existe o un horario imposible), y no se guarda nada. Una acción que no existe sí se
+guarda: falla al conceder su permiso o al ejecutarse. Pulsar ← antes de **Guardar** pierde lo hecho sin
+aviso.
 Implicados: pendiente
 Pendiente de enlazar: hub — crear una automatización: el hub valida el documento entero al guardar
 QA: qa-hub-flows R1, BD-10
@@ -93,7 +95,9 @@ Entra: los datos del aviso elegido y sus ejemplos (solo con disparador «Pasa al
 nada que insertar).
 Sale: el documento de pasos. Cada acción, consulta, canal o dirección que se nombra pasa a pedir su
 permiso (FLOWS-F19).
-Si falla: el hub rechaza al guardar una acción o una consulta que no existen y lo dice en rojo. Un
+Si falla: el hub rechaza al guardar una acción interna o la consulta inexistente de un paso «Consultar
+algo», y lo dice en rojo; una acción que no existe, o una consulta nombrada en un paso del asistente o
+en «A quién le llega», se guarda y falla al conceder su permiso o al ejecutarse. Un
 paso de un tipo que este editor no conoce se enseña con «Este paso sigue funcionando. Editarlo
 necesita una versión más nueva de este módulo.» y se guarda intacto.
 Implicados: WHATSAPP_INBOX-F19
