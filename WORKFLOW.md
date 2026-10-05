@@ -38,8 +38,8 @@ Todo lo que corre vive en el motor del hub:
 | Recetas de fábrica que traen otros módulos (servirlas, encenderlas, apagarlas, restaurarlas) | Hub, `crates/runtime/src/flows/templates.rs`; cada módulo publica las suyas en su carpeta `flows/` |
 | Conceder al módulo «Administrar automatizaciones» | Hub, Ajustes → Permisos |
 
-Pendiente de enlazar: hub — motor de automatizaciones: disparadores, pasos, permisos, secretos, aprobaciones, historial y eventos caídos
-Pendiente de enlazar: hub — recetas de fábrica de los módulos: servirlas, encenderlas, apagarlas y restaurarlas
+El motor (disparadores, pasos, permisos, secretos, aprobaciones, historial) lo describe el `WORKFLOW.md` del hub en `workflow/automatizaciones.md` (HUB-F80 a HUB-F112), y la cola de avisos caídos en `workflow/avisos.md` (HUB-F50 a HUB-F64).
+Las recetas de fábrica (servirlas, encenderlas, apagarlas y restaurarlas) son HUB-F104 a HUB-F107 del mismo documento.
 
 ## Referencia adoptada
 
