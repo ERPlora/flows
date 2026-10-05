@@ -27,8 +27,7 @@ automatización sigue. Un no o el silencio hacen lo que se eligió en el paso (F
 historial de la ejecución.
 Si falla: la tarjeta se queda y sale «Demasiado tarde: esta caducó antes de que contestaras. No se ha
 hecho nada.», «Alguien ya contestó a esta. No se ha hecho nada dos veces.» o el mensaje del hub.
-Implicados: pendiente
-Pendiente de enlazar: hub — decidir una pregunta o una propuesta (re-comprueba el permiso, ejecuta lo propuesto sin volver al asistente, caducidad por barrido)
+Implicados: HUB-F100, HUB-F101, HUB_SHELL-F93
 QA: qa-hub-flows R6
 
 ### FLOWS-F25 Reenviar o cerrar lo que no llegó a pasar
@@ -59,8 +58,7 @@ días y después borra el evento (la pantalla lo dice: «El hub guarda quién ce
 qué durante noventa días.»). Lo que sigue atascado sin decidir no se borra nunca.
 Si falla: la fila se queda y sale el motivo («Le quitaste el permiso…», «Automatizaciones no tiene permiso
 para ver lo que se ha atascado…» o el mensaje del hub).
-Implicados: PRINTING-F16
-Pendiente de enlazar: hub — cola de eventos caídos: reenviar, reenviar todos y cerrar con motivo; la misma cola de Sistema › «Eventos caídos»
+Implicados: PRINTING-F16, HUB-F53, HUB-F54, HUB-F55, HUB-F56, HUB-F57, HUB-F191, HUB-F266, HUB_SHELL-F145, HUB_SHELL-F146, HUB_SHELL-F147, HUB_SHELL-F148
 QA: qa-hub-flows R8, BD-10
 
 ### FLOWS-F26 Pedirle al asistente una automatización
@@ -87,8 +85,7 @@ Si falla: el hub rechaza un borrador que no sigue la forma pedida antes de guard
 gestionar automatizaciones (de fábrica, solo el perfil administrador) el asistente no tiene esa orden y
 contesta que no puede. Si el asistente se inventa un nombre de acción, el editor lo guarda igual: se
 descubre al conceder su permiso o al ejecutarse (FLOWS-F14).
-Implicados: pendiente
-Pendiente de enlazar: hub — el asistente del hub, que ofrece esta orden como herramienta y la ejecuta con la sesión de quien pregunta
+Implicados: HUB-F273, HUB-F274, HUB_SHELL-F190
 QA: ninguno
 
 ### FLOWS-F27 Revisar un borrador del asistente y crearlo
@@ -114,8 +111,7 @@ ejecutar.
 Sale: una automatización nueva sin permisos, y el borrador marcado como usado con el enlace a ella.
 Salir con ← sin guardar deja el borrador en la bandeja.
 Si falla: si el hub no la acepta al guardar, el mensaje en rojo y no se crea nada.
-Implicados: pendiente
-Pendiente de enlazar: hub — crear una automatización (valida el documento entero al guardar)
+Implicados: HUB-F80, HUB-F111
 QA: ninguno
 
 ### FLOWS-F28 Descartar un borrador del asistente

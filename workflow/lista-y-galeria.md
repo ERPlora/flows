@@ -25,8 +25,7 @@ Sale: nada guardado.
 Si falla: cualquier otro rechazo sale en rojo con el mensaje del hub, o «Algo ha fallado. No se ha
 guardado nada.»; hay que salir y volver a entrar. Si el hub usa un formato **más nuevo** que el módulo,
 el aviso también dice que se actualice el hub (ver «Fuentes contrastadas» del índice).
-Implicados: pendiente
-Pendiente de enlazar: hub — Ajustes → Permisos: conceder «Administrar automatizaciones» a un módulo, y la sesión de administrador que exige el motor
+Implicados: HUB-F32, HUB-F111, HUB-F136, HUB-F151, HUB_SHELL-F167
 QA: qa-hub-flows R0, qa-hub-flows R3, BD-10
 
 ### FLOWS-F02 Ver, buscar y ordenar las automatizaciones del negocio
@@ -48,8 +47,7 @@ Entra: todas las automatizaciones del negocio, de una vez (también las que ence
 receta de fábrica).
 Sale: nada guardado; el filtro dura mientras la pantalla está abierta.
 Si falla: si la lista no se puede leer, la pantalla entera da el aviso de FLOWS-F01.
-Implicados: WHATSAPP_INBOX-F14, WHATSAPP_INBOX-F15
-Pendiente de enlazar: hub — lista de automatizaciones del negocio
+Implicados: WHATSAPP_INBOX-F14, WHATSAPP_INBOX-F15, HUB-F81
 QA: qa-hub-flows R10
 
 ### FLOWS-F03 Encender o pausar automatizaciones desde la lista
@@ -75,8 +73,7 @@ Si falla: el mensaje del hub en rojo arriba. La etiqueta sigue con el estado gua
 interruptor puede quedarse movido hasta que se recarga la pantalla (leído en el código, sin ejecutar).
 No hay borrar ni ejecutar en
 grupo, a propósito.
-Implicados: WHATSAPP_INBOX-F14, WHATSAPP_INBOX-F15, WHATSAPP_INBOX-F17, REC_WA_CITA-F01, REC_WA_MESA-F01
-Pendiente de enlazar: hub — guardar una automatización con su interruptor; una ejecución en curso se cancela si se pausa
+Implicados: WHATSAPP_INBOX-F14, WHATSAPP_INBOX-F15, WHATSAPP_INBOX-F17, REC_WA_CITA-F01, REC_WA_MESA-F01, HUB-F86, HUB-F87
 QA: qa-hub-flows R10
 
 ### FLOWS-F04 Crear una automatización desde una tarjeta de la galería
@@ -104,8 +101,7 @@ Sale: una automatización nueva, en pausa y sin permisos, con el nombre y los va
 ejemplo, esperar un día, 100,00 € o seis personas). La pausa la pide la pantalla al crearla (el hub,
 si no se le dice, crea encendida), y no queda ligada a su tarjeta.
 Si falla: el mensaje del hub en rojo dentro de la tarjeta, que sigue abierta; no se crea nada.
-Implicados: APPOINTMENTS-F09, CASH_REGISTER-F09, CUSTOMERS-F01, CUSTOMERS-F05, RESERVATIONS-F06, SALES-F01, STAFF-F01, VERIFACTU-F15, WHATSAPP_INBOX-F03, REC_PELUQUERIA-F12
-Pendiente de enlazar: hub — crear una automatización y comprobar qué avisos conoce el hub
+Implicados: APPOINTMENTS-F09, CASH_REGISTER-F09, CUSTOMERS-F01, CUSTOMERS-F05, RESERVATIONS-F06, SALES-F01, STAFF-F01, VERIFACTU-F15, WHATSAPP_INBOX-F03, REC_PELUQUERIA-F12, HUB-F80, HUB-F108, HUB_VERIFACTU-F08
 Pendiente de enlazar: tasks — nueve tarjetas crean una tarea
 QA: qa-hub-flows R0, BD-10
 
@@ -134,8 +130,7 @@ automatización y dice «La receta se instaló y quedó apagada, sin ningún per
 queda en la lista). Si el hub es anterior a esta puerta: «Este hub todavía no ofrece las
 automatizaciones que vienen con tus aplicaciones…»; si la rechaza: «No se han podido cargar las
 automatizaciones que vienen con tus aplicaciones…». Las tarjetas propias siguen.
-Implicados: WHATSAPP_INBOX-F14, WHATSAPP_INBOX-F15, REC_WA_CITA-F01, REC_WA_MESA-F01
-Pendiente de enlazar: hub — recetas de fábrica que sirven los módulos instalados, con sus permisos y límites
+Implicados: WHATSAPP_INBOX-F14, WHATSAPP_INBOX-F15, REC_WA_CITA-F01, REC_WA_MESA-F01, HUB-F80, HUB-F104
 QA: qa-hub-flows R7
 
 ### FLOWS-F06 Restaurar la versión de fábrica de una receta
@@ -159,8 +154,7 @@ encendida o pausada como estaba.
 Si falla: «Esta automatización ya no existe aquí, así que no hay nada que restaurar. Vuelve a activarla
 desde su app.» o «No se pudo restaurar la automatización. No se ha cambiado nada; inténtalo de nuevo en
 un momento.».
-Implicados: WHATSAPP_INBOX-F18
-Pendiente de enlazar: hub — restaurar una receta de fábrica (misma puerta que usa la Bandeja de WhatsApp)
+Implicados: WHATSAPP_INBOX-F18, HUB-F107
 QA: ninguno
 
 ### FLOWS-F07 Llegar a una tarjeta desde otro módulo
@@ -198,8 +192,7 @@ Entra: el documento de la original.
 Sale: una automatización nueva con el mismo documento, en pausa (lo pide la pantalla) y sin permisos,
 sin historial.
 Si falla: el mensaje del hub en rojo arriba; no se crea nada.
-Implicados: pendiente
-Pendiente de enlazar: hub — crear una automatización
+Implicados: HUB-F80
 QA: qa-hub-flows R10
 
 ### FLOWS-F09 Borrar una automatización
@@ -219,8 +212,7 @@ borrada contesta «sin permiso» (sus permisos se retiraron al borrarla) y la pr
 se cierra rechazándola. Si era una receta encendida desde otro módulo, esa pantalla deja de verla y,
 si se vuelve a activar allí, se crea otra.
 Si falla: el mensaje del hub en rojo arriba; la fila sigue. Desde el editor no se puede borrar.
-Implicados: pendiente
-Pendiente de enlazar: hub — borrar una automatización (desarma sus disparadores y cancela lo que esperaba un plazo)
+Implicados: HUB-F88
 QA: qa-hub-flows R10
 
 ### FLOWS-F10 Leer la guía
@@ -260,6 +252,5 @@ Entra: el documento guardado de cada automatización.
 Sale: la automatización guardada con el filtro completo.
 Si falla: «No hemos podido actualizar esta automatización: el hub la ha guardado sin el cambio…» o el
 mensaje del hub; el aviso se queda.
-Implicados: WHATSAPP_INBOX-F03, WHATSAPP_INBOX-F19
-Pendiente de enlazar: hub — guardar una automatización
+Implicados: WHATSAPP_INBOX-F03, WHATSAPP_INBOX-F19, HUB-F86, HUB-F264
 QA: ninguno

@@ -25,8 +25,7 @@ Si falla: el mensaje del hub en rojo encima de la pestaña (por ejemplo, una acc
 consulta que no existe o un horario imposible), y no se guarda nada. Una acción que no existe sí se
 guarda: falla al conceder su permiso o al ejecutarse. Pulsar ← antes de **Guardar** pierde lo hecho sin
 aviso.
-Implicados: pendiente
-Pendiente de enlazar: hub — crear una automatización: el hub valida el documento entero al guardar
+Implicados: HUB-F80
 QA: qa-hub-flows R1, BD-10
 
 ### FLOWS-F13 Elegir cuándo arranca
@@ -62,8 +61,7 @@ qué eventos puede lanzar…», «Este hub es demasiado antiguo para listar sus 
 no tiene ningún evento…», «Automatizaciones aún no puede leer los eventos de este hub…» o «Este hub no ha
 podido listar sus eventos (…)». Un aviso que el hub no conoce dice «Este hub no lo tiene — lo trae el
 módulo …». Un horario o fecha imposibles los rechaza el hub al guardar.
-Implicados: CUSTOMERS-F01, CUSTOMERS-F14, CUSTOMERS-F15, INVENTORY-F18, KITCHEN-F05, KITCHEN-F11, PRINTING-F16, STAFF-F17, TABLES-F10, TABLES-F15, TABLES-F16, TABLES-F17, TABLES-F18, TABLES-F21
-Pendiente de enlazar: hub — catálogo de avisos y ejemplos reales; horario en la zona del negocio; rechazo de horarios imposibles al guardar
+Implicados: CUSTOMERS-F01, CUSTOMERS-F14, CUSTOMERS-F15, INVENTORY-F18, KITCHEN-F05, KITCHEN-F11, PRINTING-F16, STAFF-F17, TABLES-F10, TABLES-F15, TABLES-F16, TABLES-F17, TABLES-F18, TABLES-F21, HUB-F80, HUB-F83, HUB-F108, HUB-F109, HUB_SHELL-F157
 QA: qa-hub-flows R0, qa-hub-flows R2
 
 ### FLOWS-F14 Añadir, ordenar y rellenar los pasos
@@ -100,8 +98,7 @@ algo», y lo dice en rojo; una acción que no existe, o una consulta nombrada en
 en «A quién le llega», se guarda y falla al conceder su permiso o al ejecutarse. Un
 paso de un tipo que este editor no conoce se enseña con «Este paso sigue funcionando. Editarlo
 necesita una versión más nueva de este módulo.» y se guarda intacto.
-Implicados: WHATSAPP_INBOX-F19
-Pendiente de enlazar: hub — tipos de paso, datos de un aviso con ejemplos, «solo si toca» y «seguir si falla» por paso
+Implicados: WHATSAPP_INBOX-F19, HUB-F89, HUB-F90, HUB-F91, HUB-F92, HUB-F97, HUB-F109, HUB-F265
 QA: qa-hub-flows R1, BD-10
 
 ### FLOWS-F15 Mandar un mensaje a un cliente desde una automatización
@@ -129,8 +126,7 @@ acaba en «Necesita tu atención» (FLOWS-F25).
 Si falla: avisos en el propio paso («“…” no está entre tus plantillas aprobadas: WhatsApp no la
 enviará…», «Esa imagen pesa más de 5 MB…», «Esta plantilla lleva arriba: … y este hub todavía no puede
 enviarlo…»).
-Implicados: WHATSAPP_INBOX-F01, WHATSAPP_INBOX-F27
-Pendiente de enlazar: hub — paso de mensaje: destinatario leído de una consulta, cola de envío y permisos de canal y destinatario
+Implicados: WHATSAPP_INBOX-F01, WHATSAPP_INBOX-F27, HUB-F61, HUB-F93, HUB-F98, HUB-F266
 QA: qa-hub-flows R7
 
 ### FLOWS-F16 Llamar a otro sistema y guardar sus claves
@@ -151,8 +147,7 @@ Sale: el secreto cifrado en el hub, compartido por todas las automatizaciones de
 la dirección y las cabeceras.
 Si falla: el mensaje del hub en rojo. Borrar un secreto que usa otra automatización hace que su paso
 falle al ejecutarse; la pantalla no pregunta antes.
-Implicados: pendiente
-Pendiente de enlazar: hub — paso de llamada a otro sistema, secretos que no se pueden leer y permiso por patrón de dirección
+Implicados: HUB-F94, HUB-F98, HUB-F99
 QA: qa-hub-flows R5
 
 ### FLOWS-F17 Pedirle un paso al asistente
@@ -173,8 +168,7 @@ Entra: lo que se escribe.
 Sale: el paso; al ejecutarse, el hub llama al asistente y, con «Que me lo pregunte», deja la propuesta en
 la bandeja sin ejecutarla.
 Si falla: el hub rechaza al guardar un secreto en el texto o más vueltas de las permitidas.
-Implicados: pendiente
-Pendiente de enlazar: hub — paso del asistente: herramientas que se le ofrecen, propuesta a la bandeja y coste por llamada
+Implicados: HUB-F95, HUB-F279
 QA: qa-hub-flows R6
 
 ### FLOWS-F18 Hacer que una automatización pregunte antes a alguien
@@ -195,8 +189,7 @@ Entra: lo que se escribe.
 Sale: el paso. Al ejecutarse, la pregunta espera en «Pendiente de ti» (FLOWS-F24) y la automatización se
 para ahí hasta que contestan o vence el plazo. Este paso no pide permiso.
 Si falla: el hub rechaza un plazo de más de 30 días o una pregunta vacía al guardar.
-Implicados: pendiente
-Pendiente de enlazar: hub — paso de pregunta: rol, plazo, qué pasa con un no y con el silencio
+Implicados: HUB-F96, HUB-F101
 QA: qa-hub-flows R6, BD-10
 
 ### FLOWS-F19 Conceder, limitar y retirar los permisos de una automatización
@@ -220,8 +213,7 @@ Sale: la lista completa de permisos de la automatización, que el hub guarda ent
 Si falla: «Este hub no tiene ningún comando llamado …. Revisa el nombre en el paso.»; un límite mal
 escrito se para antes de enviarlo («“…” nombra algo que esta automatización no tiene…»); cualquier otro
 rechazo, el mensaje del hub. Si los permisos no se pueden leer, todo sale como pendiente.
-Implicados: pendiente
-Pendiente de enlazar: hub — permisos de una automatización (lista completa, acciones que existen, límites fijados y filas dañadas)
+Implicados: HUB-F98
 QA: qa-hub-flows R3, BD-10
 
 ### FLOWS-F20 Probar una automatización sin que haga nada
@@ -245,8 +237,7 @@ Entra: los ejemplos reales que el hub ha visto de cada dato del aviso (no un avi
 concedidos.
 Sale: nada: no ejecuta, no guarda, no llama al hub más allá de leer los ejemplos.
 Si falla: sin ejemplos lo dice y enseña los pasos sin valores.
-Implicados: pendiente
-Pendiente de enlazar: hub — ejemplos reales de un aviso, con los datos de personas ocultos
+Implicados: HUB-F109
 QA: qa-hub-flows R0, qa-hub-flows R1
 
 ### FLOWS-F21 Guardar y encender una automatización desde el editor
@@ -265,8 +256,7 @@ Entra: el nombre, el interruptor y el documento entero.
 Sale: la automatización guardada; el hub vuelve a validarla y a armar sus disparadores (un horario que no
 cambió conserva su reloj).
 Si falla: el mensaje del hub en rojo, que dice qué no encaja; no se guarda nada.
-Implicados: pendiente
-Pendiente de enlazar: hub — guardar una automatización (valida y arma disparadores)
+Implicados: HUB-F86, HUB-F87
 QA: qa-hub-flows R1, qa-hub-flows R10
 
 ### FLOWS-F22 Ejecutar una automatización a mano
@@ -281,8 +271,7 @@ Pasos:
 Entra: la automatización y, si se quiere, los datos de entrada.
 Sale: una ejecución real, con todos sus efectos (el hub no tiene modo de prueba; para eso está FLOWS-F20).
 Si falla: el hub rechaza lanzar una automatización pausada.
-Implicados: pendiente
-Pendiente de enlazar: hub — lanzar una ejecución a mano
+Implicados: HUB-F85
 QA: qa-hub-flows R2 (discrepa)
 
 ### FLOWS-F23 Ver qué hizo una automatización y por qué falló
@@ -306,6 +295,5 @@ Pasos:
 Entra: las ejecuciones que guarda el hub (90 días).
 Sale: nada.
 Si falla: el mensaje del hub en rojo encima de la pestaña.
-Implicados: pendiente
-Pendiente de enlazar: hub — historial de ejecuciones con sus pasos, retención de 90 días y reanudar desde el paso fallido (hub#952)
+Implicados: HUB-F102, HUB-F103
 QA: qa-hub-flows R1, qa-hub-flows R8, BD-10
