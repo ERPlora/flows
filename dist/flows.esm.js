@@ -2241,7 +2241,9 @@ function describeRunStep(row, t3, spec) {
   }
   if (row.kind === "condition") {
     const matched = row.output?.matched;
-    return matched === false ? t3("ui.ranGuardStopped") : t3("ui.ranGuardPassed");
+    if (matched !== false) return t3("ui.ranGuardPassed");
+    const clauses = spec?.kind === "condition" ? guardClauses(spec.when, t3) : [];
+    return clauses.length ? t3("ui.ranGuardStoppedOn", { conditions: clauses.join("; ") }) : t3("ui.ranGuardStopped");
   }
   if (row.kind === "delay") {
     const wake = row.output?.wake_at;
@@ -2290,6 +2292,32 @@ var FIELD_PHRASES = {
 function fieldPhrase(path, t3) {
   const key2 = FIELD_PHRASES[path];
   return key2 ? t3(key2) : humaniseField(path);
+}
+function guardFieldPhrase(path, t3) {
+  return fieldPhrase(path.replace(/^(input|event|steps)\./, ""), t3);
+}
+function guardClauses(when, t3) {
+  const out = [];
+  for (const [path, ops] of Object.entries(when ?? {})) {
+    for (const [op, expected] of Object.entries(ops ?? {})) {
+      const field = guardFieldPhrase(path, t3);
+      if (op === "exists") {
+        const key2 = expected === false ? "ui.opAbsent" : "ui.opExists";
+        out.push(t3("ui.guardClause", { field, op: t3(key2), expected: "" }));
+        continue;
+      }
+      const opKey = `ui.op${op.charAt(0).toUpperCase()}${op.slice(1)}`;
+      out.push(t3("ui.guardClause", { field, op: t3(opKey), expected: guardValue(expected, t3) }));
+    }
+  }
+  return out;
+}
+function guardValue(value, t3) {
+  if (value === true) return t3("ui.clauseYes");
+  if (value === false) return t3("ui.clauseNo");
+  if (value === "" || value === null || value === void 0) return t3("ui.clauseEmpty");
+  if (Array.isArray(value)) return value.map((v2) => guardValue(v2, t3)).join(", ");
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 function describeSample(field, t3) {
   if (field.redacted) return t3("ui.pickFieldRedacted");
@@ -4168,7 +4196,7 @@ var ErpFlowsEditor = class extends i3 {
     this.tapMemory = /* @__PURE__ */ new Map();
     this.pickerRoot = "input";
     /** The words a pill shows: `input.customer.name` → «Customer › Name». */
-    this.fieldLabel = (path) => fieldPhrase(path.replace(/^(input|event|steps)\./, ""), this.t);
+    this.fieldLabel = (path) => guardFieldPhrase(path, this.t);
   }
   static {
     this.styles = i`
@@ -11438,6 +11466,12 @@ var es_default = {
     ranFailedUnknown: "sin motivo indicado",
     ranGuardPassed: "La condici\xF3n se cumpli\xF3",
     ranGuardStopped: "La condici\xF3n no se cumpli\xF3, as\xED que termin\xF3 aqu\xED. Eso es la automatizaci\xF3n funcionando.",
+    ranGuardStoppedOn: "Se par\xF3 aqu\xED porque no se cumpli\xF3 esto: {conditions}. Eso es la automatizaci\xF3n funcionando.",
+    guardClause: "{field}: {op} {expected}",
+    clauseYes: "s\xED",
+    clauseNo: "no",
+    clauseEmpty: "(vac\xEDo)",
+    opAbsent: "no est\xE1 presente",
     ranNothingToOffer: "No hab\xEDa nada que ofrecer (la lista estaba vac\xEDa), as\xED que el mensaje no se mand\xF3",
     ranNotifyNotSent: "El mensaje no se mand\xF3",
     ranNotifyQueuedEmail: "Correo en cola para mandarse",
@@ -12443,6 +12477,12 @@ var en_default = {
     ranFailedUnknown: "no reason given",
     ranGuardPassed: "The condition was met",
     ranGuardStopped: "The condition was not met, so it stopped here. That is the automation working.",
+    ranGuardStoppedOn: "It stopped here because this was not met: {conditions}. That is the automation working.",
+    guardClause: "{field}: {op} {expected}",
+    clauseYes: "yes",
+    clauseNo: "no",
+    clauseEmpty: "(empty)",
+    opAbsent: "not present",
     ranNothingToOffer: "There was nothing to offer (the list was empty), so the message was not sent",
     ranNotifyNotSent: "The message was not sent",
     ranNotifyQueuedEmail: "Email queued to send",
