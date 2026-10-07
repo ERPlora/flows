@@ -132,3 +132,62 @@ describe('the history of a flow that HAS run', () => {
     expect(text(el)).toContain('nope');
   });
 });
+
+/**
+ * **«The condition was not met» on every guard, whichever one it was** (flows#163).
+ *
+ * The WhatsApp «Confirmed!» recipe stops at one of three guards — no phone, a phone that is not
+ * international, no conversation on that number — and the history read the same sentence for all
+ * three. The kernel stores only `{matched: false}`, so the words come from the step in the
+ * document, and that only happens if the screen hands the step to the sentence.
+ */
+describe('a run that stopped at a guard', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it('says which guard it was, in the words of its field', async () => {
+    const el = document.createElement('erp-flows-editor') as ErpFlowsEditor;
+    const c = client([{ id: 'r9', status: 'done', trigger_kind: 'event', created_at: '2026-10-07T09:00:00Z' }]);
+    c.flows.getRun = vi.fn(async () => ({
+      steps: [
+        { step_index: 0, step_id: 'has_a_phone', kind: 'condition', status: 'done', output: { matched: true } },
+        { step_index: 1, step_id: 'phone_is_international', kind: 'condition', status: 'stopped', output: { matched: false } },
+      ],
+    }));
+    el.client = c as never;
+    el.t = ((k: string, p?: Record<string, unknown>) => (p ? `${k}${JSON.stringify(p)}` : k)) as never;
+    el.flow = {
+      ...FLOW,
+      definition: {
+        schema_version: 1,
+        triggers: [{ kind: 'event', event: 'appointments.appointment.confirmed' }],
+        steps: [
+          { id: 'has_a_phone', kind: 'condition', when: { 'steps.read_appointment.customer_phone': { neq: '' } } },
+          {
+            id: 'phone_is_international',
+            kind: 'condition',
+            when: { 'steps.reachable_on_whatsapp.phone_is_international': { eq: true } },
+          },
+        ],
+      },
+    } as never;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    el.tab = 'history';
+    for (let i = 0; i < 6; i += 1) {
+      await Promise.resolve();
+      await el.updateComplete;
+    }
+    (el.renderRoot.querySelector('[data-act="open-run"]') as HTMLButtonElement).click();
+    for (let i = 0; i < 6; i += 1) {
+      await Promise.resolve();
+      await el.updateComplete;
+    }
+    const lines = [...el.renderRoot.querySelectorAll('.run li')].map((li) => li.textContent ?? '');
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('ui.ranGuardPassed');
+    expect(lines[1]).toContain('ui.ranGuardStoppedOn');
+    expect(lines[1]).toContain('Reachable on whatsapp › Phone is international');
+  });
+});
