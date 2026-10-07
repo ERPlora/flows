@@ -82,7 +82,7 @@ import {
   describeStep,
   describeRunStep,
   describeTrigger,
-  fieldPhrase,
+  guardFieldPhrase,
   readCronTime,
   readSchedule,
   runOutcome,
@@ -1715,8 +1715,7 @@ export class ErpFlowsEditor extends LitElement {
   }
 
   /** The words a pill shows: `input.customer.name` → «Customer › Name». */
-  private readonly fieldLabel = (path: string): string =>
-    fieldPhrase(path.replace(/^(input|event|steps)\./, ''), this.t);
+  private readonly fieldLabel = (path: string): string => guardFieldPhrase(path, this.t);
 
   /** What the owner reads for an event: the hand-written phrase, or the composed one (flows#41). */
   private eventLabel(event: string | undefined): string {

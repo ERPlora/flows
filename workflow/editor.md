@@ -286,9 +286,14 @@ Pasos:
 3. Cada ejecución: su estado («Terminó bien», «Se paró por un error», «Esperando», «Esperando a que lo
    apruebes», «Cancelada», «En marcha»), el día y la hora, ⧉ («Copiar la referencia»: «Copiada. Pégala si
    nos preguntas por esta ejecución.») y ▾ para desplegar sus pasos en palabras («Ejecutó …», «Encontró
-   N», «No encontró nada, y siguió», «Alguien dijo que sí», «La condición no se cumplió, así que terminó
-   aquí. Eso es la automatización funcionando.», «Mensaje de WhatsApp en cola para mandarse»…) con lo que
-   tardó cada uno.
+   N», «No encontró nada, y siguió», «Alguien dijo que sí», «Mensaje de WhatsApp en cola para mandarse»…)
+   con lo que tardó cada uno. Una condición que paró la ejecución nombra lo que comprobaba, con el campo
+   como lo enseña el editor: «Se paró aquí porque no se cumplió esto: Reachable on whatsapp › Phone is
+   international: igual a sí. Eso es la automatización funcionando.»; si tiene varias comparaciones las
+   nombra todas, separadas por «;», porque el hub no guarda cuál de ellas falló. Las palabras salen de
+   la automatización tal como está guardada ahora; si ese paso ya no existe o no es una condición, dice
+   la frase general «La condición no se cumplió, así que terminó aquí. Eso es la automatización
+   funcionando.»
 4. Una parada por error dice qué pasó y qué hacer («Ha intentado hacer algo que no le has autorizado, así
    que ha parado.» / «Abre Permisos y concédele lo que necesita…»), con «El texto técnico, para soporte»
    plegado; si el error es del módulo que ejecutó la acción, sale su frase tal cual.

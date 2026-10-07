@@ -36,8 +36,9 @@ Two related facts that look like bugs and are not:
 ## Steps run in one line, top to bottom — there are no forks
 
 An automation is a **column**. Each step runs after the previous one, and *Only continue if…*
-**stops the run** when its condition is not met — it does not take a second route. *«The condition
-was not met, so it stopped here»* in the history is the automation **working**.
+**stops the run** when its condition is not met — it does not take a second route. *«It stopped here
+because this was not met: …»* in the history — naming what the condition checked — is the automation
+**working**.
 
 Two different outcomes means two automations, or one of the two patterns below that compose a
 decision without a fork.

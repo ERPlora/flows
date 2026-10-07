@@ -18,7 +18,7 @@
  * Nothing here is translated: it returns i18n KEYS with parameters, and the component resolves
  * them against the module catalogue (ADR-0055).
  */
-import type { Step, Trigger } from './flow-doc';
+import type { Condition, Step, Trigger } from './flow-doc';
 import type { EventFieldShape } from './hub-flows';
 
 /** The component's `t()`, injected so this file stays pure and testable. */
@@ -354,7 +354,12 @@ export function describeRunStep(row: RunStepRow, t: Translator, spec?: Step): st
   }
   if (row.kind === 'condition') {
     const matched = (row.output as { matched?: boolean } | undefined)?.matched;
-    return matched === false ? t('ui.ranGuardStopped') : t('ui.ranGuardPassed');
+    if (matched !== false) return t('ui.ranGuardPassed');
+    // The kernel stores only `{matched: false}`, so WHAT was checked comes from the document. With
+    // three guards in a row, the same sentence for all of them left the owner counting positions
+    // (flows#163). Every clause is named: they are an AND and the kernel does not say which failed.
+    const clauses = spec?.kind === 'condition' ? guardClauses(spec.when, t) : [];
+    return clauses.length ? t('ui.ranGuardStoppedOn', { conditions: clauses.join('; ') }) : t('ui.ranGuardStopped');
   }
   if (row.kind === 'delay') {
     const wake = (row.output as { wake_at?: string } | undefined)?.wake_at;
@@ -439,6 +444,44 @@ const FIELD_PHRASES: Readonly<Record<string, string>> = {
 export function fieldPhrase(path: string, t: Translator): string {
   const key = FIELD_PHRASES[path];
   return key ? t(key) : humaniseField(path);
+}
+
+/** A guard's field as the editor's pill shows it: `steps.week.found` → «Week › Found». */
+export function guardFieldPhrase(path: string, t: Translator): string {
+  return fieldPhrase(path.replace(/^(input|event|steps)\./, ''), t);
+}
+
+/**
+ * Each comparison of a guard as one line: «Customer phone: not equal to (empty)».
+ *
+ * The same three parts the editor's row shows — field, operator, value — so the history and the
+ * editor name a guard the same way. `exists` carries no value worth reading: `true` is «present»
+ * and `false` is its own word, never «present false».
+ */
+function guardClauses(when: Condition | undefined, t: Translator): string[] {
+  const out: string[] = [];
+  for (const [path, ops] of Object.entries(when ?? {})) {
+    for (const [op, expected] of Object.entries(ops ?? {})) {
+      const field = guardFieldPhrase(path, t);
+      if (op === 'exists') {
+        const key = expected === false ? 'ui.opAbsent' : 'ui.opExists';
+        out.push(t('ui.guardClause', { field, op: t(key), expected: '' }).trimEnd());
+        continue;
+      }
+      const opKey = `ui.op${op.charAt(0).toUpperCase()}${op.slice(1)}`;
+      out.push(t('ui.guardClause', { field, op: t(opKey), expected: guardValue(expected, t) }));
+    }
+  }
+  return out;
+}
+
+/** The value of a comparison in words: yes/no, «(empty)», a list with commas. */
+function guardValue(value: unknown, t: Translator): string {
+  if (value === true) return t('ui.clauseYes');
+  if (value === false) return t('ui.clauseNo');
+  if (value === '' || value === null || value === undefined) return t('ui.clauseEmpty');
+  if (Array.isArray(value)) return value.map((v) => guardValue(v, t)).join(', ');
+  return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
 /**

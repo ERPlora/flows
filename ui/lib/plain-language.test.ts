@@ -14,6 +14,7 @@ import {
   describeSample,
   fieldPhrase,
 } from './plain-language';
+import en from '../../locales/en.json';
 import es from '../../locales/es.json';
 
 // The catalogue is not what is under test — the CHOICE of sentence is. A fake translator that
@@ -340,6 +341,109 @@ describe('what happened, for somebody who wants to know it worked', () => {
     expect(
       describeRunStep({ step_id: 's1', kind: 'condition', status: 'done', output: { matched: true } }, t),
     ).toBe('ui.ranGuardPassed');
+  });
+
+  describe('a stopped guard names what it was checking (flows#163)', () => {
+    const stopped = { step_id: 'g', kind: 'condition', status: 'stopped', output: { matched: false } };
+    const guard = (when: Record<string, Record<string, unknown>>) => ({ id: 'g', kind: 'condition' as const, when });
+
+    it('names the comparison of a one-clause guard, with the field as the editor shows it', () => {
+      expect(
+        describeRunStep(stopped, t, guard({ 'steps.reachable_on_whatsapp.phone_is_international': { eq: true } })),
+      ).toBe(
+        'ui.ranGuardStoppedOn(conditions=ui.guardClause(field=Reachable on whatsapp › Phone is international,op=ui.opEq,expected=ui.clauseYes))',
+      );
+    });
+
+    it('lists every clause of an AND guard, because the kernel does not say which one failed', () => {
+      expect(
+        describeRunStep(
+          stopped,
+          t,
+          guard({
+            'steps.read_appointment.found': { eq: true },
+            'steps.read_appointment.customer_phone': { neq: '' },
+          }),
+        ),
+      ).toBe(
+        'ui.ranGuardStoppedOn(conditions=' +
+          'ui.guardClause(field=Read appointment › Found,op=ui.opEq,expected=ui.clauseYes); ' +
+          'ui.guardClause(field=Read appointment › Customer phone,op=ui.opNeq,expected=ui.clauseEmpty))',
+      );
+    });
+
+    it('tells apart the three guards of the WhatsApp «Confirmed!» recipe', () => {
+      const whens: Record<string, Record<string, unknown>>[] = [
+        { 'steps.read_appointment.found': { eq: true }, 'steps.read_appointment.customer_phone': { neq: '' } },
+        { 'steps.reachable_on_whatsapp.phone_is_international': { eq: true } },
+        { 'steps.reachable_on_whatsapp.has_thread': { eq: true } },
+      ];
+      const lines = whens.map((when) => describeRunStep(stopped, t, guard(when)));
+      expect(new Set(lines).size).toBe(3);
+      for (const line of lines) expect(line).not.toBe('ui.ranGuardStopped');
+    });
+
+    it('says presence without a value, absence with its own words, and a list as a list', () => {
+      expect(describeRunStep(stopped, t, guard({ 'input.customer.email': { exists: true } }))).toBe(
+        'ui.ranGuardStoppedOn(conditions=ui.guardClause(field=Customer › Email,op=ui.opExists,expected=))',
+      );
+      expect(describeRunStep(stopped, t, guard({ 'input.customer.email': { exists: false } }))).toBe(
+        'ui.ranGuardStoppedOn(conditions=ui.guardClause(field=Customer › Email,op=ui.opAbsent,expected=))',
+      );
+      expect(describeRunStep(stopped, t, guard({ 'event.status': { in: ['paid', 'refunded'] } }))).toBe(
+        'ui.ranGuardStoppedOn(conditions=ui.guardClause(field=Status,op=ui.opIn,expected=paid, refunded))',
+      );
+      expect(describeRunStep(stopped, t, guard({ 'input.total': { gt: 100 } }))).toBe(
+        'ui.ranGuardStoppedOn(conditions=ui.guardClause(field=Total,op=ui.opGt,expected=100))',
+      );
+      expect(describeRunStep(stopped, t, guard({ 'input.vip': { eq: false } }))).toBe(
+        'ui.ranGuardStoppedOn(conditions=ui.guardClause(field=Vip,op=ui.opEq,expected=ui.clauseNo))',
+      );
+    });
+
+    it('keeps the generic sentence when the document no longer has that guard to name', () => {
+      // The run row only stores `{matched: false}`; the words come from the CURRENT document. A step
+      // deleted since, or replaced by another kind, has nothing truthful to name.
+      expect(describeRunStep(stopped, t)).toBe('ui.ranGuardStopped');
+      expect(describeRunStep(stopped, t, { id: 'g', kind: 'delay', seconds: 60 })).toBe('ui.ranGuardStopped');
+      expect(describeRunStep(stopped, t, guard({}))).toBe('ui.ranGuardStopped');
+    });
+
+    it('does not name anything on a guard that passed', () => {
+      expect(
+        describeRunStep(
+          { ...stopped, status: 'done', output: { matched: true } },
+          t,
+          guard({ 'input.total': { gt: 100 } }),
+        ),
+      ).toBe('ui.ranGuardPassed');
+    });
+
+    it('reads as a clean Spanish sentence, with no stray space where a presence check has no value', () => {
+      const spanish = (key: string, params?: Record<string, unknown>): string =>
+        (es as unknown as { ui: Record<string, string> }).ui[key.replace(/^ui\./, '')].replace(
+          /\{(\w+)\}/g,
+          (_, name: string) => String(params?.[name] ?? ''),
+        );
+      expect(
+        describeRunStep(
+          stopped,
+          spanish,
+          guard({ 'input.customer.email': { exists: false }, 'input.customer.vip': { eq: true } }),
+        ),
+      ).toBe(
+        'Se paró aquí porque no se cumplió esto: Customer › Email: no está presente; Customer › Vip: igual a sí. ' +
+          'Eso es la automatización funcionando.',
+      );
+    });
+
+    it('has the new sentences in English and in Spanish', () => {
+      for (const key of ['ranGuardStoppedOn', 'guardClause', 'clauseYes', 'clauseNo', 'clauseEmpty', 'opAbsent']) {
+        for (const catalogue of [en, es]) {
+          expect((catalogue as { ui: Record<string, string> }).ui[key], key).toBeTruthy();
+        }
+      }
+    });
   });
 
   it('says what a command step did, by its name', () => {
