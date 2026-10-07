@@ -154,7 +154,7 @@ describe('a run that stopped at a guard', () => {
         { step_index: 0, step_id: 'has_a_phone', kind: 'condition', status: 'done', output: { matched: true } },
         { step_index: 1, step_id: 'phone_is_international', kind: 'condition', status: 'stopped', output: { matched: false } },
       ],
-    }));
+    })) as never;
     el.client = c as never;
     el.t = ((k: string, p?: Record<string, unknown>) => (p ? `${k}${JSON.stringify(p)}` : k)) as never;
     el.flow = {

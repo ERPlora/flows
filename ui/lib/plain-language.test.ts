@@ -373,11 +373,12 @@ describe('what happened, for somebody who wants to know it worked', () => {
     });
 
     it('tells apart the three guards of the WhatsApp «Confirmed!» recipe', () => {
-      const lines = [
+      const whens: Record<string, Record<string, unknown>>[] = [
         { 'steps.read_appointment.found': { eq: true }, 'steps.read_appointment.customer_phone': { neq: '' } },
         { 'steps.reachable_on_whatsapp.phone_is_international': { eq: true } },
         { 'steps.reachable_on_whatsapp.has_thread': { eq: true } },
-      ].map((when) => describeRunStep(stopped, t, guard(when)));
+      ];
+      const lines = whens.map((when) => describeRunStep(stopped, t, guard(when)));
       expect(new Set(lines).size).toBe(3);
       for (const line of lines) expect(line).not.toBe('ui.ranGuardStopped');
     });
