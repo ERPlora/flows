@@ -2303,7 +2303,7 @@ function guardClauses(when, t3) {
       const field = guardFieldPhrase(path, t3);
       if (op === "exists") {
         const key2 = expected === false ? "ui.opAbsent" : "ui.opExists";
-        out.push(t3("ui.guardClause", { field, op: t3(key2), expected: "" }));
+        out.push(t3("ui.guardClause", { field, op: t3(key2), expected: "" }).trimEnd());
         continue;
       }
       const opKey = `ui.op${op.charAt(0).toUpperCase()}${op.slice(1)}`;
