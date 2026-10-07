@@ -465,7 +465,7 @@ function guardClauses(when: Condition | undefined, t: Translator): string[] {
       const field = guardFieldPhrase(path, t);
       if (op === 'exists') {
         const key = expected === false ? 'ui.opAbsent' : 'ui.opExists';
-        out.push(t('ui.guardClause', { field, op: t(key), expected: '' }));
+        out.push(t('ui.guardClause', { field, op: t(key), expected: '' }).trimEnd());
         continue;
       }
       const opKey = `ui.op${op.charAt(0).toUpperCase()}${op.slice(1)}`;

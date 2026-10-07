@@ -418,6 +418,24 @@ describe('what happened, for somebody who wants to know it worked', () => {
       ).toBe('ui.ranGuardPassed');
     });
 
+    it('reads as a clean Spanish sentence, with no stray space where a presence check has no value', () => {
+      const spanish = (key: string, params?: Record<string, unknown>): string =>
+        (es as unknown as { ui: Record<string, string> }).ui[key.replace(/^ui\./, '')].replace(
+          /\{(\w+)\}/g,
+          (_, name: string) => String(params?.[name] ?? ''),
+        );
+      expect(
+        describeRunStep(
+          stopped,
+          spanish,
+          guard({ 'input.customer.email': { exists: false }, 'input.customer.vip': { eq: true } }),
+        ),
+      ).toBe(
+        'Se paró aquí porque no se cumplió esto: Customer › Email: no está presente; Customer › Vip: igual a sí. ' +
+          'Eso es la automatización funcionando.',
+      );
+    });
+
     it('has the new sentences in English and in Spanish', () => {
       for (const key of ['ranGuardStoppedOn', 'guardClause', 'clauseYes', 'clauseNo', 'clauseEmpty', 'opAbsent']) {
         for (const catalogue of [en, es]) {
