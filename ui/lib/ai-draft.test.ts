@@ -149,6 +149,19 @@ describe('the contract is read off the LIVE schema, not remembered', () => {
     expect(schemaFacts(undefined).headerMedia).toBe(false);
   });
 
+  // hub#2675: the repeat-protection key of a call. Fail-closed like the headers: a hub without the
+  // `run` root refuses to SAVE a flow that inserts `{{run.idempotency_key}}` (flow.invalid_definition).
+  it('offers the repeat-protection key only where the hub named the run root', () => {
+    const declaring = JSON.parse(JSON.stringify(liveSchema));
+    declaring.$defs.path_root = { type: 'string', enum: ['input', 'steps', 'event', 'secret', 'now', 'run'] };
+    expect(schemaFacts(declaring).runKey).toBe(true);
+    const withoutRun = JSON.parse(JSON.stringify(liveSchema));
+    withoutRun.$defs.path_root = { type: 'string', enum: ['input', 'steps', 'event', 'secret', 'now'] };
+    expect(schemaFacts(withoutRun).runKey).toBe(false);
+    expect(schemaFacts(liveSchema).runKey).toBe(false);
+    expect(schemaFacts(undefined).runKey).toBe(false);
+  });
+
   // hub#2405: the name of the header PDF. Fail-closed like the header itself: on a hub that never
   // named the key it travels as a BODY variable and Meta refuses the send.
   it('offers the name of the header PDF only where the hub named its key', () => {

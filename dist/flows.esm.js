@@ -4158,6 +4158,7 @@ var ErpFlowsEditor = class extends i3 {
     this.documentName = false;
     this.headerText = false;
     this.buttonUrl = false;
+    this.runKey = false;
     this.openStep = null;
     this.grants = [];
     this.limitsOpen = [];
@@ -5807,7 +5808,7 @@ var ErpFlowsEditor = class extends i3 {
         label: this.t("ui.paramValue"),
         value,
         secrets: true,
-        runKey: true,
+        runKey: this.runKey,
         onChange: (v2) => setHeaders(headers.map((h3, j) => j === i4 ? [h3[0], v2] : h3))
       })}
           <button
@@ -5837,10 +5838,10 @@ var ErpFlowsEditor = class extends i3 {
       label: this.t("ui.httpBody"),
       value: step.body ?? "",
       secrets: true,
-      runKey: true,
+      runKey: this.runKey,
       onChange: (body) => this.setDoc(patchStep(this.document, index, { body }))
     })}
-      <span class="hint" data-testid="flows-editor-run-key-hint">${this.t("ui.httpRunKeyHint")}</span>
+      ${this.runKey ? b2`<span class="hint" data-testid="flows-editor-run-key-hint">${this.t("ui.httpRunKeyHint")}</span>` : A}
 
       <div class="field">
         <label for="t-${step.id}">${this.t("ui.httpTimeout")}</label>
@@ -7660,6 +7661,9 @@ __decorateClass([
   n4({ attribute: false })
 ], ErpFlowsEditor.prototype, "buttonUrl", 2);
 __decorateClass([
+  n4({ attribute: false })
+], ErpFlowsEditor.prototype, "runKey", 2);
+__decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "openStep", 2);
 __decorateClass([
@@ -7843,6 +7847,8 @@ function schemaFacts(schema, coreVersion) {
     // …hub#2111 (the title) and hub#2110 (the link button).
     headerText: !!at(schema, ["$defs", "step", "properties", "vars", "properties", "header_text"]),
     buttonUrl: !!at(schema, ["$defs", "step", "properties", "vars", "patternProperties", "^button_url_[0-9]$"]),
+    // Same rule (hub#2675), read off the roots the hub resolves: `run` arrived with the key.
+    runKey: (enumAt(schema, ["$defs", "path_root", "enum"]) ?? []).includes("run"),
     // Not `at(schema, …)` like every line above it, because there is nothing in the schema to
     // read: this one is answered by the version the same response carries, and by nothing else.
     // A caller that does not hand it over gets `false`, which is the same fail-closed default the
@@ -13995,6 +14001,7 @@ var ErpFlowsApp = class extends i3 {
         .documentName=${this.facts.documentName}
         .headerText=${this.facts.headerText}
         .buttonUrl=${this.facts.buttonUrl}
+        .runKey=${this.facts.runKey}
         @flows-back=${() => {
         this.editing = null;
         this.isNew = false;

@@ -153,7 +153,9 @@ Sale: el secreto cifrado en el hub, compartido por todas las automatizaciones de
 la dirección, las cabeceras y lo que se envía, con `{{run.idempotency_key}}` donde se insertó la clave.
 Si falla: el mensaje del hub en rojo. Borrar un secreto que usa otra automatización hace que su paso
 falle al ejecutarse; la pantalla no pregunta antes. La clave de no repetición solo se ofrece en las
-cabeceras y en lo que se envía; escrita a mano en otro sitio, el hub la rechaza al guardar.
+cabeceras y en lo que se envía; escrita a mano en otro sitio, el hub la rechaza al guardar. En un hub
+que todavía no sabe rellenarla (su esquema no declara la raíz `run`), ni el botón ni la línea salen:
+ese hub rechazaría al guardar la automatización que la usa.
 Implicados: HUB-F94, HUB-F98, HUB-F99
 QA: qa-hub-flows R5
 

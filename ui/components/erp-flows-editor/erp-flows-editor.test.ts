@@ -1552,7 +1552,10 @@ describe('the repeat-protection key of a call (hub#2675)', () => {
     document.body.replaceChildren();
   });
 
-  const openHttp = async (el: ErpFlowsEditor): Promise<Element> => {
+  // `null` leaves the editor's own default: what a screen that never asked the hub gets.
+  const openHttp = async (el: ErpFlowsEditor, runKey: boolean | null = true): Promise<Element> => {
+    if (runKey !== null) el.runKey = runKey;
+    await el.updateComplete;
     (el.renderRoot.querySelector('[data-node="h"] button.open') as HTMLButtonElement).click();
     await el.updateComplete;
     await Promise.resolve();
@@ -1600,5 +1603,16 @@ describe('the repeat-protection key of a call (hub#2675)', () => {
     (el.renderRoot.querySelector('[data-node="c"] button.open') as HTMLButtonElement).click();
     await el.updateComplete;
     expect(el.renderRoot.querySelector('[data-node="c"] [data-act="insert-run-key"]')).toBeNull();
+  });
+
+  it('is not offered on a hub that cannot resolve it — that hub would refuse to save the flow', async () => {
+    const el = await mount(flow());
+    for (const runKey of [null, false]) {
+      const panel = await openHttp(el, runKey);
+      expect(panel.querySelector('[data-act="insert-run-key"]')).toBeNull();
+      expect(panel.querySelector('[data-testid="flows-editor-run-key-hint"]')).toBeNull();
+      (el.renderRoot.querySelector('[data-node="h"] button.open') as HTMLButtonElement).click();
+      await el.updateComplete;
+    }
   });
 });

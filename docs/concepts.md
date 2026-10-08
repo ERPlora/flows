@@ -122,7 +122,8 @@ create the same order or payment twice. Some systems ask for that key somewhere 
 what you send (`idempotency_key`), PayPal in a `PayPal-Request-Id` header. **Insert the
 repeat-protection key** next to the headers and the body puts the very same key there. Keep the rest
 of what you send the same on every try: a time inserted into it changes on a retry, and the other
-system may refuse the same key with different data. The key exists only inside this step.
+system may refuse the same key with different data. The key exists only inside this step, and the
+button appears only on a hub that can fill it in: an older hub would refuse to save the automation.
 
 ## Messages go to a person the hub knows, never to a typed address
 

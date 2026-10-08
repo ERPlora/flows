@@ -1080,6 +1080,14 @@ export class ErpFlowsEditor extends LitElement {
   @property({ attribute: false }) headerText = false;
   @property({ attribute: false }) buttonUrl = false;
 
+  /**
+   * **Whether THIS hub resolves the repeat-protection key of a call** (hub#2675), read off the
+   * schema the hub served (`schemaFacts().runKey`). Default `false` for the same reason as
+   * {@link interactiveNotify}: a hub without it refuses to save a flow that inserts
+   * `{{run.idempotency_key}}`, so the control and its hint are not offered at all.
+   */
+  @property({ attribute: false }) runKey = false;
+
   @state() private openStep: string | null = null;
 
   @state() private grants: Grant[] = [];
@@ -2323,7 +2331,7 @@ export class ErpFlowsEditor extends LitElement {
             label: this.t('ui.paramValue'),
             value,
             secrets: true,
-            runKey: true,
+            runKey: this.runKey,
             onChange: (v) => setHeaders(headers.map((h, j) => (j === i ? [h[0], v] : h))),
           })}
           <button
@@ -2353,10 +2361,12 @@ export class ErpFlowsEditor extends LitElement {
         label: this.t('ui.httpBody'),
         value: step.body ?? '',
         secrets: true,
-        runKey: true,
+        runKey: this.runKey,
         onChange: (body) => this.setDoc(patchStep(this.document, index, { body })),
       })}
-      <span class="hint" data-testid="flows-editor-run-key-hint">${this.t('ui.httpRunKeyHint')}</span>
+      ${this.runKey
+        ? html`<span class="hint" data-testid="flows-editor-run-key-hint">${this.t('ui.httpRunKeyHint')}</span>`
+        : nothing}
 
       <div class="field">
         <label for="t-${step.id}">${this.t('ui.httpTimeout')}</label>
