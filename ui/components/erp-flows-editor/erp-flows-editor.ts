@@ -62,6 +62,7 @@ import {
   grantsForStep,
   valueToParts,
   isSpineKind,
+  RUN_IDEMPOTENCY_KEY,
 } from '../../lib/flow-doc';
 import type {
   Condition,
@@ -678,7 +679,8 @@ export class ErpFlowsEditor extends LitElement {
       flex: 1 1 12rem;
       min-width: 0;
     }
-    .value-row select {
+    .value-row select,
+    .value-row button[data-act='insert-run-key'] {
       font: inherit;
       font-size: 0.8rem;
       padding: 0 0.5rem;
@@ -1077,6 +1079,14 @@ export class ErpFlowsEditor extends LitElement {
    */
   @property({ attribute: false }) headerText = false;
   @property({ attribute: false }) buttonUrl = false;
+
+  /**
+   * **Whether THIS hub resolves the repeat-protection key of a call** (hub#2675), read off the
+   * schema the hub served (`schemaFacts().runKey`). Default `false` for the same reason as
+   * {@link interactiveNotify}: a hub without it refuses to save a flow that inserts
+   * `{{run.idempotency_key}}`, so the control and its hint are not offered at all.
+   */
+  @property({ attribute: false }) runKey = false;
 
   @state() private openStep: string | null = null;
 
@@ -2173,6 +2183,7 @@ export class ErpFlowsEditor extends LitElement {
           // the callback `unknown` was how `{ url }` stopped fitting `Partial<Step>` (flows#107).
           template: true;
           secrets?: boolean;
+          runKey?: boolean;
           onChange: (value: string) => void;
         }
       | {
@@ -2183,6 +2194,7 @@ export class ErpFlowsEditor extends LitElement {
           // gets `unknown` and the caller has to say what it accepts.
           template?: false;
           secrets?: boolean;
+          runKey?: boolean;
           onChange: (value: unknown) => void;
         },
   ) {
@@ -2226,6 +2238,24 @@ export class ErpFlowsEditor extends LitElement {
             <option value="">${this.t('ui.insertSecret')}</option>
             ${this.secrets.map((s) => html`<option value=${s.name}>${s.name}</option>`)}
           </select>`
+        : nothing}
+      <!-- The call's own repeat-protection key (hub#2675): the same one the hub sends as
+           Idempotency-Key, for a service that asks for it elsewhere. Only on headers and body: the
+           hub refuses it anywhere else at save. -->
+      ${opts.runKey
+        ? html`<button
+            type="button"
+            data-act="insert-run-key"
+            data-testid=${`flows-editor-insert-run-key-${opts.field}`}
+            @click=${(e: Event) => {
+              const box = (e.currentTarget as HTMLElement)
+                .closest('.value-row')
+                ?.querySelector('erp-flows-value') as ErpFlowsValue | null;
+              box?.appendField(RUN_IDEMPOTENCY_KEY);
+            }}
+          >
+            ${this.t('ui.insertRunKey')}
+          </button>`
         : nothing}
     </div>`;
   }
@@ -2301,6 +2331,7 @@ export class ErpFlowsEditor extends LitElement {
             label: this.t('ui.paramValue'),
             value,
             secrets: true,
+            runKey: this.runKey,
             onChange: (v) => setHeaders(headers.map((h, j) => (j === i ? [h[0], v] : h))),
           })}
           <button
@@ -2330,8 +2361,12 @@ export class ErpFlowsEditor extends LitElement {
         label: this.t('ui.httpBody'),
         value: step.body ?? '',
         secrets: true,
+        runKey: this.runKey,
         onChange: (body) => this.setDoc(patchStep(this.document, index, { body })),
       })}
+      ${this.runKey
+        ? html`<span class="hint" data-testid="flows-editor-run-key-hint">${this.t('ui.httpRunKeyHint')}</span>`
+        : nothing}
 
       <div class="field">
         <label for="t-${step.id}">${this.t('ui.httpTimeout')}</label>

@@ -141,12 +141,21 @@ Pasos:
 2. En la caja «Secretos» del propio paso escribe «Nombre» y «Valor» y pulsa **Guardar**: «… guardado. Su
    valor ya no se puede volver a mostrar.». × lo borra.
 3. En una cabecera, «Insertar un secreto» lo pone sin enseñarlo.
-4. **Guardar** la automatización y concede el permiso de esa dirección (FLOWS-F19).
+4. Si el otro sistema pide la clave de no repetición en otro sitio (Square en «Qué enviar», PayPal en
+   una cabecera `PayPal-Request-Id`), **Insertar la clave de no repetición**, junto a cada cabecera y
+   a «Qué enviar», pone la píldora «Clave de no repetición»: la misma que el hub manda en
+   `Idempotency-Key`, una por ejecución y paso (HUB-F94). Debajo de «Qué enviar», una línea explica
+   para qué sirve y avisa de no meter una hora en lo que se envía. En «Probar» sale como «…»
+   (se sabe al ejecutar), nunca como vacía.
+5. **Guardar** la automatización y concede el permiso de esa dirección (FLOWS-F19).
 Entra: la lista de nombres de secretos del negocio (nunca sus valores).
 Sale: el secreto cifrado en el hub, compartido por todas las automatizaciones del negocio; el paso con
-la dirección y las cabeceras.
+la dirección, las cabeceras y lo que se envía, con `{{run.idempotency_key}}` donde se insertó la clave.
 Si falla: el mensaje del hub en rojo. Borrar un secreto que usa otra automatización hace que su paso
-falle al ejecutarse; la pantalla no pregunta antes.
+falle al ejecutarse; la pantalla no pregunta antes. La clave de no repetición solo se ofrece en las
+cabeceras y en lo que se envía; escrita a mano en otro sitio, el hub la rechaza al guardar. En un hub
+que todavía no sabe rellenarla (su esquema no declara la raíz `run`), ni el botón ni la línea salen:
+ese hub rechazaría al guardar la automatización que la usa.
 Implicados: HUB-F94, HUB-F98, HUB-F99
 QA: qa-hub-flows R5
 

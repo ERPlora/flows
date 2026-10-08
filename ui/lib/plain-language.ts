@@ -439,6 +439,8 @@ const FIELD_PHRASES: Readonly<Record<string, string>> = {
   reply_to: 'ui.fieldReplyTo',
   reply_to_step: 'ui.fieldReplyToStep',
   reply_to_flow: 'ui.fieldReplyToFlow',
+  // hub#2675 — the call's own repeat-protection key; mechanically «Run › Idempotency key».
+  'run.idempotency_key': 'ui.fieldRunIdempotencyKey',
 };
 
 export function fieldPhrase(path: string, t: Translator): string {

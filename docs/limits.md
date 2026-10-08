@@ -28,7 +28,9 @@ Consecuencias que la pantalla dice en voz alta en vez de disimular:
 - `steps.<id>.…` es la salida de un paso que **no ha corrido**: se marca como desconocida, no como
   vacía;
 - un `{{secret.X}}` **jamás** se resuelve aquí — sería el único sitio del producto donde una
-  credencial write-only se vuelve legible.
+  credencial write-only se vuelve legible;
+- `{{run.idempotency_key}}` (la clave de no repetición de una llamada, hub#2675) la crea el hub al
+  ejecutar el paso: aquí no hay ejecución, así que se marca como desconocida, no como vacía.
 
 ## Ya NO es un límite: «Probar» antes de activar
 

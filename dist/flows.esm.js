@@ -2287,7 +2287,9 @@ var FIELD_PHRASES = {
   reply_title: "ui.fieldReplyTitle",
   reply_to: "ui.fieldReplyTo",
   reply_to_step: "ui.fieldReplyToStep",
-  reply_to_flow: "ui.fieldReplyToFlow"
+  reply_to_flow: "ui.fieldReplyToFlow",
+  // hub#2675 — the call's own repeat-protection key; mechanically «Run › Idempotency key».
+  "run.idempotency_key": "ui.fieldRunIdempotencyKey"
 };
 function fieldPhrase(path, t3) {
   const key2 = FIELD_PHRASES[path];
@@ -2588,7 +2590,8 @@ define("erp-flows-field-picker", ErpFlowsFieldPicker);
 
 // ui/lib/flow-doc.ts
 var SCHEMA_VERSION = 1;
-var PATH_ROOTS = ["input", "steps", "event", "secret"];
+var PATH_ROOTS = ["input", "steps", "event", "secret", "run"];
+var RUN_IDEMPOTENCY_KEY = "run.idempotency_key";
 var OPERATORS = [
   "eq",
   "neq",
@@ -2719,15 +2722,15 @@ function scalar(text2) {
 }
 function partsToValue(parts) {
   if (parts.length === 0) return "";
-  if (parts.length === 1 && !parts.some(isSecretPart)) {
+  if (parts.length === 1 && !parts.some(isAlwaysTemplated)) {
     const only = parts[0];
     if (only.kind === "field") return only.path;
     return scalar(only.text);
   }
   return partsToTemplate(parts);
 }
-function isSecretPart(part) {
-  return part.kind === "field" && part.path.startsWith("secret.");
+function isAlwaysTemplated(part) {
+  return part.kind === "field" && (part.path.startsWith("secret.") || part.path.startsWith("run."));
 }
 function partsToTemplate(parts) {
   return parts.map((p3) => p3.kind === "field" ? `{{${p3.path}}}` : p3.text).join("");
@@ -3644,7 +3647,7 @@ function resolvePath(path, scope) {
   }
   return cursor;
 }
-var PATH_ROOTS2 = ["input", "steps", "event", "secret"];
+var PATH_ROOTS2 = ["input", "steps", "event", "secret", "run"];
 function isPath2(s4) {
   const root = s4.split(".")[0];
   return PATH_ROOTS2.includes(root) && s4.length > root.length + 1 && s4[root.length] === ".";
@@ -3677,6 +3680,7 @@ function renderTemplate(text2, scope) {
 }
 function lookup(path, scope) {
   if (path.startsWith("secret.")) return REDACTED;
+  if (path.startsWith("run.")) return UNKNOWN;
   if (path.startsWith("steps.")) {
     const found2 = resolvePath(path, scope);
     return found2 === void 0 ? UNKNOWN : found2;
@@ -4154,6 +4158,7 @@ var ErpFlowsEditor = class extends i3 {
     this.documentName = false;
     this.headerText = false;
     this.buttonUrl = false;
+    this.runKey = false;
     this.openStep = null;
     this.grants = [];
     this.limitsOpen = [];
@@ -4510,7 +4515,8 @@ var ErpFlowsEditor = class extends i3 {
       flex: 1 1 12rem;
       min-width: 0;
     }
-    .value-row select {
+    .value-row select,
+    .value-row button[data-act='insert-run-key'] {
       font: inherit;
       font-size: 0.8rem;
       padding: 0 0.5rem;
@@ -5720,6 +5726,20 @@ var ErpFlowsEditor = class extends i3 {
             <option value="">${this.t("ui.insertSecret")}</option>
             ${this.secrets.map((s4) => b2`<option value=${s4.name}>${s4.name}</option>`)}
           </select>` : A}
+      <!-- The call's own repeat-protection key (hub#2675): the same one the hub sends as
+           Idempotency-Key, for a service that asks for it elsewhere. Only on headers and body: the
+           hub refuses it anywhere else at save. -->
+      ${opts.runKey ? b2`<button
+            type="button"
+            data-act="insert-run-key"
+            data-testid=${`flows-editor-insert-run-key-${opts.field}`}
+            @click=${(e4) => {
+      const box = e4.currentTarget.closest(".value-row")?.querySelector("erp-flows-value");
+      box?.appendField(RUN_IDEMPOTENCY_KEY);
+    }}
+          >
+            ${this.t("ui.insertRunKey")}
+          </button>` : A}
     </div>`;
   }
   /**
@@ -5788,6 +5808,7 @@ var ErpFlowsEditor = class extends i3 {
         label: this.t("ui.paramValue"),
         value,
         secrets: true,
+        runKey: this.runKey,
         onChange: (v2) => setHeaders(headers.map((h3, j) => j === i4 ? [h3[0], v2] : h3))
       })}
           <button
@@ -5817,8 +5838,10 @@ var ErpFlowsEditor = class extends i3 {
       label: this.t("ui.httpBody"),
       value: step.body ?? "",
       secrets: true,
+      runKey: this.runKey,
       onChange: (body) => this.setDoc(patchStep(this.document, index, { body }))
     })}
+      ${this.runKey ? b2`<span class="hint" data-testid="flows-editor-run-key-hint">${this.t("ui.httpRunKeyHint")}</span>` : A}
 
       <div class="field">
         <label for="t-${step.id}">${this.t("ui.httpTimeout")}</label>
@@ -7638,6 +7661,9 @@ __decorateClass([
   n4({ attribute: false })
 ], ErpFlowsEditor.prototype, "buttonUrl", 2);
 __decorateClass([
+  n4({ attribute: false })
+], ErpFlowsEditor.prototype, "runKey", 2);
+__decorateClass([
   r5()
 ], ErpFlowsEditor.prototype, "openStep", 2);
 __decorateClass([
@@ -7821,6 +7847,8 @@ function schemaFacts(schema, coreVersion) {
     // …hub#2111 (the title) and hub#2110 (the link button).
     headerText: !!at(schema, ["$defs", "step", "properties", "vars", "properties", "header_text"]),
     buttonUrl: !!at(schema, ["$defs", "step", "properties", "vars", "patternProperties", "^button_url_[0-9]$"]),
+    // Same rule (hub#2675), read off the roots the hub resolves: `run` arrived with the key.
+    runKey: (enumAt(schema, ["$defs", "path_root", "enum"]) ?? []).includes("run"),
     // Not `at(schema, …)` like every line above it, because there is nothing in the schema to
     // read: this one is answered by the version the same response carries, and by nothing else.
     // A caller that does not hand it over gets `false`, which is the same fail-closed default the
@@ -11274,6 +11302,7 @@ var es_default = {
     fieldReplyTo: "El mensaje al que contesta",
     fieldReplyToStep: "El paso que hizo la pregunta",
     fieldReplyToFlow: "La automatizaci\xF3n que hizo la pregunta",
+    fieldRunIdempotencyKey: "Clave de no repetici\xF3n",
     replyStepChoose: "Elige la pregunta",
     replyStepOption: "{flow} \u2014 \xAB{text}\xBB",
     replyStepAmbiguous: "Dos automatizaciones hacen esta misma pregunta. Vuelve a elegirla para que la respuesta cuente solo para la que quieres.",
@@ -11325,12 +11354,14 @@ var es_default = {
     httpGrantUnknown: "Rellena la direcci\xF3n y este paso te dir\xE1 qu\xE9 necesita que le permitas.",
     httpHeaders: "Cabeceras",
     httpHeadersHint: "Aqu\xED va la clave o el token. Gu\xE1rdalo abajo como secreto y luego ins\xE9rtalo aqu\xED: su valor no se vuelve a mostrar nunca.",
+    httpRunKeyHint: "El hub ya manda Idempotency-Key con esta llamada, la misma en cada reintento, para que el otro sistema no cree dos veces el mismo pedido o cobro. Si la pide en otro sitio \u2014Square en lo que se env\xEDa, PayPal en una cabecera PayPal-Request-Id\u2014, ins\xE9rtala ah\xED. Deja el resto igual en cada intento: una hora insertada aqu\xED cambia al reintentar y el otro sistema puede rechazarlo.",
     httpMethod: "M\xE9todo",
     httpTimeout: "Rendirse a los",
     httpTimeoutHint: "Segundos, {max} como m\xE1ximo. La automatizaci\xF3n se queda esperando todo ese rato, tambi\xE9n cuando acaba en error.",
     httpUrl: "Direcci\xF3n",
     insertField: "Insertar un dato",
     insertSecret: "Insertar un secreto",
+    insertRunKey: "Insertar la clave de no repetici\xF3n",
     lastRun: "\xDAltima vez: {when}",
     listClear: "Volver a verlas todas",
     listCount: "Se ven {shown} de {total}",
@@ -12285,6 +12316,7 @@ var en_default = {
     fieldReplyTo: "The message they are answering",
     fieldReplyToStep: "The step that asked the question",
     fieldReplyToFlow: "The automation that asked the question",
+    fieldRunIdempotencyKey: "Repeat-protection key",
     replyStepChoose: "Choose the question",
     replyStepOption: "{flow} \u2014 \xAB{text}\xBB",
     replyStepAmbiguous: "Two automations ask this same question. Choose it again so the answer only counts for the one you mean.",
@@ -12336,12 +12368,14 @@ var en_default = {
     httpGrantUnknown: "Fill in the address and this step will tell you what it needs you to allow.",
     httpHeaders: "Headers",
     httpHeadersHint: "Where a key or a token goes. Save it as a secret below, then insert it here \u2014 its value is never shown again.",
+    httpRunKeyHint: "The hub already sends Idempotency-Key with this call, the same on every retry, so the other system does not create the same order or payment twice. If it asks for that key somewhere else \u2014 Square in what you send, PayPal in a PayPal-Request-Id header \u2014 insert it there. Keep the rest the same on every try: a time inserted here changes on a retry and the other system may refuse it.",
     httpMethod: "Method",
     httpTimeout: "Give up after",
     httpTimeoutHint: "Seconds, {max} at most. The automation is held up for the whole wait \u2014 including when it ends in an error.",
     httpUrl: "Address",
     insertField: "Insert a field",
     insertSecret: "Insert a secret",
+    insertRunKey: "Insert the repeat-protection key",
     lastRun: "Last run {when}",
     listClear: "Show them all again",
     listCount: "Showing {shown} of {total}",
@@ -13967,6 +14001,7 @@ var ErpFlowsApp = class extends i3 {
         .documentName=${this.facts.documentName}
         .headerText=${this.facts.headerText}
         .buttonUrl=${this.facts.buttonUrl}
+        .runKey=${this.facts.runKey}
         @flows-back=${() => {
         this.editing = null;
         this.isNew = false;

@@ -390,6 +390,7 @@ describe('what the hub can do reaches the screen that draws it (flows#75)', () =
       documentName: boolean;
       headerText: boolean;
       buttonUrl: boolean;
+      runKey: boolean;
     };
   };
 
@@ -452,5 +453,15 @@ describe('what the hub can do reaches the screen that draws it (flows#75)', () =
     const bare = await editorOf(withSchema({ $defs: { step: { properties: {} } } }));
     expect(bare?.headerText).toBe(false);
     expect(bare?.buttonUrl).toBe(false);
+  });
+
+  // hub#2675: and for the repeat-protection key of a call.
+  it('hands the editor what the hub said about the repeat-protection key', async () => {
+    const declaring = withSchema({
+      $defs: { step: { properties: {} }, path_root: { enum: ['input', 'steps', 'event', 'secret', 'now', 'run'] } },
+    });
+    expect((await editorOf(declaring))?.runKey).toBe(true);
+    document.body.replaceChildren();
+    expect((await editorOf(withSchema({ $defs: { step: { properties: {} } } })))?.runKey).toBe(false);
   });
 });

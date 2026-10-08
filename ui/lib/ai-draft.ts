@@ -180,6 +180,14 @@ export interface SchemaFacts {
    */
   buttonUrl: boolean;
   /**
+   * Whether this hub resolves `{{run.idempotency_key}}` inside a call (hub#2675), read off the
+   * roots of the mapping language the served schema lists under `$defs.path_root`.
+   *
+   * Fail-closed like {@link SchemaFacts.interactiveNotify}, for the same hard reason: a hub without
+   * the `run` root refuses to SAVE the flow that inserts it (`flow.invalid_definition`).
+   */
+  runKey: boolean;
+  /**
    * Whether this hub can store a `query` grant that FIXES its parameters (hub#1662).
    *
    * The third fail-closed fact, and the only one in here that is **not** read off the schema —
@@ -287,6 +295,8 @@ export function schemaFacts(schema: unknown, coreVersion?: unknown): SchemaFacts
     // …hub#2111 (the title) and hub#2110 (the link button).
     headerText: !!at(schema, ['$defs', 'step', 'properties', 'vars', 'properties', 'header_text']),
     buttonUrl: !!at(schema, ['$defs', 'step', 'properties', 'vars', 'patternProperties', '^button_url_[0-9]$']),
+    // Same rule (hub#2675), read off the roots the hub resolves: `run` arrived with the key.
+    runKey: (enumAt(schema, ['$defs', 'path_root', 'enum']) ?? []).includes('run'),
     // Not `at(schema, …)` like every line above it, because there is nothing in the schema to
     // read: this one is answered by the version the same response carries, and by nothing else.
     // A caller that does not hand it over gets `false`, which is the same fail-closed default the

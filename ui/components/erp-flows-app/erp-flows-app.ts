@@ -1259,6 +1259,7 @@ export class ErpFlowsApp extends LitElement {
         .documentName=${this.facts.documentName}
         .headerText=${this.facts.headerText}
         .buttonUrl=${this.facts.buttonUrl}
+        .runKey=${this.facts.runKey}
         @flows-back=${() => {
           this.editing = null;
           this.isNew = false;

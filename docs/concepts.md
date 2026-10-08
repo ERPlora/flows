@@ -113,6 +113,18 @@ Keys and passwords for other systems live in the **Secrets** box, encrypted. Onc
 system* step can use one, and only inside that step: writing a secret into a message or a prompt
 is refused when you save. If you lose a value, you replace it; you do not recover it.
 
+## A call is never made twice by mistake
+
+A *Call another system* step can be retried — the hub restarted halfway, the other system did not
+answer in time. Every try carries the same **repeat-protection key** in the standard
+`Idempotency-Key` header, one per run and step, so Stripe and the systems that read it there do not
+create the same order or payment twice. Some systems ask for that key somewhere else: Square inside
+what you send (`idempotency_key`), PayPal in a `PayPal-Request-Id` header. **Insert the
+repeat-protection key** next to the headers and the body puts the very same key there. Keep the rest
+of what you send the same on every try: a time inserted into it changes on a retry, and the other
+system may refuse the same key with different data. The key exists only inside this step, and the
+button appears only on a hub that can fill it in: an older hub would refuse to save the automation.
+
 ## Messages go to a person the hub knows, never to a typed address
 
 *Send a message* has **no box to type an address into**, and that absence is the guarantee. The

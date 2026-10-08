@@ -17,8 +17,14 @@
 /** The document version this editor writes. A hub that enforces another one refuses the save. */
 export const SCHEMA_VERSION = 1;
 
-/** Roots of the mapping language (`def.rs`). `secret.` is legal only inside an `http` step. */
-export const PATH_ROOTS = ['input', 'steps', 'event', 'secret'] as const;
+/**
+ * Roots of the mapping language (`def.rs`). `secret.` and `run.` are legal only inside an `http`
+ * step; `run` has one field, `run.idempotency_key` (hub#2675).
+ */
+export const PATH_ROOTS = ['input', 'steps', 'event', 'secret', 'run'] as const;
+
+/** The one field of `run`: the call's repeat-protection key, the hub's `Idempotency-Key` (hub#2675). */
+export const RUN_IDEMPOTENCY_KEY = 'run.idempotency_key';
 
 /**
  * The step kinds the kernel executes — all of them drawn by this editor (see {@link isSpineKind}).
@@ -387,7 +393,7 @@ export function patchTrigger(doc: FlowDoc, trigger: Trigger): FlowDoc {
 // ── The mapping language ──────────────────────────────────────────────────────────────────────
 
 /**
- * Mirror of `def.rs::is_path`: the first dot-segment is one of the four roots and something
+ * Mirror of `def.rs::is_path`: the first dot-segment is one of the roots and something
  * follows it. Anything else is a literal.
  */
 export function isPath(s: string): boolean {
@@ -421,8 +427,9 @@ export function partsToValue(parts: ValuePart[]): unknown {
   // A secret is ALWAYS written `{{secret.X}}`, even alone. That is the one form flows.md §4
   // documents and the one every example in the kernel uses. A bare `secret.API_KEY` may well
   // resolve too — but «may well» is how a header ends up carrying the eighteen literal characters
-  // of a path instead of a credential, and nothing on any screen would say so.
-  if (parts.length === 1 && !parts.some(isSecretPart)) {
+  // of a path instead of a credential, and nothing on any screen would say so. The repeat-protection
+  // key of a call (`run.idempotency_key`, hub#2675) follows the same rule for the same reason.
+  if (parts.length === 1 && !parts.some(isAlwaysTemplated)) {
     const only = parts[0];
     if (only.kind === 'field') return only.path;
     return scalar(only.text);
@@ -430,9 +437,9 @@ export function partsToValue(parts: ValuePart[]): unknown {
   return partsToTemplate(parts);
 }
 
-/** A pill that names a secret rather than a field of the run. */
-function isSecretPart(part: ValuePart): boolean {
-  return part.kind === 'field' && part.path.startsWith('secret.');
+/** A pill that names a secret or the call's own key rather than a field of the run. */
+function isAlwaysTemplated(part: ValuePart): boolean {
+  return part.kind === 'field' && (part.path.startsWith('secret.') || part.path.startsWith('run.'));
 }
 
 /**
