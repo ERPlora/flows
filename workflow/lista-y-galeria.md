@@ -64,10 +64,12 @@ Pasos:
 Entra: la automatización entera (el hub la vuelve a validar al guardarla).
 Sale: la automatización encendida o pausada. Al pausarla, lo pendiente y lo que está en curso se
 cancelan en su siguiente paso, y una espera, solo al despertar (si se vuelve a encender antes, sigue como
-si nada; mientras tanto, un aviso de «cita anulada» o «cita movida» la sigue cancelando o moviendo). No
-se cancelan las preguntas ni las propuestas del asistente: aprobarlas ejecuta, también en pausa. Los
-mensajes que ya estaban en cola salen, y una llamada a otro sistema o un turno del asistente que ya
-estaban en marcha terminan (el turno puede ejecutar o dejar una propuesta nueva). Si es una receta
+si nada; mientras tanto, un aviso de «cita anulada» o «cita movida» la sigue cancelando o moviendo). Las
+preguntas y propuestas del asistente se quedan en la bandeja, pero aprobar una propuesta mientras esté en
+pausa se niega y no hace nada (FLOWS-F24). Los mensajes que ya estaban en cola no salen: caen en «Eventos
+caídos» con su destinatario y se pueden volver a enviar a mano (FLOWS-F25); al encenderla no salen solos.
+Una llamada a otro sistema o un turno del asistente que ya estaban en marcha terminan (el turno puede
+ejecutar o dejar una propuesta nueva). Si es una receta
 encendida desde otro módulo, esa pantalla la verá apagada.
 Si falla: el mensaje del hub en rojo arriba. La etiqueta sigue con el estado guardado, pero el
 interruptor puede quedarse movido hasta que se recarga la pantalla (leído en el código, sin ejecutar).
