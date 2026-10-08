@@ -283,8 +283,10 @@ El recorrido canónico de `qa-hub-flows` (§«Lo más importante»), paso a paso
 - **Pausar o borrar para lo que estaba en marcha, con excepciones.** Una ejecución pendiente o en
   curso de una automatización pausada o borrada se cancela en su siguiente paso. Al pausar, una espera
   se cancela solo al despertar (si se vuelve a encender antes, sigue); las preguntas y las propuestas
-  del asistente no se cancelan y aprobarlas ejecuta; los mensajes en cola salen, y una llamada a otro
-  sistema o un turno del asistente ya en marcha terminan. Al borrar, lo que esperaba un plazo se
+  del asistente se quedan en la bandeja, pero aprobar una propuesta mientras siga en pausa se niega y
+  no hace nada (FLOWS-F24); los mensajes en cola no salen: caen en «Eventos caídos» con su destinatario
+  y se reenvían a mano (FLOWS-F25), y una llamada a otro sistema o un turno del asistente ya en marcha
+  terminan. Al borrar, lo que esperaba un plazo se
   cancela al momento; lo que esperaba una respuesta se cancela cuando alguien contesta la pregunta,
   rechaza la propuesta o caduca, y aprobar una propuesta de una automatización borrada contesta «sin
   permiso» y la deja pendiente (FLOWS-F03, FLOWS-F09).

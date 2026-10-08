@@ -26,7 +26,9 @@ lo propuesto, comprobando el permiso en ese momento; aprobar una pregunta no eje
 automatización sigue. Un no o el silencio hacen lo que se eligió en el paso (FLOWS-F18). Todo queda en el
 historial de la ejecución.
 Si falla: la tarjeta se queda y sale «Demasiado tarde: esta caducó antes de que contestaras. No se ha
-hecho nada.», «Alguien ya contestó a esta. No se ha hecho nada dos veces.» o el mensaje del hub.
+hecho nada.», «Alguien ya contestó a esta. No se ha hecho nada dos veces.» o el mensaje del hub. Aprobar
+una propuesta de una automatización en pausa se niega (`flow.disabled`): no se hace nada y la tarjeta se
+queda hasta encenderla o rechazarla; hoy la bandeja enseña el motivo del hub en inglés (ERPlora/flows#166).
 Implicados: HUB-F100, HUB-F101, HUB_SHELL-F93
 QA: qa-hub-flows R6
 
