@@ -592,3 +592,31 @@ describe('a step that only runs when its `run_if` holds (flows#129, hub#2066)', 
     expect(out.steps[1].outcome).toBe('not-reached');
   });
 });
+
+describe('the repeat-protection key of a call in «Probar» (hub#2675)', () => {
+  // The hub makes the key when the step runs (one per run and step). Here there is no run: it is
+  // unknowable, not empty — calling it empty would send the owner hunting a fault that is not there.
+  it('is shown as not known yet, never as a value that would arrive empty', () => {
+    const out = simulate(
+      {
+        schema_version: 1,
+        triggers: [{ kind: 'manual' }],
+        steps: [
+          {
+            id: 'h',
+            kind: 'http',
+            url: 'https://connect.squareup.com/v2/orders',
+            headers: { 'PayPal-Request-Id': '{{run.idempotency_key}}' },
+            body: { idempotency_key: 'run.idempotency_key' },
+          },
+        ],
+      } as never,
+      {},
+    );
+    const values = out.steps[0].values;
+    const header = values.find((v) => v.label === 'PayPal-Request-Id');
+    expect(header).toMatchObject({ blank: false, unknown: true });
+    expect(values.find((v) => v.label === 'body')).toMatchObject({ blank: false, unknown: true });
+    expect(values.some((v) => v.blank)).toBe(false);
+  });
+});

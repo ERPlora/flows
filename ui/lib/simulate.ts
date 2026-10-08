@@ -127,7 +127,7 @@ export function resolvePath(path: string, scope: unknown): unknown {
   return cursor;
 }
 
-const PATH_ROOTS = ['input', 'steps', 'event', 'secret'];
+const PATH_ROOTS = ['input', 'steps', 'event', 'secret', 'run'];
 
 function isPath(s: string): boolean {
   const root = s.split('.')[0];
@@ -173,10 +173,13 @@ export function renderTemplate(text: string, scope: unknown): string {
  * - a **secret** is never resolvable here at all — there is no endpoint that returns one, and a
  *   preview that printed a credential would be the one place in the product where a write-only
  *   value became readable;
- * - `steps.<id>.…` is the output of a step that HAS NOT RUN. It is unknown, not empty.
+ * - `steps.<id>.…` is the output of a step that HAS NOT RUN. It is unknown, not empty;
+ * - `run.idempotency_key` is made by the hub when the call runs (one per run and step, hub#2675).
+ *   There is no run here, so it is unknown too — never empty.
  */
 function lookup(path: string, scope: unknown): unknown {
   if (path.startsWith('secret.')) return REDACTED;
+  if (path.startsWith('run.')) return UNKNOWN;
   if (path.startsWith('steps.')) {
     const found = resolvePath(path, scope);
     return found === undefined ? UNKNOWN : found;

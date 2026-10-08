@@ -13,6 +13,7 @@ import {
   humaniseField,
   describeSample,
   fieldPhrase,
+  guardFieldPhrase,
 } from './plain-language';
 import en from '../../locales/en.json';
 import es from '../../locales/es.json';
@@ -580,5 +581,16 @@ describe('the fields a tap comes home in, in the owner\'s words (flows#75)', () 
   it('leaves every other field to the mechanical rule', () => {
     expect(fieldPhrase('customer.first_name', t)).toBe('Customer › First name');
     expect(fieldPhrase('', t)).toBe('');
+  });
+});
+
+describe('the repeat-protection key on a pill, in the owner\'s words (hub#2675)', () => {
+  // Mechanically it would read «Run › Idempotency key»: two words of jargon on the box where the
+  // owner sets up a payment. It is the core's own value, so it gets a name once and for all.
+  it('names it, in English and in Spanish', () => {
+    const spanish = (key: string): string =>
+      (es as unknown as { ui: Record<string, string> }).ui[key.replace(/^ui\./, '')];
+    expect(guardFieldPhrase('run.idempotency_key', t)).toBe('ui.fieldRunIdempotencyKey');
+    expect(guardFieldPhrase('run.idempotency_key', spanish)).toBe('Clave de no repetición');
   });
 });

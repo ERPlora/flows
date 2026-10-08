@@ -920,3 +920,16 @@ describe('a step guard the editor does not draw (`run_if`, hub#2066)', () => {
     expect(JSON.parse(JSON.stringify(edited)).steps[0].run_if).toEqual(guard);
   });
 });
+
+describe('the repeat-protection key of a call, `run.idempotency_key` (hub#2675)', () => {
+  // The hub added a sixth root to the mapping language. A copy that does not know it reopens a
+  // stored `run.idempotency_key` as eighteen literal characters, while the kernel reads it as the key.
+  it('is a path, exactly as the runtime reads it', () => {
+    expect(isPath('run.idempotency_key')).toBe(true);
+    expect(valueToParts('run.idempotency_key')).toEqual([{ kind: 'field', path: 'run.idempotency_key' }]);
+  });
+
+  it('is always written as a template, like a secret — the form the hub documents', () => {
+    expect(partsToValue([{ kind: 'field', path: 'run.idempotency_key' }])).toBe('{{run.idempotency_key}}');
+  });
+});

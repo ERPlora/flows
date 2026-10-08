@@ -64,7 +64,7 @@ card reorders them by dragging; the × removes one. Tap a card to open its form.
 | **Ask somebody first** | `approval` | *The question* somebody has to answer, optional details, *Who has to answer* (a **role**, or whoever manages the hub), *How long to wait for an answer* (up to 30 days), *If they say no* and *If nobody answers in time*. |
 | **Wait** | `delay` | An amount and a unit (minutes, hours, days), counted from the moment the previous step finished. Drawn as a label on the line, not as a card. |
 | **Send a message** | `notify` | The channel (email or WhatsApp — WhatsApp costs money every time), *who it goes to* — always a read of this hub and one of its columns, **never a typed address** — the template, and the text. |
-| **Call another system** | `http` | Method, address, headers, body and timeout. Secrets (keys and passwords) are inserted from the box next to the value; they are stored encrypted, **write-only**, and can only be used inside this step. |
+| **Call another system** | `http` | Method, address, headers, body and timeout. Secrets (keys and passwords) are inserted from the box next to the value; they are stored encrypted, **write-only**, and can only be used inside this step. **Insert the repeat-protection key**, next to each header and the body, puts the key the hub sends as `Idempotency-Key` where a system asks for it elsewhere (Square in the body, PayPal in `PayPal-Request-Id`). |
 | **Ask the assistant** | `ai` | The prompt, what it may read and what it may run, and whether it **asks you first** (default) or acts on its own. |
 
 Wherever a value can come from the event, the field picker offers **the real fields of this hub's

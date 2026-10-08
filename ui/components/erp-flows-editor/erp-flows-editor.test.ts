@@ -1546,3 +1546,59 @@ describe('«Probar»: the two things a browser caught that happy-dom could not',
     expect(panel.querySelector('[data-blank="true"]')).toBeTruthy();
   });
 });
+
+describe('the repeat-protection key of a call (hub#2675)', () => {
+  beforeEach(() => {
+    document.body.replaceChildren();
+  });
+
+  const openHttp = async (el: ErpFlowsEditor): Promise<Element> => {
+    (el.renderRoot.querySelector('[data-node="h"] button.open') as HTMLButtonElement).click();
+    await el.updateComplete;
+    await Promise.resolve();
+    await el.updateComplete;
+    return el.renderRoot.querySelector('[data-node="h"] .panel')!;
+  };
+
+  const flow = () =>
+    flowWith([
+      { id: 'h', kind: 'http', method: 'POST', url: 'https://api-m.paypal.com/v2/checkout/orders', headers: { 'PayPal-Request-Id': '' } },
+      { id: 'c', kind: 'command', command: 'tasks.tasks.create', params: { a: 'b' } },
+    ]);
+
+  it('puts the key in a header with one tap — PayPal asks for it in PayPal-Request-Id', async () => {
+    const el = await mount(flow());
+    const panel = await openHttp(el);
+    (panel.querySelector('[data-testid="flows-editor-insert-run-key-header-0"]') as HTMLButtonElement).click();
+    await el.updateComplete;
+    const step = el.document.steps.find((s) => s.id === 'h')!;
+    expect((step.headers as Record<string, unknown>)['PayPal-Request-Id']).toBe('{{run.idempotency_key}}');
+  });
+
+  it('puts the key in what is sent — Square asks for it in the body', async () => {
+    const el = await mount(flow());
+    const panel = await openHttp(el);
+    (panel.querySelector('[data-testid="flows-editor-insert-run-key-body"]') as HTMLButtonElement).click();
+    await el.updateComplete;
+    expect(el.document.steps.find((s) => s.id === 'h')!.body).toBe('{{run.idempotency_key}}');
+  });
+
+  it('says what the key is for, beside the call, and warns about a time inside what is sent', async () => {
+    const el = await mount(flow());
+    const panel = await openHttp(el);
+    expect(panel.querySelector('[data-testid="flows-editor-run-key-hint"]')?.textContent).toContain(
+      'ui.httpRunKeyHint',
+    );
+  });
+
+  it('is offered only where the hub accepts it: headers and body of a call, never the address or another step', async () => {
+    // `run.…` anywhere else is refused at SAVE (flow.invalid_definition). Offering it there would
+    // teach a syntax that makes the document unsavable.
+    const el = await mount(flow());
+    await openHttp(el);
+    expect(el.renderRoot.querySelector('[data-testid="flows-editor-insert-run-key-url"]')).toBeNull();
+    (el.renderRoot.querySelector('[data-node="c"] button.open') as HTMLButtonElement).click();
+    await el.updateComplete;
+    expect(el.renderRoot.querySelector('[data-node="c"] [data-act="insert-run-key"]')).toBeNull();
+  });
+});
